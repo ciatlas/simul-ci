@@ -1,0 +1,598 @@
+# filters.yml
+# branches / branches-ignore / tags / tags-ignore / paths / paths-ignore
+# semantics and the filter-pattern cheat sheet, as test cases.
+#
+# Case shape:
+#   { pattern | patterns, ref | path | changed, matches: true|false }
+# `derived: true` marks a case the docs imply but do not list verbatim
+# (e.g. the negative example for `feature/*`). Everything else is copied from
+# the cited page's example lists. Fetched 2026-10-17.
+
+sources:
+  syntax: &syntax https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
+  events: &events https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+
+# ---------------------------------------------------------------------------
+# 1. Pattern language (cheat sheet)
+# ---------------------------------------------------------------------------
+pattern_language:
+  - rule: "pattern characters apply to path, branch, tag and workflow-name filters"
+    source: *syntax
+    quote: |-
+      You can use special characters in path, branch, tag, and workflow name filters.
+  - rule: "`*` matches zero or more chars except `/`"
+    source: *syntax
+    quote: |-
+      `*`: Matches zero or more characters, but does not match the `/` character. For example, `Octo*` matches `Octocat`.
+    cases:
+      - { pattern: "Octo*", path_or_ref: Octocat, matches: true }
+      - { pattern: "Octo*", path_or_ref: Octo, matches: true, derived: true }
+      - { pattern: "Octo*", path_or_ref: Octo/cat, matches: false, derived: true }
+  - rule: "`**` matches zero or more of any char (including `/`)"
+    source: *syntax
+    quote: |-
+      `**`: Matches zero or more of any character.
+    cases:
+      - { pattern: "Octo**", path_or_ref: Octo/cat, matches: true, derived: true }
+  - rule: "`?` is zero-or-one of the PRECEDING character (regex-like, not glob single-char)"
+    source: *syntax
+    quote: |-
+      `?`: Matches zero or one of the preceding character.
+    cases:
+      - { pattern: "*.jsx?", path_or_ref: page.js, matches: true }
+      - { pattern: "*.jsx?", path_or_ref: page.jsx, matches: true }
+      - { pattern: "*.jsx?", path_or_ref: page.jsxx, matches: false, derived: true }
+  - rule: "`+` is one-or-more of the preceding character"
+    source: *syntax
+    quote: |-
+      `+`: Matches one or more of the preceding character.
+    cases:
+      - { pattern: "v[0-9]+", path_or_ref: v1, matches: true, derived: true }
+      - { pattern: "v[0-9]+", path_or_ref: v123, matches: true, derived: true }
+      - { pattern: "v[0-9]+", path_or_ref: v, matches: false, derived: true }
+  - rule: "`[]` is one alphanumeric char from the set/range; ranges limited to a-z, A-Z, 0-9"
+    source: *syntax
+    quote: |-
+      `[]` Matches one alphanumeric character listed in the brackets or included in ranges. Ranges can only include `a-z`, `A-Z`, and `0-9`. For example, the range`[0-9a-z]` matches any digit or lowercase letter. For example, `[CB]at` matches `Cat` or `Bat` and `[1-2]00` matches `100` and `200`.
+    cases:
+      - { pattern: "[CB]at", path_or_ref: Cat, matches: true }
+      - { pattern: "[CB]at", path_or_ref: Bat, matches: true }
+      - { pattern: "[CB]at", path_or_ref: Rat, matches: false, derived: true }
+      - { pattern: "[1-2]00", path_or_ref: "100", matches: true }
+      - { pattern: "[1-2]00", path_or_ref: "200", matches: true }
+      - { pattern: "[1-2]00", path_or_ref: "300", matches: false, derived: true }
+      - { pattern: "[0-9a-z]", path_or_ref: "7", matches: true, derived: true }
+      - { pattern: "[0-9a-z]", path_or_ref: q, matches: true, derived: true }
+      - { pattern: "[0-9a-z]", path_or_ref: Q, matches: false, derived: true }
+  - rule: "`!` negates only at the start of a pattern"
+    source: *syntax
+    quote: |-
+      `!`: At the start of a pattern makes it negate previous positive patterns. It has no special meaning if not the first character.
+    cases:
+      - { pattern: "wow!", path_or_ref: "wow!", matches: true, derived: true }
+  - rule: "escape special chars with backslash for a literal match"
+    source: *syntax
+    quote: |-
+      The `branches`, `branches-ignore`, `tags`, and `tags-ignore` keywords accept glob patterns that use characters like `*`, `**`, `+`, `?`, `!` and others to match more than one branch or tag name. If a name contains any of these characters and you want a literal match, you need to escape each of these special characters with `\`. For more information about glob patterns, see the Workflow syntax for GitHub Actions.
+    cases:
+      - { pattern: 'Build C\+\+', path_or_ref: "Build C++", matches: true }   # from on.workflow_run.workflows example `"Build C\\+\\+"` (YAML double-quoted)
+  - rule: "YAML quoting: patterns starting with * [ ! must be quoted; flow sequences containing [ ] must be quoted"
+    source: *syntax
+    quote: |-
+      The characters `*`, `[`, and `!` are special characters in YAML. If you start a pattern with `*`, `[`, or `!`, you must enclose the pattern in quotes. Also, if you use a flow sequence with a pattern containing `[` and/or `]`, the pattern must be enclosed in quotes.
+    cases:
+      - { yaml: "paths:\n  - '**/README.md'\n", valid: true }
+      - { yaml: "paths:\n  - **/README.md\n", valid: false }
+      - { yaml: "branches: [ main, 'release/v[0-9].[0-9]' ]\n", valid: true }
+      - { yaml: "branches: [ main, release/v[0-9].[0-9] ]\n", valid: false }
+
+# ---------------------------------------------------------------------------
+# 2. Cheat sheet: branches and tags (verbatim example matches)
+# ---------------------------------------------------------------------------
+branch_tag_cheat_sheet:
+  source: *syntax
+  table:
+    - pattern: "feature/*"
+      quote: |-
+        The `*` wildcard matches any character, but does not match slash (`/`).
+      cases:
+        - { ref: feature/my-branch, matches: true }
+        - { ref: feature/your-branch, matches: true }
+        - { ref: feature/beta-a/my-branch, matches: false, derived: true }
+    - pattern: "feature/**"
+      quote: |-
+        The `**` wildcard matches any character including slash (`/`) in branch and tag names.
+      cases:
+        - { ref: feature/beta-a/my-branch, matches: true }
+        - { ref: feature/your-branch, matches: true }
+        - { ref: feature/mona/the/octocat, matches: true }
+    - pattern: main
+      quote: |-
+        Matches the exact name of a branch or tag name.
+      cases:
+        - { ref: main, matches: true }
+        - { ref: main2, matches: false, derived: true }
+        - { ref: refs/heads/main, matches: true, derived: true, note: "patterns are evaluated against the short name; see refs_prefix_handling" }
+    - pattern: releases/mona-the-octocat
+      quote: |-
+        Matches the exact name of a branch or tag name.
+      cases:
+        - { ref: releases/mona-the-octocat, matches: true }
+    - pattern: "*"
+      quote: |-
+        Matches all branch and tag names that don't contain a slash (`/`). The `*` character is a special character in YAML. When you start a pattern with `*`, you must use quotes.
+      cases:
+        - { ref: main, matches: true }
+        - { ref: releases, matches: true }
+        - { ref: releases/10, matches: false, derived: true }
+    - pattern: "**"
+      quote: |-
+        Matches all branch and tag names. This is the default behavior when you don't use a `branches` or `tags` filter.
+      cases:
+        - { ref: all/the/branches, matches: true }
+        - { ref: every/tag, matches: true }
+    - pattern: "*feature"
+      quote: |-
+        The `*` character is a special character in YAML. When you start a pattern with `*`, you must use quotes.
+      cases:
+        - { ref: mona-feature, matches: true }
+        - { ref: feature, matches: true }
+        - { ref: ver-10-feature, matches: true }
+        - { ref: mona/feature, matches: false, derived: true }
+    - pattern: "v2*"
+      quote: |-
+        Matches branch and tag names that start with `v2`.
+      cases:
+        - { ref: v2, matches: true }
+        - { ref: "v2.0", matches: true }
+        - { ref: "v2.9", matches: true }
+        - { ref: v20, matches: true, derived: true }
+        - { ref: v1, matches: false, derived: true }
+    - pattern: "v[12].[0-9]+.[0-9]+"
+      quote: |-
+        Matches all semantic versioning branches and tags with major version 1 or 2.
+      cases:
+        - { ref: v1.10.1, matches: true }
+        - { ref: v2.0.0, matches: true }
+        - { ref: v3.0.0, matches: false, derived: true }
+        - { ref: "v1.0", matches: false, derived: true }
+
+# ---------------------------------------------------------------------------
+# 3. Cheat sheet: file paths (verbatim example matches)
+# ---------------------------------------------------------------------------
+path_cheat_sheet:
+  source: *syntax
+  rule_whole_path:
+    quote: |-
+      Path patterns must match the whole path, and start from the repository's root.
+  table:
+    - pattern: "*"
+      quote: |-
+        The `*` wildcard matches any character, but does not match slash (`/`). The `*` character is a special character in YAML. When you start a pattern with `*`, you must use quotes.
+      cases:
+        - { path: README.md, matches: true }
+        - { path: server.rb, matches: true }
+        - { path: src/app.js, matches: false, derived: true }
+    - pattern: "*.jsx?"
+      quote: |-
+        The `?` character matches zero or one of the preceding character.
+      cases:
+        - { path: page.js, matches: true }
+        - { path: page.jsx, matches: true }
+    - pattern: "**"
+      quote: |-
+        The `**` wildcard matches any character including slash (`/`). This is the default behavior when you don't use a `path` filter.
+      cases:
+        - { path: all/the/files.md, matches: true }
+    - pattern: "*.js"
+      quote: |-
+        The `*` wildcard matches any character, but does not match slash (`/`). Matches all `.js` files at the root of the repository.
+      cases:
+        - { path: app.js, matches: true }
+        - { path: index.js, matches: true }
+        - { path: js/index.js, matches: false, derived: true }
+    - pattern: "**.js"
+      quote: |-
+        Matches all `.js` files in the repository.
+      cases:
+        - { path: index.js, matches: true }
+        - { path: js/index.js, matches: true }
+        - { path: src/js/app.js, matches: true }
+    - pattern: "docs/*"
+      quote: |-
+        All files within the root of the `docs` directory only, at the root of the repository.
+      cases:
+        - { path: docs/README.md, matches: true }
+        - { path: docs/file.txt, matches: true }
+        - { path: docs/mona/octocat.txt, matches: false, derived: true }
+    - pattern: "docs/**"
+      quote: |-
+        Any files in the `docs` directory and its subdirectories at the root of the repository.
+      cases:
+        - { path: docs/README.md, matches: true }
+        - { path: docs/mona/octocat.txt, matches: true }
+        - { path: dir/docs/x.md, matches: false, derived: true }
+    - pattern: "docs/**/*.md"
+      quote: |-
+        A file with a `.md` suffix anywhere in the `docs` directory.
+      cases:
+        - { path: docs/README.md, matches: true }
+        - { path: docs/mona/hello-world.md, matches: true }
+        - { path: docs/a/markdown/file.md, matches: true }
+    - pattern: "**/docs/**"
+      quote: |-
+        Any files in a `docs` directory anywhere in the repository.
+      cases:
+        - { path: docs/hello.md, matches: true }
+        - { path: dir/docs/my-file.txt, matches: true }
+        - { path: space/docs/plan/space.doc, matches: true }
+    - pattern: "**/README.md"
+      quote: |-
+        A README.md file anywhere in the repository.
+      cases:
+        - { path: README.md, matches: true }
+        - { path: js/README.md, matches: true }
+    - pattern: "**/*src/**"
+      quote: |-
+        Any file in a folder with a `src` suffix anywhere in the repository.
+      cases:
+        - { path: a/src/app.js, matches: true }
+        - { path: my-src/code/js/app.js, matches: true }
+    - pattern: "**/*-post.md"
+      quote: |-
+        A file with the suffix `-post.md` anywhere in the repository.
+      cases:
+        - { path: my-post.md, matches: true }
+        - { path: path/their-post.md, matches: true }
+    - pattern: "**/migrate-*.sql"
+      quote: |-
+        A file with the prefix `migrate-` and suffix `.sql` anywhere in the repository.
+      cases:
+        - { path: migrate-10909.sql, matches: true }
+        - { path: db/migrate-v1.0.sql, matches: true }
+        - { path: db/sept/migrate-v1.sql, matches: true }
+    - patterns: ["*.md", "!README.md"]
+      quote: |-
+        Using an exclamation mark (`!`) in front of a pattern negates it. When a file matches a pattern and also matches a negative pattern defined later in the file, the file will not be included.
+      cases:
+        - { path: hello.md, matches: true }
+        - { path: README.md, matches: false }
+        - { path: docs/hello.md, matches: false }
+    - patterns: ["*.md", "!README.md", "README*"]
+      quote: |-
+        Patterns are checked sequentially. A pattern that negates a previous pattern will re-include file paths.
+      cases:
+        - { path: hello.md, matches: true }
+        - { path: README.md, matches: true }
+        - { path: README.doc, matches: true }
+
+# ---------------------------------------------------------------------------
+# 4. Ordered negation
+# ---------------------------------------------------------------------------
+ordered_negation:
+  - rule: "order matters: later negative excludes, later positive re-includes (branches)"
+    source: *syntax
+    quote: |-
+      The order that you define patterns matters.
+    quote_bullets:
+      - |-
+        A matching negative pattern (prefixed with `!`) after a positive match will exclude the Git ref.
+      - |-
+        A matching positive pattern after a negative match will include the Git ref again.
+  - rule: "a `!` pattern needs at least one positive pattern; exclusion-only goes in branches-ignore"
+    source: *syntax
+    quote: |-
+      If you define a branch with the `!` character, you must also define at least one branch without the `!` character. If you only want to exclude branches, use `branches-ignore` instead.
+    cases:
+      - { filter: branches, patterns: ["!releases/**-alpha"], valid: false }
+      - { filter: branches, patterns: ["releases/**", "!releases/**-alpha"], valid: true }
+  - rule: "same for tags"
+    source: *syntax
+    quote: |-
+      Similarly, if you define a tag with the `!` character, you must also define at least one tag without the `!` character. If you only want to exclude tags, use `tags-ignore` instead.
+  - rule: "same for paths"
+    source: *syntax
+    quote: |-
+      If you define a path with the `!` character, you must also define at least one path without the `!` character. If you only want to exclude paths, use `paths-ignore` instead.
+    quote_bullets:
+      - |-
+        A matching negative pattern (prefixed with `!`) after a positive match will exclude the path.
+      - |-
+        A matching positive pattern after a negative match will include the path again.
+  - rule: "docs example: push branches [releases/**, !releases/**-alpha]"
+    source: *syntax
+    quote: |-
+      The following workflow will run on pushes to `releases/10` or `releases/beta/mona`, but not on `releases/10-alpha` or `releases/beta/3-alpha` because the negative pattern `!releases/**-alpha` follows the positive pattern.
+    cases:
+      - { event: push, filter: branches, patterns: ["releases/**", "!releases/**-alpha"], ref: refs/heads/releases/10, matches: true }
+      - { event: push, filter: branches, patterns: ["releases/**", "!releases/**-alpha"], ref: refs/heads/releases/beta/mona, matches: true }
+      - { event: push, filter: branches, patterns: ["releases/**", "!releases/**-alpha"], ref: refs/heads/releases/10-alpha, matches: false }
+      - { event: push, filter: branches, patterns: ["releases/**", "!releases/**-alpha"], ref: refs/heads/releases/beta/3-alpha, matches: false }
+  - rule: "docs example: pull_request branches [releases/**, !releases/**-alpha] (evaluated against the PR base branch)"
+    source: *syntax
+    quote: |-
+      The following workflow will run on `pull_request` events for pull requests that target `releases/10` or `releases/beta/mona`, but not for pull requests that target `releases/10-alpha` or `releases/beta/3-alpha` because the negative pattern `!releases/**-alpha` follows the positive pattern.
+    cases:
+      - { event: pull_request, filter: branches, patterns: ["releases/**", "!releases/**-alpha"], base: releases/10, matches: true }
+      - { event: pull_request, filter: branches, patterns: ["releases/**", "!releases/**-alpha"], base: releases/beta/mona, matches: true }
+      - { event: pull_request, filter: branches, patterns: ["releases/**", "!releases/**-alpha"], base: releases/10-alpha, matches: false }
+      - { event: pull_request, filter: branches, patterns: ["releases/**", "!releases/**-alpha"], base: releases/beta/3-alpha, matches: false }
+  - rule: "docs example: paths [sub-project/**, !sub-project/docs/**]"
+    source: *syntax
+    quote: |-
+      This example runs anytime the `push` event includes a file in the `sub-project` directory or its subdirectories, unless the file is in the `sub-project/docs` directory. For example, a push that changed `sub-project/index.js` or `sub-project/src/index.js` will trigger a workflow run, but a push changing only `sub-project/docs/readme.md` will not.
+    cases:
+      - { filter: paths, patterns: ["sub-project/**", "!sub-project/docs/**"], changed: [sub-project/index.js], runs: true }
+      - { filter: paths, patterns: ["sub-project/**", "!sub-project/docs/**"], changed: [sub-project/src/index.js], runs: true }
+      - { filter: paths, patterns: ["sub-project/**", "!sub-project/docs/**"], changed: [sub-project/docs/readme.md], runs: false }
+      - { filter: paths, patterns: ["sub-project/**", "!sub-project/docs/**"], changed: [sub-project/docs/readme.md, sub-project/index.js], runs: true, derived: true }
+
+# ---------------------------------------------------------------------------
+# 5. refs/heads and refs/tags prefix handling
+# ---------------------------------------------------------------------------
+refs_prefix_handling:
+  - rule: "branch/tag patterns are evaluated against the ref NAME (refs/heads/ and refs/tags/ stripped); branches look at refs/heads, tags at refs/tags"
+    source: *syntax
+    quote: |-
+      The patterns defined in `branches` and `tags` are evaluated against the Git ref's name. For example, the following workflow would run whenever there is a `push` event to:
+    quote_bullets:
+      - |-
+        A branch named `main` (`refs/heads/main`)
+      - |-
+        A branch named `mona/octocat` (`refs/heads/mona/octocat`)
+      - |-
+        A branch whose name starts with `releases/`, like `releases/10` (`refs/heads/releases/10`)
+      - |-
+        A tag named `v2` (`refs/tags/v2`)
+      - |-
+        A tag whose name starts with `v1.`, like `v1.9.1` (`refs/tags/v1.9.1`)
+    quote_yaml_comments:
+      - "# Sequence of patterns matched against refs/heads"
+      - "# Sequence of patterns matched against refs/tags"
+    cases:
+      - { event: push, branches: [main, mona/octocat, "releases/**"], tags: [v2, "v1.*"], ref: refs/heads/main, runs: true }
+      - { event: push, branches: [main, mona/octocat, "releases/**"], tags: [v2, "v1.*"], ref: refs/heads/mona/octocat, runs: true }
+      - { event: push, branches: [main, mona/octocat, "releases/**"], tags: [v2, "v1.*"], ref: refs/heads/releases/10, runs: true }
+      - { event: push, branches: [main, mona/octocat, "releases/**"], tags: [v2, "v1.*"], ref: refs/tags/v2, runs: true }
+      - { event: push, branches: [main, mona/octocat, "releases/**"], tags: [v2, "v1.*"], ref: refs/tags/v1.9.1, runs: true }
+      - { event: push, branches: [main, mona/octocat, "releases/**"], tags: [v2, "v1.*"], ref: refs/tags/main, runs: false, derived: true, note: "branch pattern must not match a tag of the same name" }
+      - { event: push, branches: [main, mona/octocat, "releases/**"], tags: [v2, "v1.*"], ref: refs/heads/v2, runs: false, derived: true, note: "tag pattern must not match a branch of the same name" }
+  - rule: "branches-ignore / tags-ignore: a match means skip"
+    source: *syntax
+    quote: |-
+      When a pattern matches the `branches-ignore` or `tags-ignore` pattern, the workflow will not run. The patterns defined in `branches` and `tags` are evaluated against the Git ref's name. For example, the following workflow would run whenever there is a `push` event, unless the `push` event is to:
+    quote_bullets:
+      - |-
+        A branch named `mona/octocat` (`refs/heads/mona/octocat`)
+      - |-
+        A branch whose name matches `releases/**-alpha`, like `releases/beta/3-alpha` (`refs/heads/releases/beta/3-alpha`)
+      - |-
+        A tag named `v2` (`refs/tags/v2`)
+      - |-
+        A tag whose name starts with `v1.`, like `v1.9` (`refs/tags/v1.9`)
+    cases:
+      - { event: push, branches-ignore: [mona/octocat, "releases/**-alpha"], tags-ignore: [v2, "v1.*"], ref: refs/heads/mona/octocat, runs: false }
+      - { event: push, branches-ignore: [mona/octocat, "releases/**-alpha"], tags-ignore: [v2, "v1.*"], ref: refs/heads/releases/beta/3-alpha, runs: false }
+      - { event: push, branches-ignore: [mona/octocat, "releases/**-alpha"], tags-ignore: [v2, "v1.*"], ref: refs/tags/v2, runs: false }
+      - { event: push, branches-ignore: [mona/octocat, "releases/**-alpha"], tags-ignore: [v2, "v1.*"], ref: refs/tags/v1.9, runs: false }
+      - { event: push, branches-ignore: [mona/octocat, "releases/**-alpha"], tags-ignore: [v2, "v1.*"], ref: refs/heads/main, runs: true, derived: true }
+      - { event: push, branches-ignore: [mona/octocat, "releases/**-alpha"], tags-ignore: [v2, "v1.*"], ref: refs/tags/v3, runs: true, derived: true }
+  - rule: "pull_request / pull_request_target branches match the PR's BASE (target) branch"
+    source: *syntax
+    quote: |-
+      When using the `pull_request` and `pull_request_target` events, you can configure a workflow to run only for pull requests that target specific branches.
+    quote_2: |-
+      The patterns defined in `branches` are evaluated against the Git ref's name. For example, the following workflow would run whenever there is a `pull_request` event for a pull request targeting:
+    cases:
+      - { event: pull_request, branches: [main, mona/octocat, "releases/**"], base: main, head: feature/x, runs: true }
+      - { event: pull_request, branches: [main, mona/octocat, "releases/**"], base: mona/octocat, head: feature/x, runs: true }
+      - { event: pull_request, branches: [main, mona/octocat, "releases/**"], base: releases/10, head: feature/x, runs: true }
+      - { event: pull_request, branches: [main, mona/octocat, "releases/**"], base: develop, head: main, runs: false, derived: true, note: "head branch is irrelevant to the filter" }
+      - { event: pull_request, branches-ignore: [mona/octocat, "releases/**-alpha"], base: mona/octocat, runs: false }
+      - { event: pull_request, branches-ignore: [mona/octocat, "releases/**-alpha"], base: releases/beta/3-alpha, runs: false }
+  - rule: "head-branch filtering is NOT a filter; it needs an `if:` on github.head_ref"
+    source: *events
+    quote: |-
+      To run a job based on the pull request's head branch name (as opposed to the pull request's base branch name), use the `github.head_ref` context in a conditional. For example, this workflow will run whenever a pull request is opened, but the `run_if` job will only execute if the head of the pull request is a branch whose name starts with `releases/`:
+  - rule: "merge_group branches match the merge group's TARGET branch name (not the gh-readonly-queue ref)"
+    source: *syntax
+    quote: |-
+      The patterns defined in `branches` are evaluated against the target branch's name. For example, the following workflow will run whenever there is a `merge_group` event for a merge group that targets:
+    quote_bullets:
+      - |-
+        A branch named `main`
+      - |-
+        A branch whose name starts with `releases/`
+    cases:
+      - { event: merge_group, branches: [main, "releases/**"], target: main, runs: true }
+      - { event: merge_group, branches: [main, "releases/**"], target: releases/10, runs: true }
+      - { event: merge_group, branches: [main, "releases/**"], target: develop, runs: false, derived: true }
+      - { event: merge_group, branches-ignore: [canary, "releases/**-alpha"], target: canary, runs: false }
+      - { event: merge_group, branches-ignore: [canary, "releases/**-alpha"], target: releases/beta/3-alpha, runs: false }
+      - { event: merge_group, branches: ["releases/**", "!releases/**-alpha"], target: releases/10, runs: true }
+      - { event: merge_group, branches: ["releases/**", "!releases/**-alpha"], target: releases/beta/mona, runs: true }
+      - { event: merge_group, branches: ["releases/**", "!releases/**-alpha"], target: releases/10-alpha, runs: false }
+      - { event: merge_group, branches: ["releases/**", "!releases/**-alpha"], target: releases/beta/3-alpha, runs: false }
+    quote_examples: |-
+      The following workflow will run on `merge_group` events for merge groups that target `releases/10` or `releases/beta/mona`, but not for merge groups that target `releases/10-alpha` or `releases/beta/3-alpha` because the negative pattern `!releases/**-alpha` follows the positive pattern.
+
+# ---------------------------------------------------------------------------
+# 6. paths vs paths-ignore aggregation over the changed-file set
+# ---------------------------------------------------------------------------
+paths_aggregation:
+  - rule: "paths: ANY changed file matching -> run"
+    source: *syntax
+    quote: |-
+      If at least one path matches a pattern in the `paths` filter, the workflow runs. For example, the following workflow would run anytime you push a JavaScript file (`.js`).
+    cases:
+      - { filter: paths, patterns: ["**.js"], changed: [src/app.js], runs: true }
+      - { filter: paths, patterns: ["**.js"], changed: [README.md, src/app.js], runs: true, derived: true }
+      - { filter: paths, patterns: ["**.js"], changed: [README.md], runs: false, derived: true }
+  - rule: "paths-ignore: ALL changed files matching -> skip; any non-matching file -> run"
+    source: *syntax
+    quote: |-
+      When all the path names match patterns in `paths-ignore`, the workflow will not run. If any path names do not match patterns in `paths-ignore`, even if some path names match the patterns, the workflow will run.
+    quote_2: |-
+      A workflow with the following path filter will only run on `push` events that include at least one file outside the `docs` directory at the root of the repository.
+    cases:
+      - { filter: paths-ignore, patterns: ["docs/**"], changed: [docs/a.md], runs: false }
+      - { filter: paths-ignore, patterns: ["docs/**"], changed: [docs/a.md, docs/b/c.md], runs: false, derived: true }
+      - { filter: paths-ignore, patterns: ["docs/**"], changed: [docs/a.md, src/x.js], runs: true }
+      - { filter: paths-ignore, patterns: ["docs/**"], changed: [src/x.js], runs: true, derived: true }
+  - rule: "no changed files -> no run (when a path filter is present)"
+    source: *syntax
+    quote: |-
+      The filter determines if a workflow should run by evaluating the changed files and running them against the `paths-ignore` or `paths` list. If there are no files changed, the workflow will not run.
+    cases:
+      - { filter: paths, patterns: ["**"], changed: [], runs: false }
+      - { filter: paths-ignore, patterns: ["docs/**"], changed: [], runs: false }
+  - rule: "path filters are skipped entirely for tag pushes"
+    source: *syntax
+    quote: |-
+      When using the `push` and `pull_request` events, you can configure a workflow to run based on what file paths are changed. Path filters are not evaluated for pushes of tags.
+    cases:
+      - { event: push, ref: refs/tags/v1.0.0, paths: ["src/**"], changed: [], runs: true, note: "UNVERIFIED whether 'not evaluated' means the filter passes (run) or the tag push is ignored; the sentence reads as 'filter is not applied', i.e. run" }
+  - rule: "which diff produces the changed-file list"
+    source: *syntax
+    quote: |-
+      GitHub generates the list of changed files using two-dot diffs for pushes and three-dot diffs for pull requests:
+    quote_bullets:
+      - |-
+        Pull requests: Three-dot diffs are a comparison between the most recent version of the topic branch and the commit where the topic branch was last synced with the base branch.
+      - |-
+        Pushes to existing branches: A two-dot diff compares the head and base SHAs directly with each other.
+      - |-
+        Pushes to new branches: A two-dot diff against the parent of the ancestor of the deepest commit pushed.
+  - rule: "size limits override path filtering"
+    source: *syntax
+    quote_bullets:
+      - |-
+        If a push contains more than 1,000 commits, the workflow will always run.
+      - |-
+        If generating the diff times out, the workflow will always run.
+      - |-
+        If the generated diff contains more than 3,000 files and the files the workflow filter matches are not in the first 3,000 returned by the filter, the workflow will not run.
+    cases:
+      - { filter: paths, patterns: ["src/**"], commit_count: 1001, changed: [README.md], runs: true }
+  - rule: "paths/paths-ignore apply to push, pull_request, pull_request_target (section title)"
+    source: *syntax
+    quote: |-
+      `on.<push|pull_request|pull_request_target>.<paths|paths-ignore>`
+    events_with_paths: [push, pull_request, pull_request_target]
+  - rule: "paths/paths-ignore accept only * and **  (per that section) - but see the cheat sheet, which allows ? + [] ! in path filters too"
+    source: *syntax
+    quote: |-
+      The `paths` and `paths-ignore` keywords accept glob patterns that use the `*` and `**` wildcard characters to match more than one path name. For more information, see the Workflow syntax for GitHub Actions.
+    note: |-
+      UNVERIFIED which statement is authoritative; the cheat sheet's own path table uses `*.jsx?` and `!README.md`, so the simulator should accept the full character set for paths.
+
+# ---------------------------------------------------------------------------
+# 7. Combining filters
+# ---------------------------------------------------------------------------
+combining_filters:
+  - rule: "branches AND paths: both must be satisfied (push)"
+    source: *syntax
+    quote: |-
+      If you define both `branches`/`branches-ignore` and `paths`/`paths-ignore`, the workflow will only run when both filters are satisfied.
+    cases:
+      - { event: push, branches: ["releases/**"], paths: ["**.js"], ref: refs/heads/releases/1, changed: [a.js], runs: true }
+      - { event: push, branches: ["releases/**"], paths: ["**.js"], ref: refs/heads/releases/1, changed: [a.md], runs: false }
+      - { event: push, branches: ["releases/**"], paths: ["**.js"], ref: refs/heads/main, changed: [a.js], runs: false }
+  - rule: "branches AND paths: both must be satisfied (pull_request / pull_request_target)"
+    source: *events
+    quote: |-
+      If you use both the `branches` filter and the `paths` filter, the workflow will only run when both filters are satisfied. For example, the following workflow will only run when a pull request that includes a change to a JavaScript (`.js`) file is opened on a branch whose name starts with `releases/`:
+    cases:
+      - { event: pull_request, types: [opened], branches: ["releases/**"], paths: ["**.js"], base: releases/2, changed: [x.js], runs: true }
+      - { event: pull_request, types: [opened], branches: ["releases/**"], paths: ["**.js"], base: releases/2, changed: [x.md], runs: false }
+      - { event: pull_request, types: [opened], branches: ["releases/**"], paths: ["**.js"], base: main, changed: [x.js], runs: false }
+  - rule: "push with only branches or only tags: the undefined ref kind never triggers; neither defined: both kinds trigger"
+    source: *syntax
+    quote: |-
+      If you define only `tags`/`tags-ignore` or only `branches`/`branches-ignore`, the workflow won't run for events affecting the undefined Git ref. If you define neither `tags`/`tags-ignore` or `branches`/`branches-ignore`, the workflow will run for events affecting either branches or tags. If you define both `branches`/`branches-ignore` and `paths`/`paths-ignore`, the workflow will only run when both filters are satisfied.
+    cases:
+      - { event: push, branches: [main], ref: refs/tags/v1, runs: false }
+      - { event: push, branches-ignore: [main], ref: refs/tags/v1, runs: false }
+      - { event: push, tags: ["v*"], ref: refs/heads/main, runs: false }
+      - { event: push, tags-ignore: ["v*"], ref: refs/heads/main, runs: false }
+      - { event: push, ref: refs/heads/anything, runs: true }
+      - { event: push, ref: refs/tags/anything, runs: true }
+  - rule: "push with BOTH branches and tags: a branch push is judged by `branches`, a tag push by `tags` (effectively OR across ref kinds). The docs never say 'either'; this is what the Including-branches-and-tags example demonstrates."
+    source: *syntax
+    quote: |-
+      The patterns defined in `branches` and `tags` are evaluated against the Git ref's name. For example, the following workflow would run whenever there is a `push` event to:
+    cases:
+      - { event: push, branches: [main], tags: [v2], ref: refs/heads/main, runs: true }
+      - { event: push, branches: [main], tags: [v2], ref: refs/tags/v2, runs: true }
+      - { event: push, branches: [main], tags: [v2], ref: refs/heads/dev, runs: false, derived: true }
+      - { event: push, branches: [main], tags: [v2], ref: refs/tags/v3, runs: false, derived: true }
+    note: |-
+      UNVERIFIED as a literal sentence. Derived from the example list (which includes both branch and tag refs under one `on: push` with both filters) and from the "undefined Git ref" sentence above.
+
+# ---------------------------------------------------------------------------
+# 8. "cannot use both X and X-ignore"
+# ---------------------------------------------------------------------------
+mutual_exclusion:
+  - rule: "branches vs branches-ignore (pull_request / pull_request_target)"
+    source: *syntax
+    quote: |-
+      Use the `branches` filter when you want to include branch name patterns or when you want to both include and exclude branch names patterns. Use the `branches-ignore` filter when you only want to exclude branch name patterns. You cannot use both the `branches` and `branches-ignore` filters for the same event in a workflow.
+    cases:
+      - { event: pull_request, branches: [main], branches-ignore: [dev], valid: false }
+  - rule: "branches vs branches-ignore (push)"
+    source: *syntax
+    quote: |-
+      You cannot use both the `branches` and `branches-ignore` filters for the same event in a workflow.
+    cases:
+      - { event: push, branches: [main], branches-ignore: [dev], valid: false }
+  - rule: "tags vs tags-ignore (push)"
+    source: *syntax
+    quote: |-
+      Use the `tags` filter when you want to include tag name patterns or when you want to both include and exclude tag names patterns. Use the `tags-ignore` filter when you only want to exclude tag name patterns. You cannot use both the `tags` and `tags-ignore` filters for the same event in a workflow.
+    cases:
+      - { event: push, tags: ["v*"], tags-ignore: ["v0*"], valid: false }
+      - { event: push, branches: [main], tags-ignore: ["v0*"], valid: true, derived: true, note: "the exclusion is per keyword pair, not across pairs" }
+  - rule: "branches/tags both-ignore wording"
+    source: *syntax
+    quote: |-
+      You can't use `branches` and `branches-ignore` to filter the same event in a single workflow. Similarly, you can't use `tags` and `tags-ignore` to filter the same event in a single workflow. If you want to both include and exclude branch or tag patterns for a single event, use the `branches` or `tags` filter along with the `!` character to indicate which branches or tags should be excluded.
+  - rule: "paths vs paths-ignore"
+    source: *syntax
+    quote: |-
+      Use the `paths` filter when you want to include file path patterns or when you want to both include and exclude file path patterns. Use the `paths-ignore` filter when you only want to exclude file path patterns. You cannot use both the `paths` and `paths-ignore` filters for the same event in a workflow. If you want to both include and exclude path patterns for a single event, use the `paths` filter prefixed with the `!` character to indicate which paths should be excluded.
+    cases:
+      - { event: push, paths: ["src/**"], paths-ignore: ["docs/**"], valid: false }
+  - rule: "merge_group branches vs branches-ignore"
+    source: *syntax
+    quote: |-
+      Use the `branches` filter when you want to include branch name patterns or when you want to both include and exclude branch name patterns. Use `branches-ignore` when you only want to exclude branch name patterns. You cannot use both `branches` and `branches-ignore` for the same event in a workflow.
+  - rule: "workflow_run branches vs branches-ignore"
+    source: *syntax
+    quote: |-
+      You cannot use both the `branches` and `branches-ignore` filters for the same event in a workflow. If you want to both include and exclude branch patterns for a single event, use the `branches` filter along with the `!` character to indicate which branches should be excluded.
+  - rule: "the exclusion is per event, so push.branches + pull_request.branches-ignore in one file is fine"
+    cases:
+      - { on: { push: { branches: [main] }, pull_request: { branches-ignore: [dev] } }, valid: true, derived: true }
+
+# ---------------------------------------------------------------------------
+# 9. Skipped-by-filter runs leave checks Pending
+# ---------------------------------------------------------------------------
+skipped_runs_checks:
+  - rule: "a run skipped by branch/path filter or commit message leaves required checks Pending"
+    source: *syntax
+    quote: |-
+      If a workflow is skipped due to branch filtering, path filtering, or a commit message, then checks associated with that workflow will remain in a "Pending" state. A pull request that requires those checks to be successful will be blocked from merging.
+
+# ---------------------------------------------------------------------------
+# 10. workflow_run branches filter (see workflow-run.yml for the full set)
+# ---------------------------------------------------------------------------
+workflow_run_branches:
+  - rule: "workflow_run branches / branches-ignore apply to the branch the TRIGGERING workflow ran on"
+    source: *syntax
+    quote: |-
+      When using the `workflow_run` event, you can specify what branches the triggering workflow must run on in order to trigger your workflow.
+    cases:
+      - { workflows: [Build], branches: ["releases/**"], triggering_branch: releases/1, runs: true }
+      - { workflows: [Build], branches: ["releases/**"], triggering_branch: main, runs: false, derived: true }
+      - { workflows: [Build], branches-ignore: [canary], triggering_branch: canary, runs: false }
+      - { workflows: [Build], branches-ignore: [canary], triggering_branch: main, runs: true, derived: true }
