@@ -1,0 +1,20 @@
+{
+  "name": "@simulci/engine",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The simulci engine: scenario, run settings, triggers, mocks, planner and RunPlan.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ciatlas/core": "github:ciatlas/core#v2.3.0"
+  }
+}

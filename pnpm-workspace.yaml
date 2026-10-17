@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+  - apps/*
+  - ee/*
+# Committed bundles name each file by its path, which for @ciatlas/core (a git dependency) is a long
+# node_modules/.pnpm directory. pnpm shortens such names past 60 characters on Windows and past 120 elsewhere;
+# 120 everywhere keeps a bundle the same whatever system builds it.
+virtualStoreDirMaxLength: 120

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":semanticPrefixFixDepsChoreOthers",
+    "helpers:pinGitHubActionDigestsToSemver"
+  ],
+  "description": "Pull request titles follow Conventional Commits (the PR title check and release-please rely on it). pnpm refuses versions younger than a day, hence minimumReleaseAge; commits by the release bot do not stop Renovate from updating its branches.",
+  "ignorePaths": ["**/node_modules/**", "**/vendor/**", "**/test/**", "**/tests/**", "fixtures/**"],
+  "schedule": ["before 6am on monday"],
+  "dependencyDashboard": true,
+  "packageRules": [
+    {
+      "description": "Workflow actions: ci(deps), one grouped pull request.",
+      "matchManagers": ["github-actions"],
+      "semanticCommitType": "ci",
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Development dependencies: chore(deps), grouped unless major.",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev dependencies (non-major)"
+    },
+    {
+      "description": "Runtime dependencies are bundled into the CLI and the action: fix(deps), so they ship in a patch release.",
+      "matchDepTypes": ["dependencies"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "The apps are not published to npm: their dependencies are chore(deps), not releases.",
+      "matchFileNames": ["apps/**/package.json"],
+      "semanticCommitType": "chore"
+    },
+    {
+      "description": "Non-major updates merge themselves once every required check passes; Renovate bypasses only the code owner review (.github/rulesets/main-reviews.json). Anything that ships still waits for the release pull request, which needs approval.",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest", "pinDigest"],
+      "automerge": true
+    },
+    {
+      "description": "0.x minor versions may break: review them.",
+      "matchCurrentVersion": "/^v?0\\./",
+      "matchUpdateTypes": ["minor"],
+      "automerge": false
+    },
+    {
+      "description": "@ciatlas/core, the workflow model, is bundled into the CLI, the action and the web app: fix(deps), so a new core ships in a patch release; one pull request for every package, without the release-age wait (it is our own release, reviewed in its release pull request). Matched by dependency name: for a github: dependency, Renovate's package name is the repository, ciatlas/core.",
+      "matchDepNames": ["@ciatlas/core"],
+      "semanticCommitType": "fix",
+      "groupName": null,
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "Pinning to a commit SHA keeps the same version: merge it right away instead of waiting out the release age, and apart from version updates.",
+      "matchUpdateTypes": ["pin", "pinDigest"],
+      "minimumReleaseAge": null,
+      "groupName": "pin dependencies"
+    }
+  ],
+  "minimumReleaseAge": "2 days",
+  "gitIgnoredAuthors": ["340947222+ciatlas-release-bot[bot]@users.noreply.github.com"],
+  "platformAutomerge": false,
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "osvVulnerabilityAlerts": true
+}

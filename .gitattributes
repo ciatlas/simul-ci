@@ -1,0 +1,2 @@
+# Fixtures and snapshots are compared byte for byte; keep LF everywhere.
+fixtures/** text eol=lf
