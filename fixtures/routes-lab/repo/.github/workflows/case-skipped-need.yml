@@ -1,0 +1,44 @@
+# Case 1 - skipped-need: which dependents of a skipped job run, and what needs.a.result says.
+name: case-skipped-need
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: never
+        run: 'echo "probe: a=ran"'
+  b:
+    needs: a
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  c:
+    needs: a
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  d:
+    needs: a
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  e:
+    needs: a
+    if: '!cancelled()'
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  f:
+    needs: a
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'

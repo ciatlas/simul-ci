@@ -3,6 +3,8 @@ import {
   definitelyTruthy,
   type EvaluateOptions,
   type EvalValue,
+  evaluateTemplate,
+  findTemplateSegments,
   parseExpression,
 } from '@ciatlas/core';
 import { type ContextState, contextResolver, lookupContext } from './contexts';
@@ -44,4 +46,32 @@ function statusAnswer(status: StatusAnswers, name: string): EvalValue | undefine
   const answer = (status as Record<string, Value<boolean> | undefined>)[name];
   if (!answer) return undefined;
   return answer.known ? { known: true, value: answer.value as Json, taint: [] } : undefined;
+}
+
+/**
+ * A YAML scalar that may hold `${{ }}` segments (`with:`, `env:`, `outputs:` values), as a string: known when every
+ * segment is, else unknown because of the reads the segments cannot resolve.
+ */
+export function evaluateValue(text: string, state: ContextState, status?: StatusAnswers): Value<string> {
+  const segments = findTemplateSegments(text);
+  if (segments.length === 0) return known(text);
+  const options: EvaluateOptions = status ? { runtime: (name) => statusAnswer(status, name) } : {};
+  const v = evaluateTemplate(text, contextResolver(state), options);
+  if (v.known) return known(stringOf(v.value));
+  const unknowns = segments.flatMap((seg) =>
+    seg.expr.refs.flatMap((ref) => {
+      const value = ref.dynamic
+        ? unknown([`${ref.context}.${ref.path.join('.')}`])
+        : lookupContext(state, ref);
+      return value.known ? [] : value.unknowns;
+    }),
+  );
+  return unknown(unknowns.length ? unknowns : [`expression:${text}`]);
+}
+
+/** A value as GitHub writes it into a string: `null` is empty, objects are JSON. */
+export function stringOf(value: Json): string {
+  if (value === null) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
 }

@@ -1,0 +1,11 @@
+# Case 19 - filter-tags: on.push.tags only. Runs for tag pushes matching v*, not for branch pushes.
+name: case-filter-tags
+on:
+  push:
+    tags: ['v*']
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: ref=${{ github.ref }}"'

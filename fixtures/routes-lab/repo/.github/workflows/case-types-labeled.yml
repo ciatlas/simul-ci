@@ -1,0 +1,14 @@
+# Case 20 - types-labeled: on.pull_request.types: [labeled]. Starts only when a label is added.
+name: case-types-labeled
+on:
+  pull_request:
+    types: [labeled]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: |
+          echo "probe: event.action=${{ github.event.action }}"
+          echo "probe: event.label.name=${{ github.event.label.name }}"
+          echo "probe: ref=${{ github.ref }}"

@@ -1,0 +1,30 @@
+# Case 4 - continue-on-error-job: a job that fails under continue-on-error, seen by its dependents.
+name: case-continue-on-error-job
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: fail
+        run: exit 1
+  b:
+    needs: a
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  c:
+    needs: a
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  d:
+    needs: a
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'

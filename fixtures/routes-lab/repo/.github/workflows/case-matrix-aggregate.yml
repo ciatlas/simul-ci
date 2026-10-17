@@ -1,0 +1,40 @@
+# Case 6 - matrix-aggregate: needs.<id>.result of a matrix with one failed leg, fail-fast on and off.
+name: case-matrix-aggregate
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        n: [1, 2, 3]
+    steps:
+      - name: leg
+        run: |
+          if [ "${{ matrix.n }}" = "2" ]; then exit 1; fi
+          sleep 60
+  b:
+    needs: a
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  v:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3]
+    steps:
+      - name: leg
+        run: |
+          if [ "${{ matrix.n }}" = "2" ]; then exit 1; fi
+          echo "probe: leg=${{ matrix.n }}"
+  w:
+    needs: v
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.v.result=${{ needs.v.result }}"'

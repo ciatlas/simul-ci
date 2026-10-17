@@ -67,7 +67,7 @@ describe('lookupContext', () => {
     const s = state();
     expect(read(s, 'vars', 'DEPLOY')).toEqual(known('true'));
     expect(read(s, 'vars', 'deploy')).toEqual(known('true'));
-    expect(read(s, 'vars', 'OTHER')).toEqual(unknown(['vars.OTHER']));
+    expect(read(s, 'vars', 'OTHER')).toEqual(known(''));
     expect(read(s, 'secrets', 'NPM_TOKEN')).toEqual(unknown(['secrets.NPM_TOKEN']));
     expect(read(s, 'secrets', 'GITHUB_TOKEN')).toEqual(unknown(['secrets.GITHUB_TOKEN']));
     expect(read(s, 'secrets', 'MISSING')).toEqual(known(''));
@@ -79,7 +79,7 @@ describe('lookupContext', () => {
         a: { result: known('skipped'), outputs: {} },
         b: { result: known('success'), outputs: { v: known('1') } },
       },
-      steps: { s: { outcome: known('skipped'), conclusion: known('skipped'), outputs: {} } },
+      steps: { s: { id: 's', outcome: known('skipped'), conclusion: known('skipped'), outputs: {} } },
     });
     expect(read(s, 'needs', 'a', 'result')).toEqual(known('skipped'));
     expect(read(s, 'needs', 'a', 'outputs', 'v')).toEqual(known(''));
@@ -135,11 +135,18 @@ describe('evaluateCondition', () => {
 
   it('is unknown because of the reads it names, and decides what the reads cannot change (lab unknown-or-true)', () => {
     const s = state();
-    const c = evaluateCondition("success() && (vars.OTHER == 'x')", s, okNeeds);
-    expect(c.value).toEqual(unknown(['vars.OTHER'], [true, false]));
-    expect(c.reads).toEqual([{ ref: 'vars.OTHER', value: unknown(['vars.OTHER']) }]);
-    expect(evaluateCondition('success() && (vars.OTHER || true)', s, okNeeds).value).toEqual(known(true));
-    expect(evaluateCondition('success() && (vars.OTHER && false)', s, okNeeds).value).toEqual(known(false));
+    const c = evaluateCondition(
+      "success() && (github.actor == 'octocat')",
+      state({ scenario: parseScenario({ event: 'push' }) }),
+      okNeeds,
+    );
+    expect(c.value).toEqual(unknown(['github.actor'], [true, false]));
+    expect(c.reads).toEqual([{ ref: 'github.actor', value: unknown(['github.actor']) }]);
+    expect(evaluateCondition('success() && (github.run_id || true)', s, okNeeds).value).toEqual(known(true));
+    expect(evaluateCondition('success() && (github.run_id && false)', s, okNeeds).value).toEqual(
+      known(false),
+    );
+    expect(evaluateCondition('success() && (vars.OTHER && true)', s, okNeeds).value).toEqual(known(false));
   });
 
   it('is unknown when a status answer is, and false at a skipped need under success()', () => {

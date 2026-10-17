@@ -2,6 +2,7 @@ import {
   type Combination,
   type ContextResolver,
   type EvalValue,
+  lookup,
   matrixResolver,
   UNKNOWN,
 } from '@ciatlas/core';
@@ -22,9 +23,13 @@ export interface NeedState {
 }
 
 export interface StepState {
+  /** The node id of the step, which names its unknown outputs. */
+  id: string;
   outcome: Value<Result>;
   conclusion: Value<Result>;
   outputs: Record<string, Value<string>>;
+  /** The step may set outputs beyond the ones listed (a script that mentions nothing, a remote action without a model). */
+  open?: boolean;
 }
 
 export interface ContextState {
@@ -38,6 +43,8 @@ export interface ContextState {
   inputs?: Record<string, Value<Json>>;
   /** `needs`: the jobs visible here (direct needs at a step, the transitive closure at a job-level `if:`). */
   needs?: Record<string, NeedState>;
+  /** `jobs`, read by a reusable workflow's `outputs:`. */
+  jobs?: Record<string, NeedState>;
   steps?: Record<string, StepState>;
   matrix?: Combination;
   status?: Value<JobStatus>;
@@ -66,6 +73,8 @@ export function lookupContext(state: ContextState, ref: ContextRef): Value<Json>
       return record(state.inputs ?? {}, ref.path, '');
     case 'needs':
       return needsContext(state.needs ?? {}, ref.path);
+    case 'jobs':
+      return needsContext(state.jobs ?? {}, ref.path);
     case 'steps':
       return stepsContext(state.steps ?? {}, ref.path);
     case 'matrix':
@@ -149,11 +158,11 @@ function githubEvent(scenario: Scenario, path: string[], id: string): Value<Json
   return value ?? unknown([id]);
 }
 
+/** The scenario's `vars` are the variables that exist; one that does not reads as empty (lab unknown-or-true). */
 function varsContext(scenario: Scenario, path: string[]): Value<Json> {
   const name = path[0];
   if (name === undefined) return unknown(['vars']);
-  const v = lookup(scenario.vars, name);
-  return v === undefined ? unknown([`vars.${name}`]) : known(v);
+  return known(lookup(scenario.vars, name) ?? '');
 }
 
 /** A secret that exists has an opaque value; one that does not reads as empty. `GITHUB_TOKEN` always exists. */
@@ -238,12 +247,4 @@ function record(values: Record<string, Value<Json>>, path: string[], missing: st
   const name = path[0];
   if (name === undefined) return unknown(['record']);
   return lookup(values, name) ?? known(missing);
-}
-
-/** Case-insensitive lookup, as GitHub resolves context property names. */
-function lookup<T>(rec: Record<string, T>, key: string): T | undefined {
-  if (Object.hasOwn(rec, key)) return rec[key];
-  const lower = key.toLowerCase();
-  for (const k of Object.keys(rec)) if (k.toLowerCase() === lower) return rec[k];
-  return undefined;
 }

@@ -1,0 +1,11 @@
+# Case 21 - skip-ci: a commit whose message contains [skip ci] starts no push run; workflow_dispatch still works.
+name: case-skip-ci
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: |
+          echo "probe: event=${{ github.event_name }}"
+          echo "probe: ref=${{ github.ref }}"
