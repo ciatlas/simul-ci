@@ -1,0 +1,30 @@
+# Case 2 - skipped-job-outputs: what a skipped job's declared outputs look like downstream.
+name: case-skipped-job-outputs
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    if: false
+    runs-on: ubuntu-latest
+    outputs:
+      v: hello
+    steps:
+      - name: never
+        run: 'echo "probe: a=ran"'
+  b:
+    needs: a
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        env:
+          OUTPUTS: ${{ toJSON(needs.a.outputs) }}
+        run: |
+          echo "probe: needs.a.result=${{ needs.a.result }}"
+          echo "probe: needs.a.outputs.v=${{ needs.a.outputs.v }}"
+          echo "probe: needs.a.outputs=$(jq -c . <<< "$OUTPUTS")"
+      - name: v is empty
+        if: needs.a.outputs.v == ''
+        run: 'echo "probe: if-v-empty=ran"'
+      - name: v is not empty
+        if: needs.a.outputs.v != ''
+        run: 'echo "probe: if-v-nonempty=ran"'

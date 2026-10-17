@@ -1,0 +1,35 @@
+# Case 16 - if-boolean-literal: which literal forms of `if:` run. The forms that might not parse
+# (`if: 0`, `if: ''`) are in their own files, case-if-boolean-literal-zero.yml and -empty.yml.
+name: case-if-boolean-literal
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: if false
+        if: false
+        run: 'echo "probe: if-false=ran"'
+      - name: if true
+        if: true
+        run: 'echo "probe: if-true=ran"'
+      - name: if quoted false
+        if: 'false'
+        run: 'echo "probe: if-quoted-false=ran"'
+      - name: if quoted true
+        if: 'true'
+        run: 'echo "probe: if-quoted-true=ran"'
+      - name: if expression false
+        if: ${{ false }}
+        run: 'echo "probe: if-expr-false=ran"'
+      - name: if expression string false
+        if: ${{ 'false' }}
+        run: 'echo "probe: if-expr-string-false=ran"'
+      - name: probe
+        if: always()
+        run: 'echo "probe: a=ran"'
+  skipped:
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: never
+        run: 'echo "probe: skipped=ran"'

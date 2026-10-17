@@ -1,0 +1,10 @@
+# Helper for case 10: a reusable workflow with one job that runs.
+name: callee-echo
+on:
+  workflow_call:
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: callee=ran"'

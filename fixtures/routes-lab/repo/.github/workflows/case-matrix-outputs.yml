@@ -1,0 +1,41 @@
+# Case 8 - matrix-outputs: which leg's value a matrix job output carries, and whether an empty value overwrites.
+# Legs finish in the order 1, 3, 2 (sleeps 0, 20, 40 s): leg 2 writes v='' last; every leg writes w=<n>.
+name: case-matrix-outputs
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3]
+    outputs:
+      v: ${{ steps.set.outputs.v }}
+      w: ${{ steps.set.outputs.w }}
+    steps:
+      - name: set
+        id: set
+        run: |
+          case "${{ matrix.n }}" in
+            1) sleep 0 ;;
+            3) sleep 20 ;;
+            2) sleep 40 ;;
+          esac
+          if [ "${{ matrix.n }}" = "2" ]; then
+            echo "v=" >> "$GITHUB_OUTPUT"
+          else
+            echo "v=${{ matrix.n }}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "w=${{ matrix.n }}" >> "$GITHUB_OUTPUT"
+          echo "probe: leg=${{ matrix.n }}"
+  b:
+    needs: a
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        env:
+          OUTPUTS: ${{ toJSON(needs.a.outputs) }}
+        run: |
+          echo "probe: needs.a.outputs.v=${{ needs.a.outputs.v }}"
+          echo "probe: needs.a.outputs.w=${{ needs.a.outputs.w }}"
+          echo "probe: needs.a.outputs=$(jq -c . <<< "$OUTPUTS")"

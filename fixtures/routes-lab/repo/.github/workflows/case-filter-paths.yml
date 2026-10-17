@@ -1,0 +1,11 @@
+# Case 18 - filter-paths: on.push.paths. Runs only when a pushed commit touches src/**.
+name: case-filter-paths
+on:
+  push:
+    paths: ['src/**']
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: ref=${{ github.ref }}"'

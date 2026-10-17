@@ -1,0 +1,12 @@
+# Case 19 - filter-branches-tags: branches and tags together (either may match).
+name: case-filter-branches-tags
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: ref=${{ github.ref }}"'

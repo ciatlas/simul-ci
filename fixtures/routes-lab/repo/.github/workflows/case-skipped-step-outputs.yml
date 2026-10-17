@@ -1,0 +1,31 @@
+# Case 3 - skipped-step-outputs: outputs, outcome and conclusion of a skipped step.
+name: case-skipped-step-outputs
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: skipped
+        id: s
+        if: false
+        run: echo "x=set" >> "$GITHUB_OUTPUT"
+      - name: probe
+        env:
+          OUTPUTS: ${{ toJSON(steps.s.outputs) }}
+        run: |
+          echo "probe: steps.s.outputs.x=${{ steps.s.outputs.x }}"
+          echo "probe: steps.s.outcome=${{ steps.s.outcome }}"
+          echo "probe: steps.s.conclusion=${{ steps.s.conclusion }}"
+          echo "probe: steps.s.outputs=$(jq -c . <<< "$OUTPUTS")"
+      - name: x is empty
+        if: steps.s.outputs.x == ''
+        run: 'echo "probe: if-x-empty=ran"'
+      - name: x is not empty
+        if: steps.s.outputs.x != ''
+        run: 'echo "probe: if-x-nonempty=ran"'
+      - name: outcome is skipped
+        if: steps.s.outcome == 'skipped'
+        run: 'echo "probe: if-outcome-skipped=ran"'
+      - name: conclusion is skipped
+        if: steps.s.conclusion == 'skipped'
+        run: 'echo "probe: if-conclusion-skipped=ran"'

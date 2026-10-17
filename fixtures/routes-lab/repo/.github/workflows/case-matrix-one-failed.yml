@@ -1,0 +1,28 @@
+# Case 7 - matrix-one-failed: a matrix where one leg fails (fail-fast off) and what its dependents see.
+name: case-matrix-one-failed
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2]
+    steps:
+      - name: leg
+        run: |
+          if [ "${{ matrix.n }}" = "2" ]; then exit 1; fi
+          echo "probe: leg=${{ matrix.n }}"
+  b:
+    needs: a
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  c:
+    needs: a
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'

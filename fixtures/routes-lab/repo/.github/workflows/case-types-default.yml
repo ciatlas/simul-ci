@@ -1,0 +1,12 @@
+# Case 20 - types-default: on: pull_request without types. Which activity types start it.
+name: case-types-default
+on: pull_request
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: |
+          echo "probe: event.action=${{ github.event.action }}"
+          echo "probe: ref=${{ github.ref }}"
+          echo "probe: head_ref=${{ github.head_ref }}"
