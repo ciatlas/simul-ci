@@ -1,0 +1,186 @@
+# default-branch-only.yml
+# Which events only trigger when the workflow file exists on the default
+# branch, and which of those nevertheless run with a GITHUB_REF that is NOT
+# the default branch. Every `quote` is verbatim (fetched 2026-10-17).
+
+sources:
+  events: &events https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+  syntax: &syntax https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
+
+# The sentence that the events page attaches, word for word, to each event in
+# `default_branch_file_required`. Per-event `quote` below repeats it (or the
+# event's own variant) so each row is self-contained.
+canonical_note:
+  source: *events
+  quote: |-
+    This event will only trigger a workflow run if the workflow file exists on the default branch.
+
+# Events carrying the "workflow file exists on the default branch" note.
+# `ref` is the GITHUB_REF the same table gives for that event.
+default_branch_file_required:
+  branch_protection_rule:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  check_run:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  check_suite:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  delete:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  discussion:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  discussion_comment:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  fork:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  gollum:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  issue_comment:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  issues:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  label:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  milestone:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  page_build:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  public:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  registry_package:
+    ref: Branch or tag of the published package
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  repository_dispatch:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  schedule:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+    extra_quotes:
+      - |-
+        Scheduled workflows will only run on the default branch.
+      - |-
+        Scheduled workflows run on the latest commit on the default branch. The shortest interval you can run scheduled workflows is once every 5 minutes.
+      - |-
+        In a public repository, scheduled workflows are automatically disabled when no repository activity has occurred in 60 days. For information on re-enabling a disabled workflow, see Disabling and enabling a workflow.
+  status:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  watch:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+  workflow_dispatch:
+    ref: Branch or tag that received dispatch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+    extra_quotes:
+      - |-
+        To enable a workflow to be triggered manually, you need to configure the `workflow_dispatch` event. On the GitHub UI, the "Run workflow" button will be present if the workflow file exists on the default branch. Once a workflow has run at least once, you can dispatch it against any branch or tag via the GitHub API or GitHub CLI. For more information, see Manually running a workflow.
+      - |-
+        This trigger only receives events when the workflow file is on the default branch.
+    extra_quote_sources: [*events, *syntax]
+  workflow_run:
+    ref: Default branch
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+
+# Events that DO NOT carry the note. For these the workflow file is read from
+# the triggering ref (push, create, release, pull_request merge ref, ...), or
+# the docs are silent. `ref` again copies the GITHUB_REF column.
+no_default_branch_note:
+  create:              { ref: Branch or tag created }
+  deployment:          { ref: "Branch or tag to be deployed (empty if created with a commit SHA)" }
+  deployment_status:   { ref: "Branch or tag to be deployed (empty if commit)" }
+  image_version:       { ref: Default branch }   # no note in the docs, yet GITHUB_REF is the default branch
+  merge_group:         { ref: Ref of the merge group }
+  pull_request:        { ref: "PR merge branch `refs/pull/PULL_REQUEST_NUMBER/merge`" }
+  pull_request_review: { ref: "PR merge branch `refs/pull/PULL_REQUEST_NUMBER/merge`" }
+  pull_request_review_comment: { ref: "PR merge branch `refs/pull/PULL_REQUEST_NUMBER/merge`" }
+  pull_request_target: { ref: Default branch }
+  push:                { ref: Updated ref }
+  release:             { ref: "Tag ref of release `refs/tags/<tag_name>`" }
+  workflow_call:       { ref: Same as the caller workflow }
+  source: *events
+
+# pull_request_target has no "workflow file exists on the default branch"
+# note, but its own prose says it runs in the default-branch context.
+pull_request_target_context:
+  source: *events
+  quote: |-
+    This event runs in the context of the default branch of the base repository, rather than in the context of the merge commit, as the `pull_request` event does. This prevents execution of unsafe code from the head of the pull request that could alter your repository or steal any secrets you use in your workflow. This event allows your workflow to do things like label or comment on pull requests from forks. Avoid using this event if you need to build or run code from the pull request.
+  note: |-
+    UNVERIFIED: the contexts page says "`pull_request_target` events have the `ref` from the base branch", while the events table says GITHUB_REF = "Default branch". The two agree only when the PR targets the default branch; the docs do not say which wins for a PR targeting a non-default branch.
+
+# Subset of default_branch_file_required whose GITHUB_REF is NOT the default
+# branch: the workflow file comes from the default branch, the run's ref is
+# something else.
+default_branch_file_but_other_ref:
+  - event: workflow_dispatch
+    ref: Branch or tag that received dispatch
+    sha: "Last commit on the `GITHUB_REF` branch or tag"
+    source: *events
+    note: |-
+      UNVERIFIED: the docs say the file must exist on the default branch to show the button, and that it can then be dispatched "against any branch or tag". They do not state whether the workflow file executed is the default-branch copy or the copy on the dispatched ref.
+  - event: registry_package
+    ref: Branch or tag of the published package
+    sha: Commit of the published package
+    source: *events
+
+# push explicitly runs for workflow files NOT on the default branch.
+push_runs_from_any_branch:
+  source: *events
+  quote: |-
+    Runs your workflow when you push a commit or tag, or when you create a repository from a template. This includes workflows that are not merged into the default branch. For more information, see Events that trigger workflows.
