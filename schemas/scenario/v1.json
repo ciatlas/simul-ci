@@ -38,6 +38,9 @@
       "exclusiveMinimum": 0,
       "maximum": 9007199254740991
     },
+    "merged": {
+      "type": "boolean"
+    },
     "sha": {
       "type": "string",
       "pattern": "^[0-9a-f]{7,40}$"
@@ -162,6 +165,10 @@
       "type": "object",
       "properties": {
         "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "branch": {
           "type": "string",
           "minLength": 1
         },
