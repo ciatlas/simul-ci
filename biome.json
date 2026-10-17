@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
   "files": {
-    "includes": ["**", "!**/dist", "!**/coverage", "!fixtures"]
+    "includes": ["**", "!**/dist", "!**/coverage", "!fixtures", "!schemas"]
   },
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 110 },
   "javascript": { "formatter": { "quoteStyle": "single", "semicolons": "always", "trailingCommas": "all" } },
