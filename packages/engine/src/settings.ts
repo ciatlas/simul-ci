@@ -114,50 +114,75 @@ function readJobs(context: TemplateContext, token: TemplateToken): Record<string
   if (!isMapping(token)) return jobs;
   for (const item of token) {
     if (!isString(item.key)) continue;
-    const id = item.key.value;
-    const job: JobSettings = { id, if: DEFAULT_IF, steps: [] };
-    jobs[id] = job;
-    if (!isMapping(item.value)) continue;
-    for (const prop of item.value) {
-      const key = isString(prop.key) ? prop.key.value : undefined;
-      const value = prop.value;
-      if (key === 'if') job.if = readIf(context, value);
-      else if (key === 'continue-on-error') job.continueOnError = readBoolean(context, value, key);
-      else if (key === 'timeout-minutes') job.timeoutMinutes = readNumber(context, value, key);
-      else if (key === 'concurrency') job.concurrency = readConcurrency(value);
-      else if (key === 'strategy') readStrategy(context, value, job);
-      else if (key === 'steps') job.steps = readSteps(context, value);
-    }
+    const job: JobSettings = { id: item.key.value, if: DEFAULT_IF, steps: [] };
+    jobs[job.id] = job;
+    if (isMapping(item.value))
+      for (const prop of item.value) readJobProperty(context, job, keyOf(prop.key), prop.value);
   }
   return jobs;
+}
+
+function readJobProperty(
+  context: TemplateContext,
+  job: JobSettings,
+  key: string | undefined,
+  value: TemplateToken,
+): void {
+  switch (key) {
+    case 'if':
+      job.if = readIf(context, value);
+      break;
+    case 'continue-on-error':
+      job.continueOnError = readBoolean(context, value, key);
+      break;
+    case 'timeout-minutes':
+      job.timeoutMinutes = readNumber(context, value, key);
+      break;
+    case 'concurrency':
+      job.concurrency = readConcurrency(value);
+      break;
+    case 'strategy':
+      readStrategy(context, value, job);
+      break;
+    case 'steps':
+      job.steps = readSteps(context, value);
+      break;
+    default:
+      break;
+  }
 }
 
 function readStrategy(context: TemplateContext, token: TemplateToken, job: JobSettings): void {
   if (!isMapping(token)) return;
   for (const prop of token) {
-    const key = isString(prop.key) ? prop.key.value : undefined;
+    const key = keyOf(prop.key);
     if (key === 'fail-fast') job.failFast = readBoolean(context, prop.value, key);
     else if (key === 'max-parallel') job.maxParallel = readNumber(context, prop.value, key);
   }
 }
 
+/** Steps are numbered by their position in the sequence, whatever the converter makes of each. */
 function readSteps(context: TemplateContext, token: TemplateToken): StepSettings[] {
   if (!isSequence(token)) return [];
   const steps: StepSettings[] = [];
-  let index = 0;
   for (const item of token) {
-    const step: StepSettings = { index, if: DEFAULT_IF };
+    const step: StepSettings = { index: steps.length, if: DEFAULT_IF };
     steps.push(step);
-    index++;
-    if (!isMapping(item)) continue;
-    for (const prop of item) {
-      const key = isString(prop.key) ? prop.key.value : undefined;
-      if (key === 'if') step.if = readIf(context, prop.value);
-      else if (key === 'continue-on-error') step.continueOnError = readBoolean(context, prop.value, key);
-      else if (key === 'timeout-minutes') step.timeoutMinutes = readNumber(context, prop.value, key);
-    }
+    if (isMapping(item))
+      for (const prop of item) readStepProperty(context, step, keyOf(prop.key), prop.value);
   }
   return steps;
+}
+
+function readStepProperty(
+  context: TemplateContext,
+  step: StepSettings,
+  key: string | undefined,
+  value: TemplateToken,
+): void {
+  if (key === 'if') step.if = readIf(context, value);
+  else if (key === 'continue-on-error') step.continueOnError = readBoolean(context, value, key);
+  else if (key === 'timeout-minutes') step.timeoutMinutes = readNumber(context, value, key);
 }
 
 /**
@@ -174,23 +199,21 @@ function readIf(context: TemplateContext, token: TemplateToken): string {
 }
 
 function readConcurrency(token: TemplateToken): Concurrency {
-  const out: Concurrency = {};
-  if (isMapping(token)) {
-    for (const prop of token) {
-      const key = isString(prop.key) ? prop.key.value : undefined;
-      if (key === 'group') {
-        const group = scalarText(prop.value);
-        if (group !== undefined) out.group = group;
-      } else if (key === 'cancel-in-progress') {
-        const value = literal(prop.value);
-        if (typeof value === 'boolean' || (typeof value === 'object' && value !== null))
-          out.cancelInProgress = value;
-      }
-    }
-    return out;
+  if (!isMapping(token)) {
+    const group = scalarText(token);
+    return group === undefined ? {} : { group };
   }
-  const group = scalarText(token);
-  if (group !== undefined) out.group = group;
+  const out: Concurrency = {};
+  for (const prop of token) {
+    const key = keyOf(prop.key);
+    if (key === 'group') {
+      const group = scalarText(prop.value);
+      if (group !== undefined) out.group = group;
+    } else if (key === 'cancel-in-progress') {
+      const value = literal(prop.value);
+      if (typeof value === 'boolean' || isExpression(value)) out.cancelInProgress = value;
+    }
+  }
   return out;
 }
 
@@ -200,7 +223,7 @@ function readBoolean(
   key: string,
 ): boolean | Expression | undefined {
   const value = literal(token);
-  if (typeof value === 'boolean' || (typeof value === 'object' && value !== null)) return value;
+  if (typeof value === 'boolean' || isExpression(value)) return value;
   if (value === 'true' || value === 'false') return value === 'true';
   context.error(token, `'${key}' must be a boolean or an expression`);
   return undefined;
@@ -212,12 +235,17 @@ function readNumber(
   key: string,
 ): number | Expression | undefined {
   const value = literal(token);
-  if (typeof value === 'number' || (typeof value === 'object' && value !== null)) return value;
+  if (typeof value === 'number' || isExpression(value)) return value;
   if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))
     return Number(value);
   context.error(token, `'${key}' must be a number or an expression`);
   return undefined;
 }
+
+const keyOf = (token: TemplateToken): string | undefined => (isString(token) ? token.value : undefined);
+
+const isExpression = (value: unknown): value is Expression =>
+  typeof value === 'object' && value !== null && 'expression' in value;
 
 /** A scalar's value: the literal, or the expression it is. */
 function literal(token: TemplateToken): string | number | boolean | Expression | null {

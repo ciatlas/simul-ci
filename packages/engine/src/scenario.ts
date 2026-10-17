@@ -31,6 +31,8 @@ export const ActorSchema = z.strictObject({
 export const WorkflowRunSchema = z.strictObject({
   /** The `name:` of the workflow whose run triggers this one. */
   name: z.string().min(1),
+  /** The branch the triggering run ran on (`workflow_run` `branches` filters read it). */
+  branch: z.string().min(1).optional(),
   conclusion: z.enum(['success', 'failure', 'cancelled', 'skipped']).default('success'),
 });
 
@@ -57,6 +59,8 @@ export const ScenarioInputSchema = z.strictObject({
   head: z.string().min(1).optional(),
   /** The pull request (or issue) number. */
   number: z.number().int().positive().optional(),
+  /** For `pull_request` `closed`: the pull request was merged (its ref is then the base branch). */
+  merged: z.boolean().optional(),
   /** The head commit. */
   sha: z
     .string()
@@ -113,6 +117,7 @@ export interface Scenario {
   /** `github.head_ref`, set for pull requests. */
   headRef?: string;
   number?: number;
+  merged?: boolean;
   sha?: string;
   defaultBranch: string;
   repository?: string;
@@ -124,7 +129,11 @@ export interface Scenario {
   secrets: string[];
   environments?: string[];
   cron?: string;
-  workflow_run?: { name: string; conclusion: 'success' | 'failure' | 'cancelled' | 'skipped' };
+  workflow_run?: {
+    name: string;
+    branch?: string;
+    conclusion: 'success' | 'failure' | 'cancelled' | 'skipped';
+  };
   platform: Platform;
 }
 
@@ -136,6 +145,8 @@ export class ScenarioError extends Error {
 const PULL_MERGE_REF_EVENTS = new Set(['pull_request', 'pull_request_review', 'pull_request_review_comment']);
 /** The events whose `github.ref` is the pull request's base branch. */
 const PULL_BASE_REF_EVENTS = new Set(['pull_request_target']);
+/** The events about a pull request or merge group: they carry `baseRef` and `headRef`. */
+const PULL_EVENTS = new Set([...PULL_MERGE_REF_EVENTS, ...PULL_BASE_REF_EVENTS, 'merge_group']);
 
 /** Writes a ref the way `github.ref` spells it. A bare name is a branch: a tag needs `tag:` or `refs/tags/`. */
 export function fullRef(ref: string): string {
@@ -160,16 +171,6 @@ export function parseScenario(input: unknown): Scenario {
 }
 
 export function normalizeScenario(input: z.output<typeof ScenarioInputSchema>): Scenario {
-  const given = [input.ref, input.branch, input.tag].filter((v) => v !== undefined);
-  if (given.length > 1) throw new ScenarioError('give one of ref, branch or tag');
-  const own = input.tag
-    ? `refs/tags/${input.tag}`
-    : input.branch
-      ? `refs/heads/${input.branch}`
-      : input.ref
-        ? fullRef(input.ref)
-        : undefined;
-
   const scenario: Scenario = {
     id: '',
     event: input.event,
@@ -179,30 +180,11 @@ export function normalizeScenario(input: z.output<typeof ScenarioInputSchema>): 
     vars: input.vars,
     secrets: input.secrets,
     platform: input.platform,
+    ...optionals(input),
   };
-  if (input.action !== undefined) scenario.action = input.action;
-  if (input.number !== undefined) scenario.number = input.number;
-  if (input.sha !== undefined) scenario.sha = input.sha;
-  if (input.repository !== undefined) scenario.repository = input.repository;
-  if (input.message !== undefined) scenario.message = input.message;
-  if (input.changed !== undefined)
-    scenario.changed = input.changed.map((c) =>
-      typeof c === 'string' ? { path: c, status: 'modified' } : c,
-    );
-  if (input.environments !== undefined) scenario.environments = input.environments;
-  if (input.cron !== undefined) scenario.cron = input.cron;
-  if (input.workflow_run !== undefined) scenario.workflow_run = input.workflow_run;
-
-  const ref = resolveRef(input, own);
-  if (ref !== undefined) {
-    scenario.ref = ref;
-    Object.assign(scenario, refParts(ref));
-  }
-  if (
-    PULL_MERGE_REF_EVENTS.has(input.event) ||
-    PULL_BASE_REF_EVENTS.has(input.event) ||
-    input.event === 'merge_group'
-  ) {
+  const ref = resolveRef(input, ownRef(input));
+  if (ref !== undefined) Object.assign(scenario, { ref }, refParts(ref));
+  if (PULL_EVENTS.has(input.event)) {
     scenario.baseRef = input.base ?? input.defaultBranch;
     if (input.head !== undefined) scenario.headRef = input.head;
   }
@@ -210,20 +192,65 @@ export function normalizeScenario(input: z.output<typeof ScenarioInputSchema>): 
   return scenario;
 }
 
-/** `github.ref` for the event: the merge ref of a pull request, the base of a `pull_request_target`, the tag of a release, the ref given, else the default branch. */
+const OPTIONAL_KEYS = [
+  'action',
+  'number',
+  'merged',
+  'sha',
+  'repository',
+  'message',
+  'environments',
+  'cron',
+  'workflow_run',
+] as const;
+
+/** The optional facts, copied only when given, so the echo never carries explicit undefineds. */
+function optionals(input: z.output<typeof ScenarioInputSchema>): Partial<Scenario> {
+  const out: Record<string, unknown> = {};
+  for (const key of OPTIONAL_KEYS) if (input[key] !== undefined) out[key] = input[key];
+  if (input.changed !== undefined)
+    out.changed = input.changed.map((c) => (typeof c === 'string' ? { path: c, status: 'modified' } : c));
+  return out as Partial<Scenario>;
+}
+
+/** The ref the author gave, through `ref:`, `branch:` or `tag:`. */
+function ownRef(input: z.output<typeof ScenarioInputSchema>): string | undefined {
+  const given = [input.ref, input.branch, input.tag].filter((v) => v !== undefined);
+  if (given.length > 1) throw new ScenarioError('give one of ref, branch or tag');
+  if (input.tag !== undefined) return `refs/tags/${input.tag}`;
+  if (input.branch !== undefined) return `refs/heads/${input.branch}`;
+  return input.ref === undefined ? undefined : fullRef(input.ref);
+}
+
+/** `github.ref` for the event: what the pull request rules say, else the ref given, else the default branch. */
 function resolveRef(
   input: z.output<typeof ScenarioInputSchema>,
   own: string | undefined,
 ): string | undefined {
-  const { event } = input;
-  if (PULL_MERGE_REF_EVENTS.has(event)) return `refs/pull/${input.number ?? 1}/merge`;
-  if (PULL_BASE_REF_EVENTS.has(event)) return `refs/heads/${input.base ?? input.defaultBranch}`;
-  if (event === 'merge_group')
-    return own ?? `refs/heads/gh-readonly-queue/${input.base ?? input.defaultBranch}`;
-  if (event === 'release') return own?.startsWith('refs/tags/') ? own : undefined;
+  const pull = pullRequestRef(input, own);
+  if (pull !== undefined) return pull;
+  // A release runs on its tag; without one the ref is unknown.
+  if (input.event === 'release') return own?.startsWith('refs/tags/') ? own : undefined;
   // Every other event runs on the ref given, else on the default branch's last commit.
   return own ?? `refs/heads/${input.defaultBranch}`;
 }
+
+/** The merge ref of a pull request, the base branch of a `pull_request_target` or a merged pull request, the queue ref of a merge group. */
+function pullRequestRef(
+  input: z.output<typeof ScenarioInputSchema>,
+  own: string | undefined,
+): string | undefined {
+  const { event } = input;
+  const baseName = input.base ?? input.defaultBranch;
+  if (event === 'merge_group') return own ?? `refs/heads/gh-readonly-queue/${baseName}`;
+  if (PULL_BASE_REF_EVENTS.has(event)) return `refs/heads/${baseName}`;
+  if (!PULL_MERGE_REF_EVENTS.has(event)) return undefined;
+  return closedByMerge(input) ? `refs/heads/${baseName}` : `refs/pull/${input.number ?? 1}/merge`;
+}
+
+/** A pull request closed by a merge runs on the branch it was merged into. */
+const closedByMerge = (input: z.output<typeof ScenarioInputSchema>): boolean =>
+  input.event === 'pull_request' && input.action === 'closed' && input.merged === true;
 
 function scenarioId(s: Scenario): string {
   const event = s.action ? `${s.event}.${s.action}` : s.event;
