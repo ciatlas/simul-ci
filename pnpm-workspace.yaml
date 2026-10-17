@@ -6,3 +6,6 @@ packages:
 # node_modules/.pnpm directory. pnpm shortens such names past 60 characters on Windows and past 120 elsewhere;
 # 120 everywhere keeps a bundle the same whatever system builds it.
 virtualStoreDirMaxLength: 120
+# esbuild (behind vitest, vite and tsx) installs its platform binary in a build script.
+allowBuilds:
+  esbuild: true
