@@ -3,6 +3,7 @@ export * from './evaluate';
 export * from './filters';
 export * from './plan/index';
 export * from './planner';
+export * from './render/index';
 export * from './scenario';
 export * from './schemas';
 export * from './settings';
