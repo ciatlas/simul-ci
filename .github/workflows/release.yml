@@ -2,7 +2,8 @@ name: Release
 # Every push to main updates the release pull request (version bump and changelog from Conventional Commits) and
 # rebuilds the action bundle on it, since the version is compiled in. Merging that pull request tags the release and
 # creates the GitHub release; this workflow then publishes the simulci package to npm (trusted publishing, with
-# provenance), moves the floating tag of the action (v0.N before 1.0, vN after) and smoke-tests the published package.
+# provenance), smoke-tests the published package, publishes the draft release and moves the floating tag of the action
+# (v0.N before 1.0, vN after).
 on:
   push:
     branches: [main]
@@ -200,11 +201,45 @@ jobs:
             npm publish --provenance --access public --tag previous
           fi
 
+  publish-release:
+    # release-please creates the release as a draft (release-please-config.json: draft, force-tag-creation), so it is
+    # public only once the package is on npm and the published package passed its smoke test.
+    name: Publish the release
+    needs: [resolve, npm, smoke-published]
+    if: ${{ !cancelled() && needs.npm.result == 'success' && needs.smoke-published.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+        run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          case "$draft" in
+            true) ;;
+            false) echo "$TAG is already published."; exit 0 ;;
+            *) echo "::error::cannot tell whether $TAG is a draft ($draft)"; exit 1 ;;
+          esac
+          if [ "$PRERELEASE" = true ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            # Latest only when this is the newest stable release: completing an older draft must not demote a newer one.
+            tags=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*.*.*')
+            newest=$(cut -f2 <<< "$tags" | cut -d/ -f3- | grep -v -e '-' | sort -V | tail -n 1)
+            [ -n "$newest" ] || { echo "::error::cannot list the release tags"; exit 1; }
+            latest=false
+            if [ "$newest" = "$TAG" ]; then latest=true; fi
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isLatest --jq '"published: draft=\(.isDraft) latest=\(.isLatest)"'
+
   major-tag:
     name: Move the floating tag
-    # `uses: ciatlas/simulci@v0.1` follows the newest release of its line; only once the package is published.
-    needs: [resolve, npm]
-    if: ${{ !cancelled() && needs.npm.result == 'success' && needs.resolve.outputs.prerelease == 'false' }}
+    # `uses: ciatlas/simulci@v0.1` follows the newest release of its line; only once the release is public.
+    needs: [resolve, publish-release]
+    if: ${{ !cancelled() && needs.publish-release.result == 'success' && needs.resolve.outputs.prerelease == 'false' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
