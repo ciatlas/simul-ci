@@ -143,7 +143,7 @@ export function renderMarkdownReport(
   for (const item of failed.slice(0, max)) {
     lines.push(
       '',
-      `<details><summary>${EMOJI.failed} ${md(item.name)} — ${md(item.failures[0]!.headline)}</summary>`,
+      `<details><summary>${EMOJI.failed} ${inline(item.name)} — ${inline(item.failures[0]!.headline)}</summary>`,
       '',
       '```',
     );
@@ -155,7 +155,10 @@ export function renderMarkdownReport(
 }
 
 /** A table cell: backslashes and pipes escaped, newlines flattened. */
-const md = (s: string): string => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+const md = (s: string): string => html(s).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+/** Text inside the raw HTML of a summary line: tags and entities escaped, newlines flattened. */
+const inline = (s: string): string => html(s).replace(/\n/g, ' ');
+const html = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export function renderJUnit(result: RunResult): string {
   const suites = result.files.map(suite);
