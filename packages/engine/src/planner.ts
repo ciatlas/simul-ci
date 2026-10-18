@@ -78,8 +78,9 @@ import { schemaUrl, VERSION } from './version';
  */
 
 export interface SimulateOptions {
-  /** Repository files by path (`.github/workflows/ci.yml`, `.github/actions/x/action.yml`, …). */
-  files: Record<string, string>;
+  /** Repository files by path (`.github/workflows/ci.yml`, `.github/actions/x/action.yml`, …), or a project loaded with `loadFiles`. */
+  files?: Record<string, string>;
+  project?: LoadedProject;
   scenario: ScenarioInput;
   detail?: 'legs' | 'steps';
   /** `owner/name`, for `uses:` references to this repository. */
@@ -88,23 +89,29 @@ export interface SimulateOptions {
   maxDepth?: number;
 }
 
-export function simulate(opts: SimulateOptions): RunPlan {
-  const scenario = parseScenario(opts.scenario);
-  const repository = opts.repository ?? scenario.repository;
+/** A project loaded once, to simulate many scenarios against (the app, the test runner, the lab). */
+export interface LoadedProject {
+  index: ProjectIndex;
+  files: Record<string, string>;
+  /** Run settings per workflow path, read on first use. */
+  settings: Map<string, WorkflowSettings>;
+}
+
+/** Loads the workflows and local actions of a repository snapshot (files by repository-relative path). */
+export function loadFiles(files: Record<string, string>, repository?: string): LoadedProject {
   const project = loadProject({
     root: '.',
-    fs: memoryFileSystem(opts.files),
+    fs: memoryFileSystem(files),
     ...(repository === undefined ? {} : { repository }),
     validateSchema: false,
   });
-  const planner = new Planner(
-    new ProjectIndex(project),
-    opts.files,
-    scenario,
-    opts.detail ?? 'steps',
-    opts.maxDepth ?? 10,
-  );
-  return planner.run();
+  return { index: new ProjectIndex(project), files, settings: new Map() };
+}
+
+export function simulate(opts: SimulateOptions): RunPlan {
+  const scenario = parseScenario(opts.scenario);
+  const loaded = opts.project ?? loadFiles(opts.files ?? {}, opts.repository ?? scenario.repository);
+  return new Planner(loaded, scenario, opts.detail ?? 'steps', opts.maxDepth ?? 10).run();
 }
 
 interface WorkflowContext {
@@ -153,15 +160,16 @@ interface StepsResult {
 class Planner {
   private readonly unknowns = new Map<string, Unknown>();
   private readonly diagnostics: Diagnostic[] = [];
-  private readonly settings = new Map<string, WorkflowSettings>();
+  private readonly index: ProjectIndex;
 
   constructor(
-    private readonly index: ProjectIndex,
-    private readonly files: Record<string, string>,
+    private readonly loaded: LoadedProject,
     private readonly scenario: Scenario,
     private readonly detail: 'legs' | 'steps',
     private readonly maxDepth: number,
-  ) {}
+  ) {
+    this.index = loaded.index;
+  }
 
   run(): RunPlan {
     const workflows = [...this.index.project.workflows.values()].sort((a, b) => a.path.localeCompare(b.path));
@@ -220,10 +228,10 @@ class Planner {
   }
 
   private settingsOf(wf: WorkflowDecl): WorkflowSettings {
-    let s = this.settings.get(wf.path);
+    let s = this.loaded.settings.get(wf.path);
     if (!s) {
-      s = readSettings(wf.path, this.files[wf.path] ?? wf.source.text);
-      this.settings.set(wf.path, s);
+      s = readSettings(wf.path, this.loaded.files[wf.path] ?? wf.source.text);
+      this.loaded.settings.set(wf.path, s);
     }
     return s;
   }

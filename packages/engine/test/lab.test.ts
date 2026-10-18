@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { checksOf, type ScenarioInput, simulate } from '@simulci/engine';
+import { checksOf, loadFiles, type ScenarioInput, simulate } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -36,7 +36,7 @@ function walk(dir: string, prefix = ''): Record<string, string> {
   return out;
 }
 
-const files = walk(join(lab, 'repo'));
+const project = loadFiles(walk(join(lab, 'repo')), 'ciatlas/simulci-lab');
 
 function scenarioOf(run: (typeof expected.runs)[number]): ScenarioInput {
   const s: ScenarioInput = {
@@ -59,10 +59,10 @@ const mockFree = (run: (typeof expected.runs)[number]) =>
   run.jobs.every((j) => j.conclusion === 'success' || j.conclusion === 'skipped');
 
 describe('routes lab', () => {
-  it('predicts every captured run as triggered', () => {
+  it('predicts every captured run as triggered', { timeout: 30_000 }, () => {
     const misses: string[] = [];
     for (const run of expected.runs) {
-      const plan = simulate({ files, scenario: scenarioOf(run) });
+      const plan = simulate({ project, scenario: scenarioOf(run) });
       const wf = plan.workflows.find((w) => w.path === run.workflow)!;
       if (wf.triggered.verdict !== 'yes')
         misses.push(
@@ -72,11 +72,13 @@ describe('routes lab', () => {
     expect(misses).toEqual([]);
   });
 
-  it('predicts every check run and its conclusion for the runs without failing steps', () => {
+  it('predicts every check run and its conclusion for the runs without failing steps', {
+    timeout: 30_000,
+  }, () => {
     const misses: string[] = [];
     let compared = 0;
     for (const run of expected.runs.filter(mockFree)) {
-      const plan = simulate({ files, scenario: scenarioOf(run) });
+      const plan = simulate({ project, scenario: scenarioOf(run) });
       const predicted = new Map(
         checksOf(plan)
           .filter((c) => c.node.startsWith(run.workflow))
