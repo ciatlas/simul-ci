@@ -184,11 +184,22 @@ function heredocValue(
   return { value: undefined, next: lines.length };
 }
 
-/** The argument text of an `echo` or `printf` command, else null. */
+/** The argument text of an `echo` or `printf` command, else null (no regex over the flags: that backtracks). */
 function echoed(line: string): string | null {
-  const m = /^\s*(?:echo(?:\s+-[neE]+)*|printf(?:\s+['"]%s\\n['"])?)\s+(.*)$/.exec(line.trim());
-  return m ? m[1]!.trim() : null;
+  let rest = line.trim();
+  if (rest.startsWith('printf')) {
+    rest = rest.slice('printf'.length);
+    const format = /^\s+['"]%s\\n['"]/.exec(rest);
+    if (format) rest = rest.slice(format[0].length);
+  } else if (rest.startsWith('echo')) {
+    rest = rest.slice('echo'.length);
+    for (let flag = ECHO_FLAG.exec(rest); flag; flag = ECHO_FLAG.exec(rest))
+      rest = rest.slice(flag[0].length);
+  } else return null;
+  return /^\s/.test(rest) ? rest.trim() : null;
 }
+
+const ECHO_FLAG = /^\s+-[neE]+(?=\s|$)/;
 
 /** The literal a shell word denotes, or undefined when the shell would expand something in it. */
 function literalValue(text: string): string | undefined {
