@@ -1,0 +1,26 @@
+# Case 15 - step-timeout: outcome and conclusion of a step that hits timeout-minutes.
+name: case-step-timeout
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: sleep
+        id: t
+        timeout-minutes: 1
+        run: sleep 90
+      - name: probe
+        if: always()
+        run: |
+          echo "probe: steps.t.outcome=${{ steps.t.outcome }}"
+          echo "probe: steps.t.conclusion=${{ steps.t.conclusion }}"
+          echo "probe: job.status=${{ job.status }}"
+      - name: on failure
+        if: failure()
+        run: 'echo "probe: if-failure=ran"'
+      - name: on cancelled
+        if: cancelled()
+        run: 'echo "probe: if-cancelled=ran"'
+      - name: on success
+        if: success()
+        run: 'echo "probe: if-success=ran"'

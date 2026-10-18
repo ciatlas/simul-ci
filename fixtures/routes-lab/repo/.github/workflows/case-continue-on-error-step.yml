@@ -1,0 +1,22 @@
+# Case 5 - continue-on-error-step: outcome vs conclusion of a step that fails under continue-on-error.
+name: case-continue-on-error-step
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail
+        id: f
+        continue-on-error: true
+        run: exit 1
+      - name: probe
+        run: |
+          echo "probe: steps.f.outcome=${{ steps.f.outcome }}"
+          echo "probe: steps.f.conclusion=${{ steps.f.conclusion }}"
+          echo "probe: job.status=${{ job.status }}"
+      - name: on failure
+        if: failure()
+        run: 'echo "probe: if-failure=ran"'
+      - name: on success
+        if: success()
+        run: 'echo "probe: if-success=ran"'

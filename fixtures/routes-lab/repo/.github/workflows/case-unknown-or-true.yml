@@ -1,0 +1,54 @@
+# Case 17 - unknown-or-true: `||` and `&&` with a missing variable, and a missing input compared to ''.
+name: case-unknown-or-true
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      present:
+        description: a declared input (inputs.missing is never declared)
+        type: string
+        default: declared-default
+jobs:
+  or:
+    if: ${{ vars.DOES_NOT_EXIST || true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: or=ran"'
+  and:
+    if: ${{ vars.DOES_NOT_EXIST && true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: and=ran"'
+  inputs-missing:
+    if: ${{ inputs.missing == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: inputs-missing=ran"'
+  steps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: step or
+        if: ${{ vars.DOES_NOT_EXIST || true }}
+        run: 'echo "probe: step-or=ran"'
+      - name: step and
+        if: ${{ vars.DOES_NOT_EXIST && true }}
+        run: 'echo "probe: step-and=ran"'
+      - name: step inputs missing
+        if: ${{ inputs.missing == '' }}
+        run: 'echo "probe: step-inputs-missing=ran"'
+      - name: probe
+        env:
+          INPUTS: ${{ toJSON(inputs) }}
+          VARS: ${{ toJSON(vars) }}
+        run: |
+          echo "probe: event=${{ github.event_name }}"
+          echo "probe: vars.DOES_NOT_EXIST=${{ vars.DOES_NOT_EXIST }}"
+          echo "probe: or-value=${{ vars.DOES_NOT_EXIST || true }}"
+          echo "probe: and-value=${{ vars.DOES_NOT_EXIST && true }}"
+          echo "probe: inputs.missing=${{ inputs.missing }}"
+          echo "probe: inputs.present=${{ inputs.present }}"
+          echo "probe: inputs=$(jq -c . <<< "$INPUTS")"
+          echo "probe: vars=$(jq -c . <<< "$VARS")"

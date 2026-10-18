@@ -1,0 +1,11 @@
+# Case 18 - filter-paths-ignore: on.push.paths-ignore. Skipped when every changed file is under docs/**.
+name: case-filter-paths-ignore
+on:
+  push:
+    paths-ignore: ['docs/**']
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: ref=${{ github.ref }}"'

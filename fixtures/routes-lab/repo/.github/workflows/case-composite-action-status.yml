@@ -1,0 +1,24 @@
+# Case 13 - composite-action-status: a composite whose first step fails, used under continue-on-error.
+name: case-composite-action-status
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+      - name: use composite
+        id: u
+        uses: ./.github/actions/comp
+        continue-on-error: true
+      - name: probe
+        run: |
+          echo "probe: steps.u.outcome=${{ steps.u.outcome }}"
+          echo "probe: steps.u.conclusion=${{ steps.u.conclusion }}"
+          echo "probe: job.status=${{ job.status }}"
+      - name: on failure
+        if: failure()
+        run: 'echo "probe: if-failure=ran"'
+      - name: on success
+        if: success()
+        run: 'echo "probe: if-success=ran"'

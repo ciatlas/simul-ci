@@ -1,0 +1,38 @@
+# Case 12 - grandparent-outputs: whether needs.<id> reaches a job that needs it only transitively.
+# p tests it in a job-level if, q in a step-level if and by echoing the value and toJSON(needs).
+name: case-grandparent-outputs
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    outputs:
+      v: hello
+    steps:
+      - name: probe
+        run: 'echo "probe: a=ran"'
+  m:
+    needs: a
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.outputs.v=${{ needs.a.outputs.v }}"'
+  p:
+    needs: m
+    if: needs.a.outputs.v == 'hello'
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: p=ran"'
+  q:
+    needs: m
+    runs-on: ubuntu-latest
+    steps:
+      - name: step if on grandparent
+        if: needs.a.outputs.v == 'hello'
+        run: 'echo "probe: if-grandparent=ran"'
+      - name: probe
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "probe: needs.a.outputs.v=${{ needs.a.outputs.v }}"
+          echo "probe: needs=$(jq -c . <<< "$NEEDS")"

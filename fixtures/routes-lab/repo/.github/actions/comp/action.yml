@@ -1,0 +1,20 @@
+name: comp
+description: A composite action whose first step fails (case 13).
+runs:
+  using: composite
+  steps:
+    - name: inner fail
+      shell: bash
+      run: exit 1
+    - name: inner on failure
+      if: failure()
+      shell: bash
+      run: 'echo "probe: inner-if-failure=ran"'
+    - name: inner on success
+      if: success()
+      shell: bash
+      run: 'echo "probe: inner-if-success=ran"'
+    - name: inner always
+      if: always()
+      shell: bash
+      run: 'echo "probe: inner-if-always=ran"'

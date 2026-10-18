@@ -1,0 +1,42 @@
+# Case 14 - fail-fast-cancelled: dependents of a fail-fast matrix whose other legs were cancelled.
+name: case-fail-fast-cancelled
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        n: [1, 2, 3]
+    steps:
+      - name: leg
+        run: |
+          if [ "${{ matrix.n }}" = "2" ]; then exit 1; fi
+          sleep 60
+  b:
+    needs: a
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  c:
+    needs: a
+    if: cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  d:
+    needs: a
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
+  e:
+    needs: a
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.a.result=${{ needs.a.result }}"'
