@@ -17,8 +17,11 @@ import {
   skippedCheckName,
   type WorkflowDecl,
 } from '@ciatlas/core';
+import { z } from 'zod';
 import type { ContextState, NeedState, StepState } from './contexts';
 import { type Condition, evaluateCondition, evaluateValue, stringOf } from './evaluate';
+import { type AssumeEntry, AssumeListSchema, type Facts, type MockLayers, MockResolver } from './mocks/index';
+import type { Location, LocationLink } from './paths';
 import {
   callNodeId,
   compositeNodeId,
@@ -30,6 +33,7 @@ import {
 } from './plan/ids';
 import type {
   ActionPlan,
+  AppliedMock,
   Decision,
   Diagnostic,
   IfReason,
@@ -87,6 +91,14 @@ export interface SimulateOptions {
   repository?: string;
   /** How deep reusable workflows may nest (GitHub: ten levels). */
   maxDepth?: number;
+  /** Mocks for this run (the `case` layer): what opaque steps and jobs produce. */
+  assume?: AssumeEntry[];
+  /** Mocks by layer, when a caller distinguishes them (a test file's `given`, a command line). */
+  mocks?: MockLayers;
+}
+
+export class MocksError extends Error {
+  override name = 'MocksError';
 }
 
 /** A project loaded once, to simulate many scenarios against (the app, the test runner, the lab). */
@@ -111,11 +123,26 @@ export function loadFiles(files: Record<string, string>, repository?: string): L
 export function simulate(opts: SimulateOptions): RunPlan {
   const scenario = parseScenario(opts.scenario);
   const loaded = opts.project ?? loadFiles(opts.files ?? {}, opts.repository ?? scenario.repository);
-  return new Planner(loaded, scenario, opts.detail ?? 'steps', opts.maxDepth ?? 10).run();
+  const layers: MockLayers = { ...opts.mocks };
+  if (opts.assume) layers.case = [...(layers.case ?? []), ...opts.assume];
+  for (const layer of ['given', 'case', 'cli'] as const) {
+    const parsed = AssumeListSchema.safeParse(layers[layer] ?? []);
+    if (!parsed.success) throw new MocksError(`invalid ${layer} mocks:\n${z.prettifyError(parsed.error)}`);
+    layers[layer] = parsed.data;
+  }
+  return new Planner(
+    loaded,
+    scenario,
+    opts.detail ?? 'steps',
+    opts.maxDepth ?? 10,
+    new MockResolver(layers),
+  ).run();
 }
 
 interface WorkflowContext {
   depth: number;
+  /** The jobs and steps above this workflow when it is called. */
+  chain?: LocationLink[];
   caller?: NodeId;
   triggered?: Decision;
   inputs?: Record<string, Value<Json>>;
@@ -135,6 +162,7 @@ interface JobContext {
   planned: Map<string, JobPlan>;
   depth: number;
   checkPrefix: string;
+  chain: LocationLink[];
 }
 
 interface LegContext extends JobContext {
@@ -152,14 +180,25 @@ interface Segment {
   certain: boolean;
 }
 
+interface StepProduct {
+  outcome: Value<Result>;
+  outputs: Record<string, Value<string>>;
+  open: boolean;
+  composite?: ActionPlan;
+  envWrites: Record<string, Value<string>>;
+}
+
 interface StepsResult {
   plans: StepPlan[];
   conclusions: Value<Result>[];
+  /** The `steps` context after the last step, for the job's `outputs:`. */
+  steps: Record<string, StepState>;
 }
 
 class Planner {
   private readonly unknowns = new Map<string, Unknown>();
   private readonly diagnostics: Diagnostic[] = [];
+  private readonly applied: AppliedMock[] = [];
   private readonly index: ProjectIndex;
 
   constructor(
@@ -167,6 +206,7 @@ class Planner {
     private readonly scenario: Scenario,
     private readonly detail: 'legs' | 'steps',
     private readonly maxDepth: number,
+    private readonly mocks: MockResolver,
   ) {
     this.index = loaded.index;
   }
@@ -184,28 +224,37 @@ class Planner {
       unknowns: [...this.unknowns.values()].sort(
         (a, b) => b.affects.length - a.affects.length || a.id.localeCompare(b.id),
       ),
-      mocks: [],
+      mocks: this.applied,
       models: [],
-      diagnostics: this.diagnostics,
+      diagnostics: this.finishDiagnostics(),
     };
+  }
+
+  /** The mocks' own diagnostics, plus the entries that named nothing in this plan (SC102). */
+  private finishDiagnostics(): Diagnostic[] {
+    const out = [...this.diagnostics, ...this.mocks.diagnostics];
+    for (const c of this.mocks.unmatched()) {
+      out.push({
+        severity: 'error',
+        code: 'SC102',
+        message: `${c.ref} matches nothing in this plan`,
+        mock: c.ref,
+      });
+    }
+    return out;
   }
 
   // --- workflows ---------------------------------------------------------------------------------------------------
 
   private planWorkflow(wf: WorkflowDecl, ctx: WorkflowContext): WorkflowPlan {
-    const settings = this.settingsOf(wf);
-    const id = ctx.caller === undefined ? wf.path : callNodeId(ctx.caller, wf.path);
-    this.settingsDiagnostics(settings, wf.path, id);
-    const scenario = ctx.secrets === undefined ? this.scenario : { ...this.scenario, secrets: ctx.secrets };
-    const triggered = ctx.triggered ?? this.triggerDecision(settings, id);
-    const inputs = ctx.inputs ?? dispatchInputs(wf, scenario);
+    const setup = this.setupWorkflow(wf, ctx);
+    const { id, settings, scenario, triggered, inputs, wfName } = setup;
     const plan = workflowShell(wf, id, settings, triggered, inputs, ctx);
     if (triggered.verdict === 'no') return plan;
-    const wfName = wf.name ?? wf.path;
     const base: ContextState = { scenario, workflow: wfName, inputs };
     const wfEnv = this.bindings(wf.env, base);
     const planned = new Map<string, JobPlan>();
-    const jobCtx = {
+    const jobCtx: Omit<JobContext, 'settings'> = {
       wf,
       wfNode: id,
       wfName,
@@ -216,6 +265,7 @@ class Planner {
       planned,
       depth: ctx.depth,
       checkPrefix: ctx.checkPrefix,
+      chain: ctx.chain ?? [],
     };
     for (const jobId of topoOrder(wf)) {
       const settingsOfJob = settings.jobs[jobId] ?? { id: jobId, if: 'success()', steps: [] };
@@ -225,6 +275,17 @@ class Planner {
     plan.conclusion = runConclusion(plan.jobs.map((j) => j.result));
     plan.outputs = this.callOutputs(wf, plan, { ...base, env: wfEnv });
     return plan;
+  }
+
+  /** The workflow's settings, node id, scenario (a callee sees the secrets it is given), trigger decision and inputs. */
+  private setupWorkflow(wf: WorkflowDecl, ctx: WorkflowContext) {
+    const settings = this.settingsOf(wf);
+    const id = ctx.caller === undefined ? wf.path : callNodeId(ctx.caller, wf.path);
+    this.settingsDiagnostics(settings, wf.path, id);
+    const scenario = ctx.secrets === undefined ? this.scenario : { ...this.scenario, secrets: ctx.secrets };
+    const triggered = ctx.triggered ?? this.triggerDecision(settings, id);
+    const inputs = ctx.inputs ?? dispatchInputs(wf, scenario);
+    return { settings, id, scenario, triggered, inputs, wfName: wf.name ?? wf.path };
   }
 
   private settingsOf(wf: WorkflowDecl): WorkflowSettings {
@@ -298,9 +359,102 @@ class Planner {
       total: exp.combos.length || 1,
     };
     plan.legs = this.legsOf(job, exp, segments, legCtx);
+    this.failFast(plan, job);
     plan.result = this.jobResultOf(runs, cond, continueOnError, plan.legs);
     plan.outputs = this.jobOutputs(job, plan, jobNode);
+    this.applyJobFacts(job, plan, continueOnError, {
+      workflow: ctx.wf.path,
+      chain: [...ctx.chain, { kind: 'job', id: job.id }],
+    });
     return plan;
+  }
+
+  /** A mock on the job: its outcome applies at the job boundary (the steps stay planned), its outputs overlay. */
+  private applyJobFacts(
+    job: JobDecl,
+    plan: JobPlan,
+    continueOnError: Value<boolean>,
+    location: Location,
+  ): void {
+    const facts = this.mocks.factsFor(location, plan.id);
+    if (facts.outcome) {
+      const result = jobResult({ skipped: false, continueOnError, legResults: [facts.outcome.value] });
+      plan.result =
+        plan.runs.verdict === 'maybe'
+          ? unknown(plan.result.known ? [] : plan.result.unknowns, ['skipped', ...(candidates(result) ?? [])])
+          : result;
+      this.record(facts.outcome.by, plan.id, 'outcome');
+      if (job.steps.length)
+        this.diagnostics.push({
+          severity: 'info',
+          code: 'SC108',
+          message: `${facts.outcome.by} sets the outcome of job ${job.id}; its steps are planned as written`,
+          node: plan.id,
+          mock: facts.outcome.by,
+        });
+    }
+    const declared = job.uses ? Object.keys(plan.outputs) : Object.keys(job.outputs);
+    this.overlayOutputs(plan.outputs, facts, plan.id, {
+      closed: true,
+      names: declared,
+      what: `job ${job.id}`,
+    });
+  }
+
+  /** Fail-fast: once a leg fails, the other legs are cancelled or finish first; `needs` reads the job as failed either way. */
+  private failFast(plan: JobPlan, job: JobDecl): void {
+    if (!plan.matrix?.failFast.known || !plan.matrix.failFast.value) return;
+    if (!plan.legs.some((l) => l.result.known && l.result.value === 'failure')) return;
+    for (const leg of plan.legs) {
+      if (!leg.result.known || leg.result.value !== 'success') continue;
+      const id = `race:fail-fast:${leg.id}`;
+      const matrix = Object.fromEntries(
+        Object.entries(leg.values).map(([k, v]) => [k, v.known ? String(v.value) : '?']),
+      );
+      this.register(
+        {
+          id,
+          kind: 'race',
+          reads: [],
+          affects: [],
+          pin: { layer: 'assume', fragment: { job: job.id, matrix, outcome: 'cancelled' }, at: ['assume'] },
+        },
+        undefined,
+      );
+      leg.result = unknown([id], ['success', 'cancelled']);
+    }
+  }
+
+  /** Mocked outputs over the unit's own; a name a closed interface does not declare is an error (SC101). */
+  private overlayOutputs(
+    outputs: Record<string, Value<string>>,
+    facts: Facts,
+    node: NodeId,
+    iface: { closed: boolean; names: string[]; what: string },
+  ): void {
+    for (const [name, fact] of Object.entries(facts.outputs)) {
+      if (iface.closed && !iface.names.includes(name)) {
+        this.diagnostics.push({
+          severity: 'error',
+          code: 'SC101',
+          message: `${fact.by} sets output '${name}', which ${iface.what} does not declare${iface.names.length ? ` (it declares ${iface.names.join(', ')})` : ''}`,
+          node,
+          mock: fact.by,
+        });
+      }
+      outputs[name] = fact.value.known ? { ...fact.value, by: fact.by } : fact.value;
+      this.record(fact.by, node, `outputs.${name}`);
+    }
+  }
+
+  private record(ref: string, at: NodeId, provides: string): void {
+    const existing = this.applied.find((m) => m.ref === ref && m.at === at);
+    if (existing) {
+      if (!existing.provides.includes(provides)) existing.provides.push(provides);
+      return;
+    }
+    const layer = ref.startsWith('given') ? 'given' : ref.startsWith('cli') ? 'cli' : 'case';
+    this.applied.push({ ref, layer, at, provides: [provides] });
   }
 
   /** The job-level `if:` under the workflow's trigger, with the status functions answered from the direct needs. */
@@ -430,10 +584,16 @@ class Planner {
       return leg;
     }
     leg.check = { name: `${ctx.checkPrefix}${seg.name}`, certain: seg.certain };
-    const steps = this.planSteps(job.steps, ctx.settings.steps, legId, runs, state, undefined);
+    const legLink: LocationLink = { kind: 'job', id: job.id };
+    if (combo)
+      legLink.leg = Object.fromEntries(
+        Object.entries(leg.values).map(([k, v]) => [k, v.known ? String(v.value) : '?']),
+      );
+    const location: Location = { workflow: ctx.wf.path, chain: [...ctx.chain, legLink] };
+    const steps = this.planSteps(job.steps, ctx.settings.steps, legId, runs, state, undefined, location);
     if (this.detail === 'steps') leg.steps = steps.plans;
     leg.result = legResult(steps.conclusions);
-    leg.outputs = this.outputsOf(job.outputs, state);
+    leg.outputs = this.outputsOf(job.outputs, { ...state, steps: steps.steps });
     return leg;
   }
 
@@ -480,8 +640,14 @@ class Planner {
     }
     const inputs = callInputs(job, callee, state);
     for (const v of Object.values(inputs)) this.noteValue(v);
+    const callLink: LocationLink = { kind: 'job', id: job.id };
+    if (Object.keys(leg.values).length)
+      callLink.leg = Object.fromEntries(
+        Object.entries(leg.values).map(([k, v]) => [k, v.known ? String(v.value) : '?']),
+      );
     leg.call = this.planWorkflow(callee, {
       depth: ctx.depth + 1,
+      chain: [...ctx.chain, callLink],
       caller: leg.id,
       triggered: {
         verdict: leg.runs.verdict,
@@ -526,21 +692,28 @@ class Planner {
     parentRuns: Decision,
     state: ContextState,
     inputs: Record<string, Value<Json>> | undefined,
+    parent: Location,
   ): StepsResult {
     const taken = new Set<string>();
-    const out: StepsResult = { plans: [], conclusions: [] };
     const stepsState: Record<string, StepState> = {};
+    const out: StepsResult = { plans: [], conclusions: [], steps: stepsState };
     let status: Value<JobStatus> = known('success');
+    // `$GITHUB_ENV` writes a mock states reach the steps after it.
+    let written: Record<string, Value<string>> = {};
     for (const step of steps) {
       const sid = stepNodeId(parentId, stepKeyOf(step, taken));
+      const link: LocationLink = { kind: 'step', index: step.index + 1 };
+      if (step.id !== undefined) link.id = step.id;
+      if (step.uses) link.uses = step.uses.raw;
+      const location: Location = { workflow: parent.workflow, chain: [...parent.chain, link] };
       const stepState: ContextState = {
         ...state,
         steps: stepsState,
         status,
-        env: { ...state.env, ...this.bindings(step.env, state) },
+        env: { ...state.env, ...written, ...this.bindings(step.env, state) },
       };
       if (inputs) stepState.inputs = inputs;
-      const { plan, open } = this.planStep(
+      const { plan, open, envWrites } = this.planStep(
         step,
         settings[step.index],
         sid,
@@ -548,7 +721,9 @@ class Planner {
         parentRuns,
         stepState,
         status,
+        location,
       );
+      written = { ...written, ...envWrites };
       out.plans.push(plan);
       if (step.id !== undefined)
         stepsState[step.id] = {
@@ -572,7 +747,8 @@ class Planner {
     parentRuns: Decision,
     state: ContextState,
     status: Value<JobStatus>,
-  ): { plan: StepPlan; open: boolean } {
+    location: Location,
+  ): { plan: StepPlan; open: boolean; envWrites: Record<string, Value<string>> } {
     const evaluated = st?.if ?? impliedIf(step);
     const cond = evaluateCondition(evaluated, state, stepStatusFunctions(status));
     const parent: Reason = { kind: 'parent', node: parentId, verdict: parentRuns.verdict };
@@ -588,15 +764,23 @@ class Planner {
     if (runs.verdict === 'maybe') this.noteValue(cond.value, sid);
     const continueOnError = this.setting(st?.continueOnError, false, `${sid}.continue-on-error`);
     const action = step.uses ? this.index.actionOf(step) : undefined;
-    const { outcome, outputs, open, composite } = this.stepOutcome(step, action, sid, runs, cond, state);
+    const { outcome, outputs, open, composite, envWrites } = this.stepOutcome(
+      step,
+      action,
+      sid,
+      runs,
+      cond,
+      state,
+      location,
+    );
     const plan = stepShell(step, sid, parentId, runs, outcome, continueOnError, outputs);
     plan.with = this.bindings(step.with, state);
     plan.env = this.bindings(step.env, state);
     if (composite) plan.composite = composite;
-    return { plan, open };
+    return { plan, open, envWrites };
   }
 
-  /** What a step produces: skipped when it does not run; else success with its outputs unknown, or a composite's inner result. */
+  /** What a step produces: skipped when it does not run; else as mocked or success, with outputs; a composite's inner steps decide unless mocked. */
   private stepOutcome(
     step: StepDecl,
     action: ActionDecl | undefined,
@@ -604,26 +788,77 @@ class Planner {
     runs: Decision,
     cond: Condition,
     state: ContextState,
-  ): {
-    outcome: Value<Result>;
-    outputs: Record<string, Value<string>>;
-    open: boolean;
-    composite?: ActionPlan;
-  } {
-    if (runs.verdict === 'no') return { outcome: known('skipped'), outputs: {}, open: false };
+    location: Location,
+  ): StepProduct {
+    if (runs.verdict === 'no') return { outcome: known('skipped'), outputs: {}, open: false, envWrites: {} };
+    const facts = this.mocks.factsFor(location, sid, step.uses?.raw);
+    const envWrites = this.envWritesOf(facts, sid);
+    const { produced, base } = this.producedOutcome(facts, runs, cond, sid);
+    if (action?.using === 'composite') {
+      return {
+        ...this.compositeProduct(action, step, sid, state, runs, location, facts, produced, base),
+        envWrites,
+      };
+    }
+    const opaque = this.opaqueOutputs(step, action, sid);
+    const what = step.run !== undefined ? 'the script' : `action ${step.uses?.raw ?? ''}`;
+    this.overlayOutputs(opaque.outputs, facts, sid, {
+      closed: !opaque.open,
+      names: Object.keys(opaque.outputs),
+      what,
+    });
+    return { outcome: base, ...opaque, envWrites };
+  }
+
+  private envWritesOf(facts: Facts, sid: NodeId): Record<string, Value<string>> {
+    const envWrites: Record<string, Value<string>> = {};
+    for (const [name, fact] of Object.entries(facts.env)) {
+      envWrites[name] = fact.value;
+      this.record(fact.by, sid, `env.${name}`);
+    }
+    return envWrites;
+  }
+
+  /** The outcome as mocked, else success; a `maybe` step may also have been skipped. */
+  private producedOutcome(
+    facts: Facts,
+    runs: Decision,
+    cond: Condition,
+    sid: NodeId,
+  ): { produced: Value<Result>; base: Value<Result> } {
+    const produced: Value<Result> = facts.outcome ? facts.outcome.value : known('success');
+    if (facts.outcome) this.record(facts.outcome.by, sid, 'outcome');
     const base: Value<Result> =
       runs.verdict === 'yes'
-        ? known('success')
-        : unknown(cond.value.known ? [] : cond.value.unknowns, ['success', 'skipped']);
-    if (action?.using === 'composite') {
-      const composite = this.planComposite(action, step, sid, state, runs);
-      const inner = legResult(composite.steps.map((s) => s.conclusion));
-      const outcome = combine([base, inner] as Value<Result>[], ([o, i]) =>
-        o === 'skipped' ? 'skipped' : (i as Result),
-      );
-      return { outcome, outputs: composite.outputs, open: false, composite };
-    }
-    return { outcome: base, ...this.opaqueOutputs(step, action, sid) };
+        ? produced
+        : unknown(cond.value.known ? [] : cond.value.unknowns, [...(candidates(produced) ?? []), 'skipped']);
+    return { produced, base };
+  }
+
+  /** A composite action under its step: a mocked outcome makes it opaque, otherwise its inner steps decide. */
+  private compositeProduct(
+    action: ActionDecl,
+    step: StepDecl,
+    sid: NodeId,
+    state: ContextState,
+    runs: Decision,
+    location: Location,
+    facts: Facts,
+    produced: Value<Result>,
+    base: Value<Result>,
+  ): Omit<StepProduct, 'envWrites'> {
+    const composite = this.planComposite(action, step, sid, state, runs, location);
+    const inner = facts.outcome ? produced : legResult(composite.steps.map((s) => s.conclusion));
+    const outcome = combine([base, inner] as Value<Result>[], ([o, i]) =>
+      o === 'skipped' ? 'skipped' : (i as Result),
+    );
+    const outputs = { ...composite.outputs };
+    this.overlayOutputs(outputs, facts, sid, {
+      closed: true,
+      names: Object.keys(action.outputs),
+      what: `action ${action.path}`,
+    });
+    return { outcome, outputs, open: false, composite };
   }
 
   /** The outputs an opaque step may set: a script's literal names, a local action's declared ones; the rest open. */
@@ -656,6 +891,7 @@ class Planner {
     stepNode: NodeId,
     state: ContextState,
     runs: Decision,
+    location: Location,
   ): ActionPlan {
     const id = compositeNodeId(stepNode, action.path);
     const given = this.bindings(step.with, state);
@@ -670,6 +906,7 @@ class Planner {
       runs,
       { ...state, steps: {}, status: known('success') },
       inputs,
+      location,
     );
     const steps = Object.fromEntries(
       inner.plans

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { checksOf, loadFiles, type ScenarioInput, simulate } from '@simulci/engine';
+import { type AssumeEntry, checksOf, loadFiles, type ScenarioInput, simulate } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -55,8 +55,20 @@ function scenarioOf(run: (typeof expected.runs)[number]): ScenarioInput {
   return s;
 }
 
-const mockFree = (run: (typeof expected.runs)[number]) =>
-  run.jobs.every((j) => j.conclusion === 'success' || j.conclusion === 'skipped');
+/** What the runner knew and the simulator cannot: which scripted steps fail (cases.md). */
+const ASSUME: Record<string, AssumeEntry[]> = {
+  'case-continue-on-error-job.yml': [{ step: 'a.#1', outcome: 'failure' }],
+  'case-continue-on-error-step.yml': [{ step: 'a.f', outcome: 'failure' }],
+  'case-matrix-aggregate.yml': [
+    { step: 'a[n=2].#1', outcome: 'failure' },
+    { step: 'v[n=2].#1', outcome: 'failure' },
+  ],
+  'case-matrix-one-failed.yml': [{ step: 'a[n=2].#1', outcome: 'failure' }],
+  'case-fail-fast-cancelled.yml': [{ step: 'a[n=2].#1', outcome: 'failure' }],
+  'case-step-timeout.yml': [{ step: 'a.t', outcome: 'failure' }],
+  'case-composite-action-status.yml': [{ step: 'a.u/#1', outcome: 'failure' }],
+};
+const assumeFor = (workflow: string) => ASSUME[workflow.replace(/^.*\//, '')] ?? [];
 
 describe('routes lab', () => {
   it('predicts every captured run as triggered', { timeout: 30_000 }, () => {
@@ -72,30 +84,41 @@ describe('routes lab', () => {
     expect(misses).toEqual([]);
   });
 
-  it('predicts every check run and its conclusion for the runs without failing steps', {
-    timeout: 30_000,
-  }, () => {
+  it('predicts every check run and its conclusion, given which steps fail', { timeout: 30_000 }, () => {
     const misses: string[] = [];
     let compared = 0;
-    for (const run of expected.runs.filter(mockFree)) {
-      const plan = simulate({ project, scenario: scenarioOf(run) });
-      const predicted = new Map(
-        checksOf(plan)
-          .filter((c) => c.node.startsWith(run.workflow))
-          .map((c) => [c.name, c]),
-      );
-      for (const check of run.checks) {
-        if (!check.name || !predicted.has(check.name)) continue;
-        compared++;
-        const p = predicted.get(check.name)!;
-        const expectedRuns = check.conclusion === 'skipped' ? 'no' : 'yes';
-        if (p.runs !== expectedRuns)
-          misses.push(
-            `${run.workflow} [${run.event} ${run.ref}] ${check.name}: predicted ${p.runs}, was ${check.conclusion}`,
-          );
-      }
+    for (const run of expected.runs) {
+      const plan = simulate({ project, scenario: scenarioOf(run), assume: assumeFor(run.workflow) });
+      for (const d of plan.diagnostics)
+        if (d.severity === 'error') misses.push(`${run.workflow}: ${d.code} ${d.message}`);
+      compared += compareChecks(run, plan, misses);
     }
     expect(misses).toEqual([]);
-    expect(compared).toBeGreaterThan(100);
+    expect(compared).toBeGreaterThan(300);
   });
 });
+
+/** Compares the plan's check runs with the captured ones by name: run or skipped, and the conclusion when known. */
+function compareChecks(
+  run: (typeof expected.runs)[number],
+  plan: ReturnType<typeof simulate>,
+  misses: string[],
+): number {
+  const predicted = new Map(
+    checksOf(plan)
+      .filter((c) => c.node.startsWith(run.workflow))
+      .map((c) => [c.name, c]),
+  );
+  let compared = 0;
+  for (const check of run.checks) {
+    const p = check.name ? predicted.get(check.name) : undefined;
+    if (!p) continue;
+    compared++;
+    const where = `${run.workflow} [${run.event} ${run.ref}] ${check.name}`;
+    const expectedRuns = check.conclusion === 'skipped' ? 'no' : 'yes';
+    if (p.runs !== expectedRuns) misses.push(`${where}: predicted ${p.runs}, was ${check.conclusion}`);
+    else if (p.result.known && p.result.value !== check.conclusion)
+      misses.push(`${where}: predicted ${p.result.value}, was ${check.conclusion}`);
+  }
+  return compared;
+}
