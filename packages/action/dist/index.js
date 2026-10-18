@@ -31649,7 +31649,9 @@ function parseWorkflow(entryFile, contextOrTrace) {
 		value: readTemplate(context, WORKFLOW_ROOT, reader, fileId)
 	};
 }
-(/* @__PURE__ */ __commonJSMin(((exports, module) => {
+//#endregion
+//#region ../../node_modules/.pnpm/cronstrue@2.59.0/node_modules/cronstrue/dist/cronstrue.js
+var require_cronstrue = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	(function webpackUniversalModuleDefinition(root, factory) {
 		if (typeof exports === "object" && typeof module === "object") module.exports = factory();
 		else if (typeof define === "function" && define.amd) define("cronstrue", [], factory);
@@ -32509,7 +32511,9 @@ function parseWorkflow(entryFile, contextOrTrace) {
 			return __webpack_exports__;
 		})();
 	});
-})))();
+}));
+//#endregion
+//#region ../../node_modules/.pnpm/@actions+workflow-parser@0.3.61/node_modules/@actions/workflow-parser/dist/model/converter/cron-constants.js
 const MONTHS = {
 	jan: 1,
 	feb: 2,
@@ -32555,8 +32559,7 @@ const DOW_RANGE = {
 	max: 6,
 	names: DAYS
 };
-//#endregion
-//#region ../../node_modules/.pnpm/@actions+workflow-parser@0.3.61/node_modules/@actions/workflow-parser/dist/model/converter/cron.js
+require_cronstrue();
 function isValidCron(cron) {
 	const parts = cron.split(/ +/);
 	if (parts.length != 5) return false;
@@ -35252,6 +35255,12 @@ function* product(lists) {
 	const [first, ...rest] = lists;
 	for (const value of first) for (const tail of product(rest)) yield [value, ...tail];
 }
+/** A value in GitHub's string form: `null` is empty, objects are JSON, the rest `String()`. */
+function stringOf(value) {
+	if (value === null) return "";
+	if (typeof value === "object") return JSON.stringify(value);
+	return String(value);
+}
 //#endregion
 //#region ../engine/src/contexts.ts
 /** The value of a context reference, with the unknown that explains a missing value. */
@@ -35646,11 +35655,6 @@ function evaluateValue(text, state, status) {
 	return unknown$1(unknowns.length ? unknowns : [`expression:${text}`]);
 }
 /** A value as GitHub writes it into a string: `null` is empty, objects are JSON. */
-function stringOf(value) {
-	if (value === null) return "";
-	if (typeof value === "object") return JSON.stringify(value);
-	return String(value);
-}
 /**
 * A script with its `${{ }}` segments replaced by their values, for folding what it writes; a segment the plan cannot
 * evaluate becomes `UNKNOWN_MARKER`, which taints any write that includes it.
