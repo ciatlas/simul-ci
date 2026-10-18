@@ -75,6 +75,16 @@
           "jsonpath": "$.version"
         },
         {
+          "type": "json",
+          "path": "packages/node/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/action/package.json",
+          "jsonpath": "$.version"
+        },
+        {
           "type": "generic",
           "path": "packages/engine/src/version.ts"
         }

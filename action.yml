@@ -1,0 +1,76 @@
+name: simulci
+description: 'Route tests for GitHub Actions workflows: what runs, skips and why, for a scenario, without running anything.'
+author: Ruman Kazi
+branding:
+  icon: map
+  color: purple
+
+inputs:
+  mode:
+    description: '`test` runs the route tests under .github/simulci/tests and fails the step when they do; `plan` prints the plan for `scenario`.'
+    required: false
+    default: test
+  working-directory:
+    description: Directory holding the `.github` folder, relative to the workspace.
+    required: false
+    default: '.'
+  files:
+    description: 'Test files to run, one per line, relative to working-directory. Empty runs every *.test.yml under .github/simulci/tests.'
+    required: false
+    default: ''
+  filter:
+    description: Run only the cases whose name contains this text.
+    required: false
+    default: ''
+  assume:
+    description: 'Mocks for every case or for the plan, one per line: `build.unit=failure`, `build.unit.outputs.sha=abc`, `build.cache=as:hit`, or a YAML mapping.'
+    required: false
+    default: ''
+  strict:
+    description: Ignore `allowMaybe` and fail on stale snapshots.
+    required: false
+    default: 'false'
+  annotations:
+    description: Annotate failures on the test files and the workflow lines that decided.
+    required: false
+    default: 'true'
+  summary:
+    description: Write the report (or the plan) to the job summary.
+    required: false
+    default: 'true'
+  title:
+    description: The heading of the job summary.
+    required: false
+    default: ''
+  junit:
+    description: Write a JUnit report to this path, relative to the workspace.
+    required: false
+    default: ''
+  scenario:
+    description: 'In plan mode: the scenario as a YAML mapping, e.g. `{ event: pull_request, base: main, head: feat/x, changed: [src/a.ts] }`.'
+    required: false
+    default: ''
+  format:
+    description: 'In plan mode: what the log shows, `text`, `json` or `mermaid` (the summary always has text and the graph).'
+    required: false
+    default: text
+
+outputs:
+  passed:
+    description: Cases that passed.
+  failed:
+    description: Cases that failed.
+  invalid:
+    description: Cases and files that are invalid (a schema error, a selector that names nothing, a mock conflict).
+  skipped:
+    description: Cases skipped.
+  exit-code:
+    description: 'What `simulci test` would exit with: 0, 1 when a case failed, 2 when something is invalid (or the action stopped early).'
+  junit:
+    description: Absolute path of the JUnit report, when `junit` was set.
+  triggered:
+    description: In plan mode, how many workflows the scenario triggers.
+
+runs:
+  using: node24
+  main: packages/action/dist/index.js

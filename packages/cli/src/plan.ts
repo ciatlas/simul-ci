@@ -10,8 +10,7 @@ import {
   simulate,
 } from '@simulci/engine';
 import { defineCommand } from 'citty';
-import { AssumeError, parseAssume } from './assume';
-import { readWorkflowFiles } from './files';
+import { AssumeError, parseAssume, readWorkflowFiles } from '@simulci/node';
 
 /** The `simulci plan` arguments as citty parses them. */
 export interface PlanArgs {

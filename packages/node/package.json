@@ -1,0 +1,22 @@
+{
+  "name": "@simulci/node",
+  "version": "0.0.0",
+  "private": true,
+  "description": "What simulci needs from Node.js: the workflow files of a checkout, test discovery, snapshot files, command-line mocks.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@simulci/engine": "workspace:*",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  }
+}

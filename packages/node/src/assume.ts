@@ -15,7 +15,7 @@ export class AssumeError extends Error {
 export function parseAssume(items: string[], fileText?: string): AssumeEntry[] {
   const entries: unknown[] = items.map(parseOne);
   if (fileText !== undefined) {
-    const list: unknown = parse(fileText);
+    const list = yaml(fileText, 'the assume file');
     if (!Array.isArray(list)) throw new AssumeError('an assume file is a YAML list of entries');
     entries.push(...list);
   }
@@ -26,7 +26,7 @@ export function parseAssume(items: string[], fileText?: string): AssumeEntry[] {
 
 function parseOne(text: string): unknown {
   const trimmed = text.trim();
-  if (trimmed.startsWith('{')) return parse(trimmed);
+  if (trimmed.startsWith('{')) return yaml(trimmed, `'${text}'`);
   const eq = trimmed.indexOf('=');
   if (eq === -1)
     throw new AssumeError(
@@ -35,9 +35,19 @@ function parseOne(text: string): unknown {
   const left = trimmed.slice(0, eq);
   const value = trimmed.slice(eq + 1);
   const field = /^(.+)\.(outputs|env)\.([^.=]+)$/.exec(left);
-  if (field) return { step: field[1], [field[2]!]: { [field[3]!]: value } };
+  if (field) return { ...unitOf(field[1]!), [field[2]!]: { [field[3]!]: value } };
   if (value.startsWith('as:')) return { ...unitOf(left), as: value.slice(3) };
   return { ...unitOf(left), outcome: value };
+}
+
+/** YAML, or an AssumeError naming what could not be read. */
+function yaml(text: string, what: string): unknown {
+  try {
+    return parse(text);
+  } catch (e) {
+    const reason = e instanceof Error ? (e.message.split('\n')[0] ?? e.message) : String(e);
+    throw new AssumeError(`${what} is not valid YAML: ${reason}`);
+  }
 }
 
 /** A path with a step names a step; a bare job id names the job. */

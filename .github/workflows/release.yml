@@ -1,13 +1,24 @@
 name: Release
-# Every push to main updates the release pull request (version bump and changelog from Conventional Commits).
-# Merging it tags the release (vX.Y.Z) and creates the GitHub release. Publishing the simulci package to npm is added
-# with the CLI.
+# Every push to main updates the release pull request (version bump and changelog from Conventional Commits) and
+# rebuilds the action bundle on it, since the version is compiled in. Merging that pull request tags the release and
+# creates the GitHub release; this workflow then publishes the simulci package to npm (trusted publishing, with
+# provenance), smoke-tests the published package, publishes the draft release and moves the floating tag of the action
+# (v0.N before 1.0, vN after).
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish again (e.g. v0.2.0) when publishing failed
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+# Release jobs never read the Actions cache (no `cache:` in setup-node): a cache written by another run must not end up
+# in a published artifact.
 
 concurrency:
   group: release
@@ -16,9 +27,15 @@ concurrency:
 jobs:
   release-please:
     name: Release pull request
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    # Writes go through the ciatlas-release-bot app: unlike GITHUB_TOKEN, its pull requests start the usual workflows,
-    # so the release pull request gets the required checks like any other.
+    # Writes go through the ciatlas-release-bot app: unlike GITHUB_TOKEN, its pull requests, pushes and tags start the
+    # usual workflows, so the release pull request gets the required checks like any other.
+    permissions:
+      contents: read
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
     steps:
       - id: app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -28,8 +45,288 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
           token: ${{ steps.app.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # The release pull request changes the version, which is compiled into the committed action bundle.
+      - if: steps.rp.outputs.prs_created == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: true # pushes with the token below
+      - if: steps.rp.outputs.prs_created == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - if: steps.rp.outputs.prs_created == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+      - name: Rebuild the action bundle on the release branch
+        if: steps.rp.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BOT: ${{ steps.app.outputs.app-slug }}[bot]
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @simulci/action build
+          if [ -n "$(git status --porcelain packages/action/dist)" ]; then
+            git config user.name "$BOT"
+            git config user.email "$(gh api "/users/$BOT" --jq .id)+$BOT@users.noreply.github.com"
+            git add -A packages/action/dist
+            git commit -m "build(action): rebuild the bundle for the release"
+            git push
+          fi
+
+  resolve:
+    name: Resolve the release
+    needs: release-please
+    if: ${{ !cancelled() && (needs.release-please.outputs.created == 'true' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - id: tag
+        env:
+          TAG: ${{ needs.release-please.outputs.tag || inputs.tag }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::not a release tag: $TAG"
+            exit 1
+          fi
+          version="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+      - name: The tag exists
+        # Jobs check out refs/tags/<tag>; a branch of the same name must never stand in for the release.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent; then
+            echo "::error::$TAG is not a tag in this repository"
+            exit 1
+          fi
+
+  npm:
+    name: Publish to npm
+    needs: resolve
+    if: ${{ !cancelled() && needs.resolve.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: The tag matches every package version
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          for pkg in packages/engine packages/node packages/cli packages/action; do
+            actual=$(node -p "require('./$pkg/package.json').version")
+            if [ "$actual" != "$VERSION" ]; then
+              echo "::error file=$pkg/package.json::version $actual does not match the release $VERSION"
+              exit 1
+            fi
+          done
+          grep -q "VERSION = '$VERSION'" packages/engine/src/version.ts || { echo "::error file=packages/engine/src/version.ts::VERSION is not $VERSION"; exit 1; }
+      - name: Already published?
+        id: published
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          if npm view "simulci@$VERSION" version >/dev/null 2>&1; then
+            echo "simulci@$VERSION is already on npm; skipping the publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.published.outputs.skip != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter simulci build
+      - name: npm 11.5.1 or later (trusted publishing)
+        if: steps.published.outputs.skip != 'true'
+        # Node.js 24 ships a recent npm; fail clearly instead of installing an unpinned npm.
+        run: |
+          version=$(npm --version)
+          if ! node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$version"; then
+            echo "::error::npm $version cannot use trusted publishing (needs 11.5.1 or later)"
+            exit 1
+          fi
+      - name: npm publish (trusted publishing, with provenance)
+        if: steps.published.outputs.skip != 'true'
+        working-directory: packages/cli
+        # npm exchanges this job's OIDC identity for a short-lived publish token; the package's trusted publisher on
+        # npmjs.com names this repository, release.yml and the npm environment. A trusted publisher can only be added
+        # once the package exists, so the first publish of a new package name falls back to an NPM_TOKEN secret, which
+        # is deleted afterwards (unset, the variable is empty and unused).
+        env:
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          # devDependencies and scripts only build the package in this repository; where it is vendored into an npm
+          # workspace, npm cannot install their workspace:* packages. Then the files and the manifest are checked as CI
+          # checks them (scripts/check-pack.mjs).
+          npm pkg delete devDependencies scripts
+          node ../../scripts/check-pack.mjs
+          if [ "$PRERELEASE" = true ]; then
+            npm publish --provenance --access public --tag next
+            exit 0
+          fi
+          # `latest` only for the newest stable release: an older one completed after a newer one went out gets
+          # `previous` (npm refuses to move `latest` back without --tag).
+          tags=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*.*.*')
+          newest=$(cut -f2 <<< "$tags" | cut -d/ -f3- | grep -v -e '-' | sort -V | tail -n 1)
+          [ -n "$newest" ] || { echo "::error::cannot list the release tags"; exit 1; }
+          if [ "$newest" = "$TAG" ]; then
+            npm publish --provenance --access public --tag latest
+          else
+            npm publish --provenance --access public --tag previous
+          fi
+
+  publish-release:
+    # release-please creates the release as a draft (release-please-config.json: draft, force-tag-creation), so it is
+    # public only once the package is on npm and the published package passed its smoke test.
+    name: Publish the release
+    needs: [resolve, npm, smoke-published]
+    if: ${{ !cancelled() && needs.npm.result == 'success' && needs.smoke-published.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+        run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          case "$draft" in
+            true) ;;
+            false) echo "$TAG is already published."; exit 0 ;;
+            *) echo "::error::cannot tell whether $TAG is a draft ($draft)"; exit 1 ;;
+          esac
+          if [ "$PRERELEASE" = true ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            # Latest only when this is the newest stable release: completing an older draft must not demote a newer one.
+            tags=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*.*.*')
+            newest=$(cut -f2 <<< "$tags" | cut -d/ -f3- | grep -v -e '-' | sort -V | tail -n 1)
+            [ -n "$newest" ] || { echo "::error::cannot list the release tags"; exit 1; }
+            latest=false
+            if [ "$newest" = "$TAG" ]; then latest=true; fi
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isLatest --jq '"published: draft=\(.isDraft) latest=\(.isLatest)"'
+
+  major-tag:
+    name: Move the floating tag
+    # `uses: ciatlas/simulci@v0.1` follows the newest release of its line; only once the release is public.
+    needs: [resolve, publish-release]
+    if: ${{ !cancelled() && needs.publish-release.result == 'success' && needs.resolve.outputs.prerelease == 'false' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Release tags are protected by a ruleset that only the release bot bypasses (.github/rulesets/release-tags.json).
+      - id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: true # pushes and fetches with the token below
+      - name: Point the floating tag at the release
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BOT: ${{ steps.app.outputs.app-slug }}[bot]
+        run: |
+          git fetch --force --tags origin
+          # Before 1.0 each minor line gets its own tag (v0.2), as a minor release can change what is reported; from
+          # 1.0, the major (v1).
+          major="${TAG%%.*}"
+          if [ "$major" = v0 ]; then
+            rest="${TAG#v0.}"
+            float="v0.${rest%%.*}"
+          else
+            float="$major"
+          fi
+          # A re-publish of an older release must not move the floating tag backwards.
+          latest=$(git tag --list "$float.*" --sort=-v:refname | grep -v -- - | head -n 1)
+          if [ "$latest" != "$TAG" ]; then
+            echo "$TAG is not the latest $float release ($latest); leaving $float alone."
+            exit 0
+          fi
+          git config user.name "$BOT"
+          git config user.email "$(gh api "/users/$BOT" --jq .id)+$BOT@users.noreply.github.com"
+          git tag -fa "$float" -m "$float → $TAG" "$TAG^{commit}"
+          git push origin "refs/tags/$float" --force
+
+  smoke-published:
+    name: Smoke test the published package (${{ matrix.os }})
+    needs: [resolve, npm]
+    if: ${{ !cancelled() && needs.npm.result == 'success' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+      - name: Install the published package
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          cd "$RUNNER_TEMP"
+          # The registry can take a moment to serve a new version everywhere. --prefer-online revalidates npm's cached
+          # metadata on every attempt (the registry marks it fresh for 5 minutes, so a cached miss would repeat).
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            npm pack "simulci@$VERSION" --prefer-online --loglevel=error && break
+            echo "not available yet (attempt $attempt); retrying in 30s"
+            sleep 30
+          done
+          if [ ! -f "simulci-$VERSION.tgz" ]; then
+            echo "::error::simulci@$VERSION is still not available from the registry"
+            exit 1
+          fi
+          mkdir -p simulci-package
+          tar -xzf "simulci-$VERSION.tgz" -C simulci-package
+          cd simulci-package/package
+          npm link --ignore-scripts --no-audit --no-fund
+      - name: The command runs on this repository's workflows
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          simulci --version | grep -F "$VERSION"
+          simulci models
+          simulci plan --event push --branch main --changed packages/engine/src/x.ts | grep -F '● .github/workflows/ci.yml'
+          simulci test

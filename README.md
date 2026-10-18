@@ -14,9 +14,28 @@ Built on [`@ciatlas/core`](https://github.com/ciatlas/core), the workflow model 
 [flowpact](https://github.com/ciatlas/flowpact). flowpact answers what is true for every run (the wiring, values that
 arrive empty); simulci answers what this run does.
 
+## Use
+
+```sh
+npx simulci plan --event pull_request --base main --head feat/x --changed src/a.ts   # what runs, and why
+npx simulci plan --event push --branch main --as-test steps                           # the plan as a test case
+npx simulci test                                                                      # .github/simulci/tests/*.test.yml
+```
+
+In a workflow, the action runs the route tests (annotations on the test line and the workflow line that decided, a
+job summary, `junit`), or prints the plan of a scenario:
+
+```yaml
+- uses: ciatlas/simulci@v0.1
+- uses: ciatlas/simulci@v0.1
+  with:
+    mode: plan
+    scenario: '{ event: pull_request, base: main, head: feat/x, changed: [src/a.ts] }'
+```
+
 ## Status
 
-Bootstrapping. The engine, CLI and Action come first, then the web app, then the self-host image.
+The engine, the CLI and the action are the first release; the web app and the self-host image follow.
 
 ## Licences
 

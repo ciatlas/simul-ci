@@ -1,6 +1,8 @@
 node_modules/
 coverage/
 dist/
+# The action bundle runs straight from the repository (action.yml), so it is committed.
+!packages/action/dist/
 *.tsbuildinfo
 .DS_Store
 # Agent worktrees Claude Code creates inside the repository.
