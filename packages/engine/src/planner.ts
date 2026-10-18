@@ -192,6 +192,8 @@ interface LegContext extends JobContext {
 interface Segment {
   name: string;
   certain: boolean;
+  /** The check name with the matrix part elided, when the job has a matrix. */
+  stem?: string;
 }
 
 interface StepProduct {
@@ -441,7 +443,7 @@ class Planner {
       if (!leg.result.known || leg.result.value !== 'success') continue;
       const id = `race:fail-fast:${leg.id}`;
       const matrix = Object.fromEntries(
-        Object.entries(leg.values).map(([k, v]) => [k, v.known ? String(v.value) : '?']),
+        Object.entries(leg.values).map(([k, v]) => [k, v.known ? stringOf(v.value) : '?']),
       );
       this.register(
         {
@@ -609,7 +611,7 @@ class Planner {
     const legLink: LocationLink = { kind: 'job', id: job.id };
     if (combo)
       legLink.leg = Object.fromEntries(
-        Object.entries(leg.values).map(([k, v]) => [k, v.known ? String(v.value) : '?']),
+        Object.entries(leg.values).map(([k, v]) => [k, v.known ? stringOf(v.value) : '?']),
       );
     const location: Location = { workflow: ctx.wf.path, chain: [...ctx.chain, legLink] };
     const steps = this.planSteps(job.steps, ctx.settings.steps, legId, runs, state, undefined, location);
@@ -679,7 +681,7 @@ class Planner {
     const callLink: LocationLink = { kind: 'job', id: job.id };
     if (Object.keys(leg.values).length)
       callLink.leg = Object.fromEntries(
-        Object.entries(leg.values).map(([k, v]) => [k, v.known ? String(v.value) : '?']),
+        Object.entries(leg.values).map(([k, v]) => [k, v.known ? stringOf(v.value) : '?']),
       );
     leg.call = this.planWorkflow(callee, {
       depth: ctx.depth + 1,
@@ -735,7 +737,7 @@ class Planner {
     const out: StepsResult = { plans: [], conclusions: [], steps: stepsState };
     let status: Value<JobStatus> = known('success');
     // `$GITHUB_ENV` writes a mock states reach the steps after it.
-    let written: Record<string, Value<string>> = {};
+    const written: Record<string, Value<string>> = {};
     for (const step of steps) {
       const sid = stepNodeId(parentId, stepKeyOf(step, taken));
       const link: LocationLink = { kind: 'step', index: step.index + 1 };
@@ -759,7 +761,7 @@ class Planner {
         status,
         location,
       );
-      written = { ...written, ...envWrites };
+      Object.assign(written, envWrites);
       out.plans.push(plan);
       if (step.id !== undefined)
         stepsState[step.id] = {
@@ -939,7 +941,7 @@ class Planner {
     const folded = foldWrites(substituteTemplates(step.run ?? '', state), {
       unknownId: (n) => `${sid}.outputs.${n}`,
     });
-    for (const name of [...new Set([...step.writesOutputs.names, ...Object.keys(folded)])]) {
+    for (const name of new Set([...step.writesOutputs.names, ...Object.keys(folded)])) {
       const v = folded[name] ?? this.unknownOutput(sid, name);
       this.noteValue(v);
       outputs[name] = v;
@@ -1046,7 +1048,7 @@ class Planner {
   private bindings(bindings: Record<string, Binding>, state: ContextState): Record<string, Value<string>> {
     const out: Record<string, Value<string>> = {};
     for (const [name, b] of Object.entries(bindings)) {
-      const v = b.site ? evaluateValue(b.site.text, state) : known(stringOf(b.value as Json));
+      const v = b.site ? evaluateValue(b.site.text, state) : known(stringOf(b.value));
       this.noteValue(v);
       out[name] = v;
     }
@@ -1056,7 +1058,7 @@ class Planner {
   private bindingsJson(bindings: Record<string, Binding>, state: ContextState): Record<string, Value<Json>> {
     const out: Record<string, Value<Json>> = {};
     for (const [name, b] of Object.entries(bindings)) {
-      const v: Value<Json> = b.site ? evaluateValue(b.site.text, state) : known(b.value as Json);
+      const v: Value<Json> = b.site ? evaluateValue(b.site.text, state) : known(b.value);
       this.noteValue(v);
       out[name] = v;
     }
@@ -1141,7 +1143,7 @@ function jobShell(
   continueOnError: Value<boolean>,
   segments: Segment[],
 ): JobPlan {
-  const segment = segments[0] as (Segment & { stem?: string }) | undefined;
+  const segment = segments[0];
   const plan: JobPlan = {
     id: jobNode,
     jobId: job.id,
@@ -1210,7 +1212,7 @@ function legValues(combo: Combination | undefined, legId: NodeId): Record<string
   return Object.fromEntries(
     Object.entries(combo.values).map(([k, c]) => [
       k,
-      c.known ? known(c.value as Json) : unknown([`${legId}.matrix.${k}`]),
+      c.known ? known(c.value) : unknown([`${legId}.matrix.${k}`]),
     ]),
   );
 }
@@ -1264,7 +1266,7 @@ function callInputs(job: JobDecl, callee: WorkflowDecl, state: ContextState): Re
       out[name] = inputDefault(decl);
       continue;
     }
-    const v: Value<Json> = b.site ? evaluateValue(b.site.text, state) : known(b.value as Json);
+    const v: Value<Json> = b.site ? evaluateValue(b.site.text, state) : known(b.value);
     out[name] = v.known ? known(coerceInput(decl, v.value)) : v;
   }
   return out;
@@ -1274,7 +1276,7 @@ function callInputs(job: JobDecl, callee: WorkflowDecl, state: ContextState): Re
 function inputDefault(decl: InputDecl): Value<Json> {
   if (decl.hasDefault) {
     if (decl.defaultSite) return unknown([`inputs.${decl.name}.default`]);
-    return known(coerceInput(decl, (decl.default ?? null) as Json));
+    return known(coerceInput(decl, decl.default ?? null));
   }
   return known(decl.type === 'boolean' ? false : decl.type === 'number' ? 0 : '');
 }
@@ -1326,7 +1328,7 @@ function topoOrder(wf: WorkflowDecl): string[] {
   const ids = Object.keys(wf.jobs);
   const done = new Set<string>();
   const order: string[] = [];
-  for (let progress = true; progress; ) {
+  for (let progress = true; progress;) {
     progress = false;
     for (const id of ids) {
       if (done.has(id) || !wf.jobs[id]!.needs.every((n) => done.has(n.id) || !(n.id in wf.jobs))) continue;

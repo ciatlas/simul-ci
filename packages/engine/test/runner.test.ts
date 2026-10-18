@@ -46,10 +46,9 @@ const project = loadFiles({ '.github/workflows/ci.yml': ci });
 const run = (text: string, options = {}) => runTests(project, [{ path: 't.test.yml', text }], options);
 const headlines = (text: string, options = {}) => {
   const r = run(text, options);
-  return r.files.flatMap((f) => [
-    ...f.failures.map((x) => x.headline),
-    ...f.cases.flatMap((c) => c.failures.map((x) => x.headline)),
-  ]);
+  return r.files.flatMap((f) =>
+    f.failures.map((x) => x.headline).concat(f.cases.flatMap((c) => c.failures.map((x) => x.headline))),
+  );
 };
 
 const passing = `
@@ -305,12 +304,12 @@ cases:
       ['skipped', 'only elsewhere'],
       ['skipped', 'flaky'],
     ]);
-    const ci = run(text, { ci: true });
-    expect(ci.files[0]!.failures[0]!.headline).toBe(
+    const underCi = run(text, { ci: true });
+    expect(underCi.files[0]!.failures[0]!.headline).toBe(
       'T104 only left in a test file (CI=true runs every case)',
     );
-    expect(ci.files[0]!.cases.map((c) => c.status)).toEqual(['passed', 'passed', 'skipped']);
-    expect(ci.exitCode).toBe(2);
+    expect(underCi.files[0]!.cases.map((c) => c.status)).toEqual(['passed', 'passed', 'skipped']);
+    expect(underCi.exitCode).toBe(2);
     expect(
       run(text.replace(', only: true', ''), { filter: 'tw' }).files[0]!.cases.map((c) => c.reason),
     ).toEqual(['filter', undefined, 'flaky']);

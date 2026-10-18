@@ -3,25 +3,24 @@
   "version": "0.0.0",
   "description": "Static simulator and test framework for GitHub Actions: which jobs and steps run for a scenario, and why.",
   "keywords": [
+    "ci",
     "github-actions",
     "simulation",
-    "workflow",
-    "ci",
+    "static-analysis",
     "testing",
-    "static-analysis"
+    "workflow"
   ],
   "homepage": "https://github.com/ciatlas/simulci",
   "bugs": {
     "url": "https://github.com/ciatlas/simulci/issues"
   },
+  "license": "MIT",
+  "author": "Ruman Kazi",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ciatlas/simulci.git",
     "directory": "packages/cli"
   },
-  "license": "MIT",
-  "author": "Ruman Kazi",
-  "type": "module",
   "bin": {
     "simulci": "dist/index.js"
   },
@@ -30,20 +29,21 @@
     "README.md",
     "LICENSE"
   ],
-  "engines": {
-    "node": ">=22"
-  },
+  "type": "module",
   "publishConfig": {
     "access": "public",
     "provenance": true
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
     "@simulci/engine": "workspace:*",
     "citty": "^0.2.2",
-    "tsup": "^8.5.1"
+    "tsdown": "0.23.1"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

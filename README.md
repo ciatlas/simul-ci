@@ -33,7 +33,7 @@ pnpm install
 pnpm test          # unit, property and conformance tests
 pnpm coverage
 pnpm typecheck
-pnpm lint          # Biome
+pnpm lint          # oxlint (type-aware) and oxfmt --check
 pnpm exec fallow   # code health (fallow.tools); CI runs `fallow audit` on pull requests
 ```
 

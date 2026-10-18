@@ -39,10 +39,12 @@ function walkArray(value: Json[], key: string, profile: CanonicalProfile): Json[
   return items;
 }
 
+const keyText = (v: Json | undefined): string => (typeof v === 'string' ? v : JSON.stringify(v ?? ''));
+
 function sortBy(items: Json[], field: string): Json[] {
   return [...items].sort((a, b) => {
-    const x = String((a as Record<string, Json>)[field] ?? '');
-    const y = String((b as Record<string, Json>)[field] ?? '');
+    const x = keyText((a as Record<string, Json>)[field]);
+    const y = keyText((b as Record<string, Json>)[field]);
     return x.localeCompare(y);
   });
 }
@@ -54,7 +56,7 @@ const LEG_IDENTITY = new Set(['id', 'legKey', 'values', 'check']);
 function foldLegs(legs: Record<string, Json>[]): Json[] {
   const seen = new Map<string, string>();
   return legs.map((leg) => {
-    const legKey = String(leg.legKey ?? '');
+    const legKey = typeof leg.legKey === 'string' ? leg.legKey : '';
     if (legKey === '') return leg;
     const behaviour = Object.fromEntries(Object.entries(leg).filter(([k]) => !LEG_IDENTITY.has(k)));
     const masked = JSON.stringify(behaviour).split(`[${legKey}]`).join('[*]');

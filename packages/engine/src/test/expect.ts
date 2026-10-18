@@ -1,6 +1,6 @@
 import { stringOf } from '../evaluate';
 import type { Json, Result, Tri, Value } from '../plan/types';
-import type { ExpectResult, ExpectValue } from './schema';
+import type { ExpectValue } from './schema';
 
 /**
  * How a test's expectation meets a plan value: exact and case-sensitive in GitHub's string form; a list accepts
@@ -14,17 +14,17 @@ export interface Check {
   actual: string;
 }
 
-export function checkValue(expect: ExpectValue | ExpectResult, value: Value<Json>, missing = false): Check {
+export function checkValue(expect: ExpectValue, value: Value<Json>, missing = false): Check {
   const actual = describe(value, missing);
   if (typeof expect === 'object' && !Array.isArray(expect)) {
     if ('unknown' in expect) return { ok: !value.known, actual };
     if (!value.known) return { ok: false, actual };
     return { ok: regexOf(expect.match).test(stringOf(value.value)), actual };
   }
-  const wanted = (Array.isArray(expect) ? expect : [expect]).map((e) => stringOf(e as Json));
-  if (value.known) return { ok: wanted.includes(stringOf(value.value)), actual };
+  const wanted = new Set((Array.isArray(expect) ? expect : [expect]).map((e) => stringOf(e as Json)));
+  if (value.known) return { ok: wanted.has(stringOf(value.value)), actual };
   if (!Array.isArray(expect) || !value.oneOf) return { ok: false, actual };
-  return { ok: value.oneOf.every((c) => wanted.includes(stringOf(c))), actual };
+  return { ok: value.oneOf.every((c) => wanted.has(stringOf(c))), actual };
 }
 
 /** The regular expression of a `{ match }`; the schema accepted the text, so a bad one is a plain error here. */
@@ -48,4 +48,4 @@ export function checkTri(want: Tri, got: Tri, allowMaybe: boolean): boolean {
 }
 
 /** A result as a plan value, for the value checks. */
-export const resultValue = (v: Value<Result>): Value<Json> => v as Value<Json>;
+export const resultValue = (v: Value<Result>): Value<Json> => v;

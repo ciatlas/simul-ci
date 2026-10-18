@@ -16,7 +16,7 @@ export function compilePattern(pattern: string): CompiledPattern {
   const negated = pattern.startsWith('!');
   const body = negated ? pattern.slice(1) : pattern;
   let out = '';
-  for (let i = 0; i < body.length; ) {
+  for (let i = 0; i < body.length;) {
     const token = compileToken(body, i, out === '');
     out += token.regex;
     i = token.next;

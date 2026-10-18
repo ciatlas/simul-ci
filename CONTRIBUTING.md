@@ -15,7 +15,7 @@ Node.js 22 or later and pnpm (pinned in `package.json`; pnpm switches to it by i
 ## Rules
 
 - **Licences by directory:** `packages/*` are MIT and never import `apps/*` or `ee/*` (fallow checks the boundaries).
-- **The engine is pure:** no I/O, no Node.js modules (Biome checks `packages/engine/src`), so it runs in the CLI, the
+- **The engine is pure:** no I/O, no Node.js modules (oxlint checks `packages/engine/src`), so it runs in the CLI, the
   Action, a Web Worker and the server unchanged.
 - **Run the whole suite before you push:** `CI=true pnpm test`. CI never writes missing snapshots.
 

@@ -29,7 +29,7 @@ interface Write {
 export function foldWrites(script: string, opts: FoldOptions): Record<string, Value<string>> {
   const writes = scanWrites(script, opts.file ?? 'GITHUB_OUTPUT');
   const out: Record<string, Value<string>> = {};
-  for (const name of [...new Set(writes.map((w) => w.name))]) {
+  for (const name of new Set(writes.map((w) => w.name))) {
     out[name] = foldName(
       writes.filter((w) => w.name === name),
       opts.unknownId(name),
@@ -40,10 +40,7 @@ export function foldWrites(script: string, opts: FoldOptions): Record<string, Va
 
 /** Last write wins; conditional writes make the value one of the literals seen (or empty, when none may run). */
 function foldName(writes: Write[], unknownId: string): Value<string> {
-  const lastUnconditional = writes
-    .map((w, i) => [w, i] as const)
-    .filter(([w]) => !w.conditional)
-    .at(-1);
+  const lastUnconditional = writes.map((w, i) => [w, i] as const).findLast(([w]) => !w.conditional);
   const after = lastUnconditional ? writes.slice(lastUnconditional[1] + 1) : writes;
   if (after.length === 0) {
     const w = lastUnconditional![0];

@@ -793,9 +793,9 @@ function multisetMinus(a: readonly string[], b: readonly string[]): string[] {
 
 const quote = (items: readonly string[]): string => items.map((s) => `'${s}'`).join(', ');
 
-function describeExpect(expect: ExpectValue | ExpectResult): string {
+function describeExpect(expect: ExpectValue): string {
   if (Array.isArray(expect)) return `one of ${quote(expect.map((e) => stringOf(e as Json)))}`;
   if (typeof expect === 'object')
     return 'unknown' in expect ? 'to stay unknown' : `to match /${expect.match}/`;
-  return `'${stringOf(expect as Json)}'`;
+  return `'${stringOf(expect)}'`;
 }

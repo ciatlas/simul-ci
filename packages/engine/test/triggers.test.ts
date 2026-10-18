@@ -109,7 +109,7 @@ describe('activity types', () => {
   });
 
   it('replays the workflow_run type cases', () => {
-    for (const c of cases(fixture('workflow-run').types as unknown[])) {
+    for (const c of cases(fixture('workflow-run').types)) {
       if (c.rerun) continue;
       const types = c.types === null ? {} : { types: c.types };
       const v = verdictFor(types, 'workflow_run', {
@@ -151,10 +151,7 @@ describe('filters from fixtures/triggers/filters.yml', () => {
   });
 
   it('replays the workflow_run branch cases', () => {
-    for (const c of [
-      ...cases(filters.workflow_run_branches),
-      ...cases(fixture('workflow-run').branches as unknown[]),
-    ]) {
+    for (const c of [...cases(filters.workflow_run_branches), ...cases(fixture('workflow-run').branches)]) {
       if (!('runs' in c) || 'valid' in c) continue;
       const scenario: ScenarioInput = {
         event: 'workflow_run',
@@ -166,7 +163,7 @@ describe('filters from fixtures/triggers/filters.yml', () => {
   });
 
   it('replays the workflows name cases', () => {
-    for (const c of cases(fixture('workflow-run').workflows as unknown[])) {
+    for (const c of cases(fixture('workflow-run').workflows)) {
       if (!('runs' in c) || typeof c.triggering_workflow_name !== 'string') continue;
       const scenario: ScenarioInput = {
         event: 'workflow_run',

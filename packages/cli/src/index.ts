@@ -13,4 +13,4 @@ const main = defineCommand({
   subCommands: { plan: planCommand, models: modelsCommand },
 });
 
-runMain(main);
+void runMain(main);
