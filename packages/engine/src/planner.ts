@@ -28,7 +28,7 @@ import {
   MockResolver,
   type ModelUse,
 } from './mocks/index';
-import { type ModelContext, modelFor } from './models/index';
+import { type ActionModel, type ModelContext, modelFor, SHIPPED_MODELS } from './models/index';
 import type { Location, LocationLink } from './paths';
 import {
   callNodeId,
@@ -105,6 +105,8 @@ export interface SimulateOptions {
   assume?: AssumeEntry[];
   /** Mocks by layer, when a caller distinguishes them (a test file's `given`, a command line). */
   mocks?: MockLayers;
+  /** The action models to use, the shipped ones by default; `[]` switches them off. */
+  models?: readonly ActionModel[];
 }
 
 export class MocksError extends Error {
@@ -146,6 +148,7 @@ export function simulate(opts: SimulateOptions): RunPlan {
     opts.detail ?? 'steps',
     opts.maxDepth ?? 10,
     new MockResolver(layers),
+    opts.models ?? SHIPPED_MODELS,
   ).run();
 }
 
@@ -232,6 +235,7 @@ class Planner {
     private readonly detail: 'legs' | 'steps',
     private readonly maxDepth: number,
     private readonly mocks: MockResolver,
+    private readonly shipped: readonly ActionModel[],
   ) {
     this.index = loaded.index;
   }
@@ -813,7 +817,7 @@ class Planner {
     if (!step.uses) return {};
     const action = this.index.actionOf(step);
     if (action) return { action };
-    const model = modelFor(step.uses.raw);
+    const model = modelFor(step.uses.raw, this.shipped);
     if (!model) return {};
     this.models.set(model.id, model.version);
     const ctx: ModelContext = { scenario: this.scenario, with: withValues, node: sid };

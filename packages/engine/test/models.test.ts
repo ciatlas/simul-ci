@@ -102,6 +102,17 @@ describe('shipped models: actions/cache', () => {
     expect(codes(plan)).toEqual([]);
   });
 
+  it('models: [] switches the shipped models off', () => {
+    const plan = simulate({
+      files: { '.github/workflows/ci.yml': cacheWorkflow() },
+      scenario: { event: 'push' },
+      models: [],
+    });
+    expect(plan.models).toEqual([]);
+    expect(steps(plan)[0]!.outputs).toEqual({});
+    expect(steps(plan)[1]!.runs.verdict).toBe('maybe');
+  });
+
   it('as: hit skips the install step; as: partial and as: miss run it', () => {
     for (const [as, expected] of [
       ['hit', 'no'],
