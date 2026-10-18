@@ -9,6 +9,7 @@ export default defineConfig({
       // @ciatlas/core is a git dependency that ships its TypeScript source (github:ciatlas/core#vX.Y.Z), never built.
       '@ciatlas/core': fileURLToPath(new URL('./node_modules/@ciatlas/core/src/index.ts', import.meta.url)),
       '@simulci/engine': src('engine'),
+      '@simulci/node': src('node'),
     },
   },
   test: {

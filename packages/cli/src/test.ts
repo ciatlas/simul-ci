@@ -1,20 +1,27 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import {
   type AssumeEntry,
   type LoadedProject,
   loadFiles,
   MocksError,
+  renderAnnotations,
+  renderJUnit,
+  renderTextReport,
   type RunOptions,
   type RunResult,
   runTests,
-  type Snapshot,
-  type SnapshotStore,
 } from '@simulci/engine';
+import {
+  AssumeError,
+  discoverTests,
+  diskSnapshotStore,
+  misplacedTests,
+  parseAssume,
+  readWorkflowFiles,
+  TESTS_DIR,
+} from '@simulci/node';
 import { defineCommand } from 'citty';
-import { AssumeError, parseAssume } from './assume';
-import { readWorkflowFiles } from './files';
-import { renderAnnotations, renderJUnit, renderTextReport } from './report';
 
 /** `simulci test`: the route tests under `.github/simulci/tests`, or the files named. */
 
@@ -38,8 +45,6 @@ export interface TestIo {
   env: Record<string, string | undefined>;
 }
 
-const TESTS_DIR = '.github/simulci/tests';
-
 /** Runs the command; returns the exit code. */
 export function runTestCommand(a: TestArgs, io: TestIo): number {
   const ready = prepare(a, io);
@@ -50,7 +55,7 @@ export function runTestCommand(a: TestArgs, io: TestIo): number {
     update: a.update ?? false,
     strict: a.strict ?? false,
     snapshotDetail: a.snapshotDetail === 'legs' ? 'legs' : 'steps',
-    snapshots: diskStore(root),
+    snapshots: diskSnapshotStore(root),
   };
   if (a.filter !== undefined) options.filter = a.filter;
   if (cli.length) options.cli = cli;
@@ -80,8 +85,8 @@ interface Prepared {
 /** The checkout, the test files, the project and the cli mocks; or the exit code when one of them is not there. */
 function prepare(a: TestArgs, io: TestIo): Prepared | number {
   const root = resolve(a.dir);
-  const files = discover(root, list(a.files));
-  const misplaced = files.filter((f) => /(^|\/)\.github\/workflows\//.test(f));
+  const files = discoverTests(root, list(a.files));
+  const misplaced = misplacedTests(files);
   if (misplaced.length) {
     io.stderr(
       `T000 ${misplaced.join(', ')}: a test file under .github/workflows would be run by GitHub; put it under ${TESTS_DIR}\n`,
@@ -111,45 +116,6 @@ function report(result: RunResult, a: TestArgs, io: TestIo): void {
     mkdirSync(dirname(resolve(a.junit)), { recursive: true });
     writeFileSync(resolve(a.junit), renderJUnit(result));
   }
-}
-
-/** The named files (relative to the checkout), else every `*.test.yml` under the tests directory. */
-function discover(root: string, named: string[]): string[] {
-  if (named.length) return named.map((f) => relative(root, resolve(f)).split('\\').join('/'));
-  const dir = join(root, TESTS_DIR);
-  if (!existsSync(dir)) return [];
-  return walk(dir)
-    .filter((f) => /\.test\.ya?ml$/.test(f) && !f.includes('/__snapshots__/'))
-    .map((f) => relative(root, f).split('\\').join('/'))
-    .sort((x, y) => x.localeCompare(y));
-}
-
-function walk(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = join(dir, entry.name);
-    return entry.isDirectory() ? walk(full) : [full];
-  });
-}
-
-/** `<tests dir>/__snapshots__/<name>.test.snap.json` beside the tests. */
-export function snapshotPath(testFile: string): string {
-  const name = testFile.replace(/^.*\//, '').replace(/\.ya?ml$/, '');
-  return `${dirname(testFile)}/__snapshots__/${name}.snap.json`;
-}
-
-function diskStore(root: string): SnapshotStore {
-  return {
-    read(testFile) {
-      const file = join(root, snapshotPath(testFile));
-      if (!existsSync(file)) return undefined;
-      return JSON.parse(readFileSync(file, 'utf8')) as Snapshot;
-    },
-    write(testFile, snapshot) {
-      const file = join(root, snapshotPath(testFile));
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, `${JSON.stringify(snapshot, null, 2)}\n`);
-    },
-  };
 }
 
 const list = (v: string | string[] | undefined): string[] =>

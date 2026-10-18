@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { renderMermaid, renderText, simulate } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
-import { readWorkflowFiles } from '../src/files';
+import { readWorkflowFiles } from '@simulci/node';
 import { render, scenarioFromArgs } from '../src/plan';
 
 const root = join(import.meta.dirname, '../../..');

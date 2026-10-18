@@ -8,13 +8,14 @@
   ],
   // The engine is a library inside the workspace: what its index exports, and the members of what it exports, are
   // its API for the CLI, the Action, the web app and the server.
-  "publicPackages": ["@simulci/engine"],
+  "publicPackages": ["@simulci/engine", "@simulci/node"],
   // The licence map: packages/* are MIT, apps/* are FSL-1.1-MIT, ee/* is commercial. MIT code never imports the
   // other two, and the document model (the builder's foundation) depends on nothing else in the repository.
   "boundaries": {
     "zones": [
       { "name": "engine", "patterns": ["packages/engine/**"] },
       { "name": "document", "patterns": ["packages/document/**"] },
+      { "name": "node", "patterns": ["packages/node/**"] },
       { "name": "cli", "patterns": ["packages/cli/**"] },
       { "name": "action", "patterns": ["packages/action/**"] },
       { "name": "web", "patterns": ["apps/**"] },
@@ -23,8 +24,9 @@
     "rules": [
       { "from": "engine", "allow": [] },
       { "from": "document", "allow": [] },
-      { "from": "cli", "allow": ["engine", "document"] },
-      { "from": "action", "allow": ["engine", "cli"] },
+      { "from": "node", "allow": ["engine"] },
+      { "from": "cli", "allow": ["engine", "document", "node"] },
+      { "from": "action", "allow": ["engine", "node"] },
       { "from": "web", "allow": ["engine", "document"] },
       { "from": "ee", "allow": ["engine", "document", "web"] },
     ],

@@ -1,12 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadFiles, runTests } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
-import { AssumeError, parseAssume } from '../src/assume';
 import { planOutput } from '../src/plan';
-import { renderAnnotations, renderJUnit, renderTextReport } from '../src/report';
-import { runTestCommand, snapshotPath, type TestIo } from '../src/test';
+import { snapshotPath } from '@simulci/node';
+import { runTestCommand, type TestIo } from '../src/test';
 
 const ci = `
 on:
@@ -55,34 +53,6 @@ function io(env: Record<string, string> = {}): TestIo & { out: string[]; err: st
   const err: string[] = [];
   return { out, err, stdout: (t) => out.push(t), stderr: (t) => err.push(t), env };
 }
-
-describe('parseAssume', () => {
-  it('reads the shorthands and YAML mappings', () => {
-    expect(
-      parseAssume([
-        'build.t=failure',
-        'deploy=failure',
-        'build.t.outputs.sha=abc',
-        'deploy.#1.env.TARGET=prod',
-        'build.c=as:hit',
-        '{ uses: actions/cache, as: miss }',
-      ]),
-    ).toEqual([
-      { step: 'build.t', outcome: 'failure' },
-      { job: 'deploy', outcome: 'failure' },
-      { step: 'build.t', outputs: { sha: 'abc' } },
-      { step: 'deploy.#1', env: { TARGET: 'prod' } },
-      { step: 'build.c', as: 'hit' },
-      { uses: 'actions/cache', as: 'miss' },
-    ]);
-    expect(parseAssume([], '- { step: a.b, outcome: failure }\n')).toEqual([
-      { step: 'a.b', outcome: 'failure' },
-    ]);
-    expect(() => parseAssume(['nonsense'])).toThrow(AssumeError);
-    expect(() => parseAssume(['build.t=maybe'])).toThrow(/invalid assume entries/);
-    expect(() => parseAssume([], 'step: x\n')).toThrow(/YAML list/);
-  });
-});
 
 describe('simulci test', () => {
   it('runs the tests of a checkout, reports, writes a snapshot locally and fails on it under ci', () => {
@@ -141,37 +111,6 @@ describe('simulci test', () => {
     const none = io();
     expect(runTestCommand({ dir: checkout({ '.github/workflows/ci.yml': ci }) }, none)).toBe(2);
     expect(none.out.join('')).toContain('T000 no test files');
-  });
-});
-
-describe('reports', () => {
-  const project = loadFiles({ '.github/workflows/ci.yml': ci });
-  const result = runTests(project, [
-    {
-      path: 't.test.yml',
-      text: 'workflow: ci.yml\ncases:\n  - { name: a, when: { event: push, branch: main }, then: { run: [deploy] } }\n  - { name: b, when: { event: push, branch: main }, then: { run: [nope] } }\n  - { name: c, when: { event: push }, then: { run: [build] }, skip: later }\n',
-    },
-    { path: 'bad.test.yml', text: 'workflow: ci.yml\ncases: [\n' },
-  ]);
-
-  it('renders text, annotations and JUnit from one result', () => {
-    const text = renderTextReport(result);
-    expect(text).toContain('t.test.yml → ci.yml\n  ✗ a\n      run[0]: expected deploy to run; it skips\n');
-    expect(text).toContain("  ! b\n      run[0]: no job 'nope' in ci.yml (jobs: build, deploy)\n");
-    expect(text).toContain('  - c (later)\n');
-    expect(text).toContain('bad.test.yml\n  T001 ');
-    expect(text).toMatch(/\n0 passed · 1 failed · 1 invalid · 1 skipped · exit 2\n$/);
-    const annotations = renderAnnotations(result);
-    expect(annotations.filter((l) => l.startsWith('::error'))).toHaveLength(3);
-    expect(annotations[0]).toMatch(
-      /^::error file=t\.test\.yml,line=3,col=\d+,title=simulci%3A a::run\[0\]: expected deploy to run; it skips%0A/,
-    );
-    const junit = renderJUnit(result);
-    expect(junit).toContain('<testsuites name="simulci" tests="4" failures="1" errors="2" skipped="1">');
-    expect(junit).toContain('<skipped message="later"/>');
-    expect(junit).toMatch(
-      /<testcase classname="bad\.test\.yml" name="\(file\)" time="0">\n {6}<error type="T001" message="T001 /,
-    );
   });
 });
 
