@@ -11,6 +11,12 @@ are the oracle the engine's conformance tests compare against; nothing in the fi
 The engine is only tested on what the oracle observed: a run means "this input produced these conclusions", not
 "this is how it is documented".
 
+## The workflows
+
+`repo/` is the lab repository's `.github/` tree and README at the last run-starting commit
+(`e623802ba524a344c2033c94c438a38fe0e8c07f`), so the engine can simulate exactly what the runs executed. Workflows
+under `fixtures/` are inert for GitHub; the one true copy is the lab repository.
+
 ## Re-capturing
 
 ```sh
