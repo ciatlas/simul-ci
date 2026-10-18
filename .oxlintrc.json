@@ -1,6 +1,11 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "oxc", "unicorn", "import"],
+  "plugins": [
+    "typescript",
+    "oxc",
+    "unicorn",
+    "import"
+  ],
   "categories": {
     "correctness": "error",
     "suspicious": "error",
@@ -20,16 +25,47 @@
     "import/no-unassigned-import": [
       "error",
       {
-        "allow": ["**/*.css"]
+        "allow": [
+          "**/*.css"
+        ]
       }
     ]
   },
-  "ignorePatterns": ["fixtures/**", "schemas/**", "**/dist/**", "**/coverage/**", ".claude/**"],
+  "ignorePatterns": [
+    "fixtures/**",
+    "schemas/**",
+    "**/dist/**",
+    "**/coverage/**",
+    ".claude/**"
+  ],
   "overrides": [
     {
-      "files": ["packages/engine/src/**", "packages/document/src/**", "apps/web/src/**"],
+      "files": [
+        "packages/engine/src/**",
+        "packages/document/src/**",
+        "apps/web/src/**"
+      ],
       "rules": {
         "import/no-nodejs-modules": "error"
+      }
+    },
+    {
+      "files": [
+        "apps/web/src/**"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@simulci/engine",
+                "message": "only src/worker/** runs the engine; the page imports types, or values from @simulci/engine/plan and @simulci/engine/render",
+                "allowTypeImports": true
+              }
+            ]
+          }
+        ]
       }
     }
   ],

@@ -1,3 +1,4 @@
+/* oxlint-disable no-restricted-imports -- the worker is where the engine runs */
 import { SCHEMA_VERSIONS, SHIPPED_MODELS, VERSION } from '@simulci/engine';
 import { handle, initialState } from './handle';
 import { type EngineResponse, isEngineRequest, PROTOCOL } from './protocol';

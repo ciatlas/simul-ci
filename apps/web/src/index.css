@@ -1,1 +1,113 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/mona-sans/wdth.css';
+@import '@fontsource-variable/jetbrains-mono';
+
+/*
+ * The token sheet: a warm neutral ramp, one accent that never means a status, and the four run states shared by the
+ * form, the panels and the graph. Light and dark are both first-class; the OS decides unless the author did.
+ */
+:root {
+  --bg: #f7f4ee;
+  --surface: #fffdf9;
+  --chrome: #efebe3;
+  --border: #ddd6ca;
+  --border-strong: #bfb6a7;
+  --text: #211d18;
+  --muted: #6e665b;
+  --accent: #b4532a;
+  --accent-soft: #f6e4da;
+  --run: #1f7a3e;
+  --run-soft: #dcefe1;
+  --skip: #8d8477;
+  --skip-soft: #ebe6dd;
+  --might: #b26b00;
+  --might-soft: #f8e8c8;
+  --unknown: #6b4fbb;
+  --unknown-soft: #e8e1f7;
+  --danger: #b3261e;
+  --danger-soft: #f8dcd9;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #15120f;
+  --surface: #1d1915;
+  --chrome: #181511;
+  --border: #2f2a24;
+  --border-strong: #4a423a;
+  --text: #ebe5db;
+  --muted: #a0978a;
+  --accent: #f08a5a;
+  --accent-soft: #3a2419;
+  --run: #4cc472;
+  --run-soft: #17301f;
+  --skip: #8d8477;
+  --skip-soft: #262220;
+  --might: #f0b445;
+  --might-soft: #342a12;
+  --unknown: #a98cf0;
+  --unknown-soft: #27203a;
+  --danger: #f0756b;
+  --danger-soft: #3a1b18;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'Mona Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-chrome: var(--chrome);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-run: var(--run);
+  --color-run-soft: var(--run-soft);
+  --color-skip: var(--skip);
+  --color-skip-soft: var(--skip-soft);
+  --color-might: var(--might);
+  --color-might-soft: var(--might-soft);
+  --color-unknown: var(--unknown);
+  --color-unknown-soft: var(--unknown-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus is the one ring; the accent is its colour. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A field whose value the page chose for the author. */
+.assumed {
+  border-style: dashed;
+  border-color: var(--border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
