@@ -25,17 +25,28 @@ export const legNodeId = (job: NodeId, legKey: string): NodeId => (legKey === ''
 /** `steps.<id>` for a step with an id, else `~<slug>` of its name, its `uses:` without the ref, or its first `run:` line; `~2` on duplicates. */
 export function stepKeyOf(step: StepDecl, taken: Set<string>): string {
   if (step.id) return `steps.${step.id}`;
-  const source = step.name ?? step.uses?.raw.replace(/@.*$/, '') ?? step.run?.split('\n')[0] ?? 'step';
-  const slug =
-    source
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'step';
+  const source = step.name ?? withoutRef(step.uses?.raw) ?? step.run?.split('\n')[0] ?? 'step';
+  const slug = trimDashes(source.toLowerCase().replace(/[^a-z0-9]+/g, '-')).slice(0, 40) || 'step';
   let key = `~${slug}`;
   for (let n = 2; taken.has(key); n++) key = `~${slug}~${n}`;
   taken.add(key);
   return key;
+}
+
+/** `owner/repo@ref` without the `@ref`. */
+function withoutRef(uses: string | undefined): string | undefined {
+  if (uses === undefined) return undefined;
+  const at = uses.indexOf('@');
+  return at === -1 ? uses : uses.slice(0, at);
+}
+
+/** Leading and trailing dashes removed (no regex: a `-+$` pattern is polynomial on long dashed input). */
+function trimDashes(s: string): string {
+  let start = 0;
+  let end = s.length;
+  while (start < end && s[start] === '-') start++;
+  while (end > start && s[end - 1] === '-') end--;
+  return s.slice(start, end);
 }
 
 export const stepNodeId = (leg: NodeId, key: string): NodeId => `${leg}/${key}`;

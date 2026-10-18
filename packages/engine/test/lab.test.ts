@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type AssumeEntry, checksOf, loadFiles, type ScenarioInput, simulate } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
@@ -27,10 +27,10 @@ const expected = JSON.parse(readFileSync(join(lab, 'expected.json'), 'utf8')) as
 
 function walk(dir: string, prefix = ''): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const rel = prefix ? `${prefix}/${entry}` : entry;
-    if (statSync(full).isDirectory()) Object.assign(out, walk(full, rel));
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) Object.assign(out, walk(full, rel));
     else out[rel] = readFileSync(full, 'utf8');
   }
   return out;
