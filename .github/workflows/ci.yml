@@ -35,6 +35,9 @@ jobs:
       - run: pnpm build
       # Dogfood: the route tests under .github/simulci/tests, run with the bundle that was just built.
       - run: node packages/cli/dist/index.js test
+      # The published package holds exactly its bundle, README and licence, and no dependencies.
+      - run: node ../../scripts/check-pack.mjs
+        working-directory: packages/cli
       - run: pnpm coverage
       - id: upload
         if: always() && matrix.node == '24'
@@ -119,11 +122,68 @@ jobs:
       - run: pnpm schemas
       - run: git diff --exit-code -- schemas
 
+  action-dist:
+    # action.yml runs packages/action/dist/index.js straight from the repository, so the bundle is committed and must
+    # be what the sources build.
+    name: Action bundle is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @simulci/action build
+      - name: Compare with the committed bundle
+        run: |
+          if [ -n "$(git status --porcelain packages/action/dist)" ]; then
+            git status --short packages/action/dist
+            echo "::error::packages/action/dist is out of date. Run 'pnpm --filter @simulci/action build' and commit the result."
+            exit 1
+          fi
+
+  action-dogfood:
+    # The committed action on this repository: the route tests, then a plan.
+    name: Action on this repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: tests
+        name: Route tests
+        uses: ./
+        with:
+          junit: simulci-junit.xml
+      - id: plan
+        name: The plan of a pull request
+        uses: ./
+        with:
+          mode: plan
+          scenario: '{ event: pull_request, base: main, head: feat/x, changed: [packages/engine/src/x.ts] }'
+      - name: Check the outputs
+        env:
+          PASSED: ${{ steps.tests.outputs.passed }}
+          FAILED: ${{ steps.tests.outputs.failed }}
+          EXIT: ${{ steps.tests.outputs.exit-code }}
+          TRIGGERED: ${{ steps.plan.outputs.triggered }}
+        run: |
+          set -x
+          test "$PASSED" -ge 17
+          test "$FAILED" -eq 0
+          test "$EXIT" -eq 0
+          test "$TRIGGERED" -eq 2
+          test -s simulci-junit.xml
+
   ci-passed:
     # The only required status check: add new jobs to `needs` instead of changing the branch rules.
     name: CI passed
     if: always()
-    needs: [test, fallow, workflows, zizmor, schemas]
+    needs: [test, fallow, workflows, zizmor, schemas, action-dist, action-dogfood]
     runs-on: ubuntu-latest
     steps:
       - name: Every job succeeded
