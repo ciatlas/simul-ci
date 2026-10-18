@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { handle } from '../src/worker/handle';
+import { isWorkerRequest } from '../src/worker/protocol';
 
 const files = {
   '.github/workflows/ci.yml':
@@ -31,5 +32,14 @@ describe('the worker handler', () => {
       assume: [{ step: 'a.#1' }] as never,
     });
     expect(mocks).toMatchObject({ id: 2, type: 'error', kind: 'mocks' });
+  });
+
+  it('accepts only well-formed requests', () => {
+    expect(isWorkerRequest({ id: 1, type: 'simulate', files, scenario: { event: 'push' } })).toBe(true);
+    expect(isWorkerRequest({ id: 1, type: 'simulate', files })).toBe(false);
+    expect(isWorkerRequest({ id: '1', type: 'simulate', files, scenario: {} })).toBe(false);
+    expect(isWorkerRequest({ type: 'other' })).toBe(false);
+    expect(isWorkerRequest(null)).toBe(false);
+    expect(isWorkerRequest('simulate')).toBe(false);
   });
 });

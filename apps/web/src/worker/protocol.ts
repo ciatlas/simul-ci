@@ -34,3 +34,17 @@ export interface ErrorResponse {
 }
 
 export type WorkerResponse = PlanResponse | ErrorResponse;
+
+/** Whether a message is a request the worker answers: the shape is checked, not trusted. */
+export function isWorkerRequest(data: unknown): data is WorkerRequest {
+  if (typeof data !== 'object' || data === null) return false;
+  const d = data as Record<string, unknown>;
+  return (
+    d.type === 'simulate' &&
+    typeof d.id === 'number' &&
+    typeof d.files === 'object' &&
+    d.files !== null &&
+    typeof d.scenario === 'object' &&
+    d.scenario !== null
+  );
+}
