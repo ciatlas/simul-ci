@@ -21,7 +21,15 @@ const BUDGETS = [
 ];
 
 /** What may only appear in the worker chunk. */
-const WORKER_ONLY = [/@ciatlas\/core\//, /\/@actions\//, /\/zod\//, /\/yaml\//, /picomatch/, /\/elkjs\//, /cronstrue/];
+const WORKER_ONLY = [
+  /@ciatlas\/core\//,
+  /\/@actions\//,
+  /\/zod\//,
+  /\/yaml\//,
+  /picomatch/,
+  /\/elkjs\//,
+  /cronstrue/,
+];
 /** Engine sources the page may use: the core-free entries. */
 const PAGE_ENGINE_OK = /packages\/engine\/src\/(plan|render)\//;
 const ENGINE = /packages\/engine\/src\//;
@@ -43,18 +51,26 @@ for (const file of files) {
     problems.push(`${file} has no source map to check`);
   }
   if (isWorker) {
-    if (!sources.some((s) => s.includes('project-browser'))) problems.push(`${file} was not built from core's browser entry`);
-    for (const s of sources) if (/node-fs\.ts|\/git\.ts/.test(s) && s.includes('@ciatlas/core')) problems.push(`${file} holds ${s}`);
+    if (!sources.some((s) => s.includes('project-browser')))
+      problems.push(`${file} was not built from core's browser entry`);
+    for (const s of sources)
+      if (/node-fs\.ts|\/git\.ts/.test(s) && s.includes('@ciatlas/core')) problems.push(`${file} holds ${s}`);
   } else {
     for (const s of sources) {
-      if (WORKER_ONLY.some((re) => re.test(s))) problems.push(`${file} holds ${s}, which only the worker may`);
-      if (ENGINE.test(s) && !PAGE_ENGINE_OK.test(s)) problems.push(`${file} holds ${s}: the page may use only plan/ and render/`);
+      if (WORKER_ONLY.some((re) => re.test(s)))
+        problems.push(`${file} holds ${s}, which only the worker may`);
+      if (ENGINE.test(s) && !PAGE_ENGINE_OK.test(s))
+        problems.push(`${file} holds ${s}: the page may use only plan/ and render/`);
     }
   }
   const byPackage = new Map();
   for (const s of sources) {
     const m = /node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?((?:@[^/]+\/)?[^/]+)/.exec(s);
-    const key = m ? m[1] : s.includes('packages/') ? s.replace(/.*packages\/([^/]+).*/, '@simulci/$1') : 'app';
+    const key = m
+      ? m[1]
+      : s.includes('packages/')
+        ? s.replace(/.*packages\/([^/]+).*/, '@simulci/$1')
+        : 'app';
     byPackage.set(key, (byPackage.get(key) ?? 0) + 1);
   }
   rows.push({ file, kB: statSync(join(assets, file)).size / 1024, gz, packages: byPackage });
@@ -66,7 +82,9 @@ for (const file of files) {
 const table = ['| chunk | kB | gzip kB | sources |', '|---|---:|---:|---|'];
 for (const r of rows) {
   const top = [...r.packages.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  table.push(`| ${r.file} | ${r.kB.toFixed(0)} | ${r.gz.toFixed(1)} | ${top.map(([k, n]) => `${k} (${n})`).join(', ')} |`);
+  table.push(
+    `| ${r.file} | ${r.kB.toFixed(0)} | ${r.gz.toFixed(1)} | ${top.map(([k, n]) => `${k} (${n})`).join(', ')} |`,
+  );
 }
 const report = table.join('\n');
 console.log(report);

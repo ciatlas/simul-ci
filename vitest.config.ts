@@ -10,7 +10,9 @@ export default defineConfig({
       '@ciatlas/core': fileURLToPath(new URL('./node_modules/@ciatlas/core/src/index.ts', import.meta.url)),
       // Subpaths before the root: an alias matches by prefix, so the root would swallow `@simulci/engine/plan`.
       '@simulci/engine/plan': fileURLToPath(new URL('./packages/engine/src/plan/index.ts', import.meta.url)),
-      '@simulci/engine/render': fileURLToPath(new URL('./packages/engine/src/render/index.ts', import.meta.url)),
+      '@simulci/engine/render': fileURLToPath(
+        new URL('./packages/engine/src/render/index.ts', import.meta.url),
+      ),
       '@simulci/engine': src('engine'),
       '@simulci/node': src('node'),
     },
