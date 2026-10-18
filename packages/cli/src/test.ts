@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import {
   type AssumeEntry,
   type LoadedProject,
@@ -18,6 +18,7 @@ import {
   diskSnapshotStore,
   misplacedTests,
   parseAssume,
+  readTests,
   readWorkflowFiles,
   TESTS_DIR,
 } from '@simulci/node';
@@ -61,11 +62,7 @@ export function runTestCommand(a: TestArgs, io: TestIo): number {
   if (cli.length) options.cli = cli;
   let result: RunResult;
   try {
-    result = runTests(
-      ready.project,
-      files.map((f) => ({ path: f, text: readFileSync(join(root, f), 'utf8') })),
-      options,
-    );
+    result = runTests(ready.project, readTests(root, files), options);
   } catch (e) {
     if (!(e instanceof MocksError)) throw e;
     io.stderr(`${e.message}\n`);

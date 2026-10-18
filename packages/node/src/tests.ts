@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import type { Snapshot, SnapshotStore } from '@simulci/engine';
+import type { Snapshot, SnapshotStore, TestInput } from '@simulci/engine';
 
 /** Where route tests live in a repository. */
 export const TESTS_DIR = '.github/simulci/tests';
@@ -15,6 +15,10 @@ export function discoverTests(root: string, named: readonly string[] = []): stri
     .map((f) => relative(root, f).split('\\').join('/'))
     .sort((x, y) => x.localeCompare(y));
 }
+
+/** The test files as the runner takes them: their checkout-relative path and text. */
+export const readTests = (root: string, files: readonly string[]): TestInput[] =>
+  files.map((path) => ({ path, text: readFileSync(join(root, path), 'utf8') }));
 
 /** Test files under `.github/workflows`, which GitHub would try to run. */
 export const misplacedTests = (files: readonly string[]): string[] =>
