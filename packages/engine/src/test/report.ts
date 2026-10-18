@@ -1,4 +1,5 @@
-import type { CaseResult, Failure, FileResult, RunResult } from '@simulci/engine';
+import type { Failure } from './assert';
+import type { CaseResult, FileResult, RunResult, Status } from './runner';
 
 /** The three renderings of a run: text for the terminal, workflow commands for annotations, JUnit for CI systems. */
 
@@ -36,31 +37,65 @@ function failureLines(f: Failure, pad: string): string[] {
 
 const ANNOTATION_CAP = 9;
 
-/** `::error` on the assertion's own line, `::notice` on the workflow line that decided; at most ten per severity. */
-export function renderAnnotations(result: RunResult): string[] {
-  const errors: string[] = [];
-  const notices: string[] = [];
+/** One annotation: an error on the assertion's own token, or a notice on the workflow line that decided. */
+export interface Annotation {
+  level: 'error' | 'notice';
+  file: string;
+  line: number;
+  col: number;
+  title: string;
+  message: string;
+}
+
+/** Every annotation of a run, errors first, uncapped. */
+export function annotationsOf(result: RunResult): Annotation[] {
+  const errors: Annotation[] = [];
+  const notices: Annotation[] = [];
   for (const file of result.files) {
-    for (const f of file.failures) errors.push(annotation('error', file.path, f, `simulci: ${file.path}`));
+    for (const f of file.failures) errors.push(annotation(file.path, f, `simulci: ${file.path}`));
     for (const c of file.cases) {
       for (const f of c.failures) {
-        errors.push(annotation('error', file.path, f, `simulci: ${c.name}`));
+        errors.push(annotation(file.path, f, `simulci: ${c.name}`));
         if (f.workflowLoc) {
           const loc = f.workflowLoc;
           const message = `${f.headline} (test: ${file.path}:${f.at.line})`;
-          notices.push(
-            `::notice file=${prop(loc.file)},line=${loc.line},col=${loc.column},title=${prop('simulci: decided here')}::${msg(message)}`,
-          );
+          notices.push({
+            level: 'notice',
+            file: loc.file,
+            line: loc.line,
+            col: loc.column,
+            title: 'simulci: decided here',
+            message,
+          });
         }
       }
     }
   }
-  return [...capped(errors, 'error'), ...capped(notices, 'notice')];
+  return [...errors, ...notices];
 }
 
-function annotation(kind: 'error', file: string, f: Failure, title: string): string {
-  const body = [f.headline, ...f.detail].join('\n');
-  return `::${kind} file=${prop(file)},line=${f.at.line},col=${f.at.col},title=${prop(title)}::${msg(body)}`;
+function annotation(file: string, f: Failure, title: string): Annotation {
+  return {
+    level: 'error',
+    file,
+    line: f.at.line,
+    col: f.at.col,
+    title,
+    message: [f.headline, ...f.detail].join('\n'),
+  };
+}
+
+/** `::error` on the assertion's own line, `::notice` on the workflow line that decided; at most ten per severity. */
+export function renderAnnotations(result: RunResult): string[] {
+  const all = annotationsOf(result);
+  const lines = (level: Annotation['level']) =>
+    all
+      .filter((a) => a.level === level)
+      .map(
+        (a) =>
+          `::${a.level} file=${prop(a.file)},line=${a.line},col=${a.col},title=${prop(a.title)}::${msg(a.message)}`,
+      );
+  return [...capped(lines('error'), 'error'), ...capped(lines('notice'), 'notice')];
 }
 
 function capped(items: string[], kind: string): string[] {
@@ -75,6 +110,51 @@ function capped(items: string[], kind: string): string[] {
 /** As actions/toolkit escapes: `%`, CR and LF in messages; also `:` and `,` in properties. */
 const msg = (s: string): string => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
 const prop = (s: string): string => msg(s).replace(/:/g, '%3A').replace(/,/g, '%2C');
+
+const EMOJI: Record<Status, string> = { passed: '✅', failed: '❌', invalid: '⚠️', skipped: '⏭️' };
+
+/** The run as Markdown for a job summary or a pull request comment: a table of cases, then each failure in full. */
+export function renderMarkdownReport(
+  result: RunResult,
+  opts: { title?: string; maxFailures?: number } = {},
+): string {
+  const s = result.summary;
+  const lines = [
+    `## ${opts.title ?? 'simulci test'}: ${s.passed} passed · ${s.failed} failed · ${s.invalid} invalid · ${s.skipped} skipped`,
+    '',
+    '| | Case | File |',
+    '|---|---|---|',
+  ];
+  for (const file of result.files) {
+    if (file.failures.length)
+      lines.push(`| ${EMOJI.invalid} | ${md(file.failures[0]!.headline)} | ${md(file.path)} |`);
+    for (const c of file.cases)
+      lines.push(
+        `| ${EMOJI[c.status]} | ${md(c.name)}${c.reason ? ` (${md(c.reason)})` : ''} | ${md(file.path)} |`,
+      );
+  }
+  const failed = result.files.flatMap((file) => [
+    ...file.failures.map((f) => ({ name: file.path, file: file.path, failures: [f] })),
+    ...file.cases
+      .filter((c) => c.failures.length)
+      .map((c) => ({ name: c.name, file: file.path, failures: c.failures })),
+  ]);
+  const max = opts.maxFailures ?? 50;
+  for (const item of failed.slice(0, max)) {
+    lines.push(
+      '',
+      `<details><summary>${EMOJI.failed} ${md(item.name)} — ${md(item.failures[0]!.headline)}</summary>`,
+      '',
+      '```',
+    );
+    for (const f of item.failures) lines.push(...failureLines(f, ''), '');
+    lines.push('```', '', '</details>');
+  }
+  if (failed.length > max) lines.push('', `${failed.length - max} more failed cases are in the log.`);
+  return `${lines.join('\n')}\n`;
+}
+
+const md = (s: string): string => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
 export function renderJUnit(result: RunResult): string {
   const suites = result.files.map(suite);
