@@ -1,3 +1,4 @@
+export { stringOf } from './plan/values';
 import {
   definitelyFalsy,
   definitelyTruthy,
@@ -10,7 +11,7 @@ import {
 } from '@ciatlas/core';
 import { type ContextState, contextResolver, lookupContext } from './contexts';
 import type { IfReason, Json, Value } from './plan/types';
-import { known, unknown } from './plan/values';
+import { known, stringOf, unknown } from './plan/values';
 import { UNKNOWN_MARKER } from './script-outputs';
 import type { StatusAnswers } from './status';
 
@@ -72,11 +73,6 @@ export function evaluateValue(text: string, state: ContextState, status?: Status
 }
 
 /** A value as GitHub writes it into a string: `null` is empty, objects are JSON. */
-export function stringOf(value: Json): string {
-  if (value === null) return '';
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
-}
 
 /**
  * A script with its `${{ }}` segments replaced by their values, for folding what it writes; a segment the plan cannot
