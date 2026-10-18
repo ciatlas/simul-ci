@@ -79,12 +79,24 @@ function scanWrites(script: string, file: string): Write[] {
   };
   for (let i = 0; i < scan.lines.length; i++) {
     // A `case` arm's `pattern)` prefix and its `;;` are not part of the command.
-    const line = scan.lines[i]!.trimEnd()
-      .replace(/\s*;;?\s*$/, '')
-      .replace(/^(\s*)[^\s()]+\)\s+/, '$1');
+    const line = withoutTerminator(scan.lines[i]!).replace(/^(\s*)[^\s()]+\)\s+/, '$1');
     i = scan.group ? groupLine(scan, line, i) : scanLine(scan, line, i);
   }
   return scan.writes;
+}
+
+/** The line without a trailing `;` or `;;` (by hand: a `\\s*;;?\\s*$` regex is polynomial on long blank tails). */
+function withoutTerminator(raw: string): string {
+  let line = raw.trimEnd();
+  if (line.endsWith(';;')) line = line.slice(0, -2);
+  else if (line.endsWith(';')) line = line.slice(0, -1);
+  return line.trimEnd();
+}
+
+/** The command after the last `&&` or `||`, which is what a redirect at the end of a chain applies to. */
+function lastCommand(command: string): string {
+  const at = Math.max(command.lastIndexOf('&&'), command.lastIndexOf('||'));
+  return at === -1 ? command : command.slice(at + 2).trimStart();
 }
 
 /** A line inside a `{ … }` group: collected until the closing brace, which tells whether the group was redirected. */
@@ -115,9 +127,9 @@ function scanLine(scan: Scan, line: string, i: number): number {
 
 /** A command redirected to the file: an `echo`/`printf`, or `cat <<EOF` whose body follows on the next lines. */
 function redirectedCommand(scan: Scan, command: string, conditional: boolean, i: number): number {
-  const heredoc = /<<-?\s*['"]?(\w+)['"]?\s*$/.exec(command);
+  const heredoc = /<<-?\s*['"]?(\w+)['"]?$/.exec(command.trimEnd());
   if (!heredoc) {
-    scan.writes.push(...parseGroup([command.replace(/^.*(&&|\|\|)\s*/, '')], conditional));
+    scan.writes.push(...parseGroup([lastCommand(command)], conditional));
     return i;
   }
   // cat >> "$GITHUB_OUTPUT" <<EOF … EOF: one `k=v` per line.
