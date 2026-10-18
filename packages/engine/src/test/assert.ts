@@ -24,7 +24,7 @@ import type {
   Value,
   WorkflowPlan,
 } from '../plan/types';
-import { becauseOf, decidingReason, formatReason, formatValue } from '../render/reason';
+import { becauseOf, decidingReason, formatReason, formatValue, reasonUnknowns } from '../render/reason';
 import { checkTri, checkValue, resultValue } from './expect';
 import type { TextPos } from './positions';
 import {
@@ -698,26 +698,11 @@ export function explain(ctx: AssertContext, decision: Decision): string[] {
     if ('loc' in r && r.loc) lines.push(`    at ${r.loc.file}:${r.loc.line}:${r.loc.column}`);
   }
   if (decision.verdict === 'maybe') {
-    const ids = decision.chain.flatMap(unknownsOf);
+    const ids = decision.chain.flatMap(reasonUnknowns);
     lines.push(...pinLines(ctx, { known: false, unknowns: [...new Set(ids)] }));
     lines.push('a maybe fails this assertion; pin the unknown, or set allowMaybe: true to accept it');
   }
   return lines;
-}
-
-/** The unknown ids a reason's gate depends on. */
-function unknownsOf(r: Reason): string[] {
-  switch (r.kind) {
-    case 'if':
-      return r.value.known ? [] : r.value.unknowns;
-    case 'filter':
-    case 'types':
-      return r.matched.known ? [] : r.matched.unknowns;
-    case 'matrix':
-      return [r.unknown];
-    default:
-      return [];
-  }
 }
 
 function ifDetail(ctx: AssertContext, r: Reason & { kind: 'if' }): string[] {
