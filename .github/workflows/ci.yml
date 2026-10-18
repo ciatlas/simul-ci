@@ -156,12 +156,12 @@ jobs:
           persist-credentials: false
       - id: tests
         name: Route tests
-        uses: ./
+        uses: $/
         with:
           junit: simulci-junit.xml
       - id: plan
         name: The plan of a pull request
-        uses: ./
+        uses: $/
         with:
           mode: plan
           scenario: '{ event: pull_request, base: main, head: feat/x, changed: [packages/engine/src/x.ts] }'
