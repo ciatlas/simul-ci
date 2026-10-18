@@ -16,9 +16,23 @@ export function discoverTests(root: string, named: readonly string[] = []): stri
     .sort((x, y) => x.localeCompare(y));
 }
 
-/** The test files as the runner takes them: their checkout-relative path and text. */
-export const readTests = (root: string, files: readonly string[]): TestInput[] =>
-  files.map((path) => ({ path, text: readFileSync(join(root, path), 'utf8') }));
+export class TestsError extends Error {
+  override name = 'TestsError';
+}
+
+/** The test files as the runner takes them: their checkout-relative path and text (T000 when one cannot be read). */
+export function readTests(root: string, files: readonly string[]): TestInput[] {
+  return files.map((path) => {
+    try {
+      return { path, text: readFileSync(join(root, path), 'utf8') };
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') throw new TestsError(`T000 ${path}: no such test file`);
+      if (code === 'EISDIR') throw new TestsError(`T000 ${path}: is a directory, not a test file`);
+      throw e;
+    }
+  });
+}
 
 /** Test files under `.github/workflows`, which GitHub would try to run. */
 export const misplacedTests = (files: readonly string[]): string[] =>

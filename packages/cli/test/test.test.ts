@@ -108,6 +108,11 @@ describe('simulci test', () => {
     });
     expect(runTestCommand({ dir }, io())).toBe(1);
     expect(runTestCommand({ dir, assume: 'build.t=failure' }, io())).toBe(0);
+    const missing = io();
+    expect(runTestCommand({ dir, files: [join(dir, '.github/simulci/tests/nope.test.yml')] }, missing)).toBe(
+      2,
+    );
+    expect(missing.err.join('')).toBe('T000 .github/simulci/tests/nope.test.yml: no such test file\n');
     const none = io();
     expect(runTestCommand({ dir: checkout({ '.github/workflows/ci.yml': ci }) }, none)).toBe(2);
     expect(none.out.join('')).toContain('T000 no test files');

@@ -21,6 +21,7 @@ import {
   readTests,
   readWorkflowFiles,
   TESTS_DIR,
+  TestsError,
 } from '@simulci/node';
 import { defineCommand } from 'citty';
 
@@ -64,7 +65,7 @@ export function runTestCommand(a: TestArgs, io: TestIo): number {
   try {
     result = runTests(ready.project, readTests(root, files), options);
   } catch (e) {
-    if (!(e instanceof MocksError)) throw e;
+    if (!(e instanceof MocksError || e instanceof TestsError)) throw e;
     io.stderr(`${e.message}\n`);
     return 2;
   }

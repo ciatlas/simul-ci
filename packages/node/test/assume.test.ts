@@ -26,5 +26,11 @@ describe('parseAssume', () => {
     expect(() => parseAssume(['nonsense'])).toThrow(AssumeError);
     expect(() => parseAssume(['build.t=maybe'])).toThrow(/invalid assume entries/);
     expect(() => parseAssume([], 'step: x\n')).toThrow(/YAML list/);
+    expect(parseAssume(['build.outputs.version=1.2.3'])).toEqual([
+      { job: 'build', outputs: { version: '1.2.3' } },
+    ]);
+    expect(() => parseAssume(['{ step: ['])).toThrow(/is not valid YAML/);
+    expect(() => parseAssume([], '- { step: [\n')).toThrow(/the assume file is not valid YAML/);
+    expect(() => parseAssume(['build.env.X=1'])).toThrow(/env writes belong to a step/);
   });
 });
