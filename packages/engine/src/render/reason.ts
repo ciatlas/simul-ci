@@ -1,4 +1,5 @@
-import type { Json, Reason, Value } from '../plan/types';
+import type { Decision, Json, Reason, Tri, Value } from '../plan/types';
+import { known, unknown } from '../plan/values';
 
 /** A value for a line of text: the value, or `?` with what it depends on. */
 export function formatValue(v: Value<Json>): string {
@@ -25,7 +26,7 @@ export function formatReason(r: Reason): string {
     case 'parent':
       return `parent ${r.verdict}`;
     case 'if': {
-      const reads = r.reads.filter((x) => !x.value.known).map((x) => x.ref);
+      const reads = (r.reads ?? []).filter((x) => !x.value.known).map((x) => x.ref);
       const expr = r.expr === '' ? r.evaluated : r.expr;
       return `if: ${expr} → ${formatValue(r.value)}${reads.length ? ` [${reads.join(', ')}]` : ''}`;
     }
@@ -38,8 +39,51 @@ export function formatReason(r: Reason): string {
   }
 }
 
-/** The clause that decided: the last reason of the chain. */
-export function decidingReason(chain: Reason[]): string {
-  const last = chain.at(-1);
-  return last ? formatReason(last) : '';
+/** What a reason's gate says: passed, failed, or undecided. */
+export function reasonGate(r: Reason): Value<boolean> {
+  switch (r.kind) {
+    case 'event':
+      return known(r.listens);
+    case 'types':
+    case 'filter':
+      return r.matched;
+    case 'default-branch':
+    case 'schedule':
+      return known(r.matched);
+    case 'skip-ci':
+    case 'limit':
+      return known(false);
+    case 'parent':
+      return r.verdict === 'maybe' ? unknown([]) : known(r.verdict === 'yes');
+    case 'if':
+      return r.value;
+    case 'matrix':
+      return unknown([r.unknown]);
+    default:
+      return unknown([]);
+  }
 }
+
+/**
+ * The reason that decided a verdict: for `no` the first gate that failed, for `maybe` the first that is undecided,
+ * else the last of the chain. A workflow's chain holds every trigger gate, so the last one is not always the one.
+ */
+export function decidingReason(chain: Reason[], verdict: Tri): Reason | undefined {
+  if (verdict === 'no') return chain.find(gateFailed) ?? chain.at(-1);
+  if (verdict === 'maybe') return chain.find((r) => !reasonGate(r).known) ?? chain.at(-1);
+  return chain.at(-1);
+}
+
+function gateFailed(r: Reason): boolean {
+  const gate = reasonGate(r);
+  return gate.known && !gate.value;
+}
+
+/** The deciding clause of a decision as a line of text. */
+export function decidingClause(decision: Decision): string {
+  const r = decidingReason(decision.chain, decision.verdict);
+  return r ? formatReason(r) : '';
+}
+
+/** The word a reason goes by in a test's `because:`: its kind, or the filter's name. */
+export const becauseOf = (r: Reason): string => (r.kind === 'filter' ? r.filter : r.kind);

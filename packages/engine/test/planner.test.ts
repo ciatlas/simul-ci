@@ -385,3 +385,83 @@ jobs:
     expect(test.legs[0]!.runs.chain.at(-1)).toEqual({ kind: 'matrix', unknown: `${test.id}.matrix` });
   });
 });
+
+describe('simulate: positions, environments and composite inputs', () => {
+  const files = {
+    '.github/workflows/ci.yml': `
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        type: string
+        default: staging
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: \${{ inputs.env }}
+    steps:
+      - id: s
+        if: github.actor == 'octocat'
+        uses: ./.github/actions/greet
+        with:
+          who: world
+  named:
+    runs-on: ubuntu-latest
+    environment:
+      name: \${{ vars.TARGET }}
+      url: https://example.com
+    steps: [{ run: echo }]
+`,
+    '.github/actions/greet/action.yml': `
+name: greet
+inputs:
+  who:
+    default: nobody
+  loud:
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - run: echo \${{ inputs.who }}
+      shell: bash
+`,
+  };
+
+  it('records where jobs, steps and if conditions are declared', () => {
+    const plan = simulate({ files, scenario: { event: 'workflow_dispatch', branch: 'main' } });
+    const job = plan.workflows[0]!.jobs[0]!;
+    expect(job.loc).toEqual({ file: '.github/workflows/ci.yml', line: 9, column: 3 });
+    const step = job.legs[0]!.steps![0]!;
+    expect(step.loc).toMatchObject({ file: '.github/workflows/ci.yml', line: 13 });
+    const ifReason = step.runs.chain.find((r) => r.kind === 'if')!;
+    expect(ifReason.kind === 'if' && ifReason.loc).toMatchObject({
+      file: '.github/workflows/ci.yml',
+      line: 14,
+    });
+    expect(step.composite!.steps[0]!.loc).toMatchObject({ file: '.github/actions/greet/action.yml' });
+  });
+
+  it('evaluates a dynamic environment for the leg, as a string or as its name', () => {
+    const plan = simulate({
+      files,
+      scenario: { event: 'workflow_dispatch', branch: 'main', inputs: { env: 'prod' } },
+    });
+    const [deploy, named] = plan.workflows[0]!.jobs;
+    expect(deploy!.legs[0]!.environment).toEqual({ known: true, value: 'prod' });
+    expect(named!.legs[0]!.environment).toEqual({ known: true, value: '' });
+    const vars = simulate({
+      files,
+      scenario: { event: 'workflow_dispatch', branch: 'main', vars: { TARGET: 'live' } },
+    });
+    expect(vars.workflows[0]!.jobs[1]!.legs[0]!.environment).toEqual({ known: true, value: 'live' });
+  });
+
+  it('carries the inputs a composite action reads: the with: over the defaults', () => {
+    const plan = simulate({ files, scenario: { event: 'workflow_dispatch', branch: 'main' } });
+    const composite = plan.workflows[0]!.jobs[0]!.legs[0]!.steps![0]!.composite!;
+    expect(composite.inputs).toEqual({
+      who: { known: true, value: 'world' },
+      loud: { known: true, value: 'false' },
+    });
+  });
+});
