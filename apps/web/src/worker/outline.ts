@@ -8,16 +8,7 @@ export function outlineOf(loaded: LoadedProject): Outline {
   const actionFiles = new Set([...project.actions.values()].map((a) => a.file));
   const files: OutlineFile[] = Object.keys(loaded.files)
     .sort((a, b) => a.localeCompare(b))
-    .map((path) => {
-      const decl = project.workflows.get(path) ?? [...project.actions.values()].find((a) => a.file === path);
-      const kind = project.workflows.has(path) ? 'workflow' : actionFiles.has(path) ? 'action' : 'other';
-      const errors = (decl?.parseErrors ?? []).map((e) => ({
-        line: e.loc.line,
-        column: e.loc.column,
-        message: e.message,
-      }));
-      return { path, kind, errors };
-    });
+    .map((path) => fileOf(loaded, path, actionFiles));
   const workflows: OutlineWorkflow[] = [...project.workflows.values()]
     .sort((a, b) => a.path.localeCompare(b.path))
     .map((wf) => {
@@ -140,6 +131,26 @@ function jobOf(
   return out;
 }
 
+function fileOf(loaded: LoadedProject, path: string, actionFiles: Set<string>): OutlineFile {
+  const { project } = loaded.index;
+  const decl = project.workflows.get(path) ?? [...project.actions.values()].find((a) => a.file === path);
+  const kind = project.workflows.has(path) ? 'workflow' : actionFiles.has(path) ? 'action' : 'other';
+  const errors = (decl?.parseErrors ?? []).map((e) => ({
+    line: e.loc.line,
+    column: e.loc.column,
+    message: e.message,
+  }));
+  // What the workflow parser's converter rejected (an unknown event, a bad filter) the YAML parser let through.
+  if (kind === 'workflow' && errors.length === 0) errors.push(...settingsErrors(loaded, path));
+  return { path, kind, errors };
+}
+
+function settingsErrors(loaded: LoadedProject, path: string): OutlineFile['errors'] {
+  const settings = loaded.settings.get(path) ?? readSettings(path, loaded.files[path] ?? '');
+  loaded.settings.set(path, settings);
+  return settings.errors.map((e) => ({ line: e.line ?? 1, column: e.column ?? 1, message: e.message }));
+}
+
 /** The lines of `on:`, of each event key under it and of each filter key, which the plan's trigger reasons lack. */
 type EventLines = Record<string, { line: number; filters: Record<string, number> }>;
 
@@ -174,7 +185,10 @@ function mapLines(items: { key: unknown; value: unknown }[], line: LineOf): Even
   const out: EventLines = {};
   for (const pair of items) {
     if (!isScalar(pair.key)) continue;
-    out[String(pair.key.value)] = { line: line(pair.key.range?.[0]), filters: keyLines(pair.value, line) };
+    const key = String(pair.key.value);
+    // A duplicate key: the converter keeps the first block, so the lines point at that one.
+    if (key in out) continue;
+    out[key] = { line: line(pair.key.range?.[0]), filters: keyLines(pair.value, line) };
   }
   return out;
 }

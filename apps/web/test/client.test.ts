@@ -86,10 +86,10 @@ describe('the engine client', () => {
     expect((await c).type).toBe('plan');
   });
 
-  it('restarts a stalled worker, replays the load and the request, and gives up after two restarts', async () => {
+  it('restarts a stalled worker, replays the load and the request under the new project id, and gives up after two restarts', async () => {
     const client = createEngineClient({ spawn });
-    const restarts: number[] = [];
-    client.onRestart((n) => restarts.push(n));
+    const restarts: [number, number | undefined][] = [];
+    client.onRestart((n, project) => restarts.push([n, project]));
     workers[0]!.ready();
     await client.ready;
     void client.load({ files: { a: '' } });
@@ -98,17 +98,31 @@ describe('the engine client', () => {
     await vi.advanceTimersByTimeAsync(3001);
     expect(workers[0]!.terminated).toBe(true);
     expect(workers).toHaveLength(2);
-    expect(restarts).toEqual([1]);
     workers[1]!.ready();
     await client.ready;
     await vi.advanceTimersByTimeAsync(0);
-    expect(workers[1]!.sent.map((m) => m.type)).toEqual(['load', 'simulate']);
-    workers[1]!.reply({ ...plan(workers[1]!.sent[1]!.id) });
+    expect(workers[1]!.sent.map((m) => m.type)).toEqual(['load']);
+    workers[1]!.reply({ id: workers[1]!.sent[0]!.id, type: 'loaded', project: 7, outline: {}, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(workers[1]!.sent.map((m) => [m.type, (m as { project?: number }).project])).toEqual([
+      ['load', undefined],
+      ['simulate', 7],
+    ]);
+    expect(restarts).toEqual([[1, 7]]);
+    workers[1]!.reply({ ...plan(workers[1]!.sent[1]!.id), project: 7 });
     expect((await stalled).type).toBe('plan');
-    const again = client.simulate({ project: 1, scenario: { event: 'push' }, assume: [], detail: 'steps' });
-    await vi.advanceTimersByTimeAsync(3001);
-    workers[2]!.ready();
-    await client.ready;
+    // Three stalls in a row with no plan between them exhaust the budget.
+    const again = client.simulate({ project: 7, scenario: { event: 'push' }, assume: [], detail: 'steps' });
+    for (let round = 0; round < 2; round++) {
+      await vi.advanceTimersByTimeAsync(3001);
+      const w = workers.at(-1)!;
+      w.ready();
+      await client.ready;
+      await vi.advanceTimersByTimeAsync(0);
+      w.reply({ id: w.sent[0]!.id, type: 'loaded', project: 1, outline: {}, ms: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(w.sent.map((m) => m.type)).toEqual(['load', 'simulate']);
+    }
     await vi.advanceTimersByTimeAsync(3001);
     expect(await again).toMatchObject({
       type: 'error',
@@ -116,6 +130,89 @@ describe('the engine client', () => {
       message: 'the engine stopped responding',
     });
     expect(client.restarts()).toBe(3);
+    expect(workers).toHaveLength(4);
+  });
+
+  it('replays a stalled load with its own promise and holds waiting requests until the new project is known', async () => {
+    const client = createEngineClient({ spawn });
+    workers[0]!.ready();
+    await client.ready;
+    const load = client.load({ files: { a: '' } });
+    const sim = client.simulate({ project: 1, scenario: { event: 'push' }, assume: [], detail: 'steps' });
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(workers).toHaveLength(2);
+    workers[1]!.ready();
+    await client.ready;
+    await vi.advanceTimersByTimeAsync(0);
+    // Only the load went out; the simulate waits for the project id.
+    expect(workers[1]!.sent.map((m) => m.type)).toEqual(['load']);
+    workers[1]!.reply({ id: workers[1]!.sent[0]!.id, type: 'loaded', project: 1, outline: {}, ms: 1 });
+    expect((await load).type).toBe('loaded');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(workers[1]!.sent.map((m) => [m.type, (m as { project?: number }).project])).toEqual([
+      ['load', undefined],
+      ['simulate', 1],
+    ]);
+    workers[1]!.reply({ ...plan(workers[1]!.sent[1]!.id), project: 1 });
+    expect((await sim).type).toBe('plan');
+  });
+
+  it('settles the held requests when the replacement worker never starts, and is final after terminate', async () => {
+    const client = createEngineClient({ spawn, readyTimeoutMs: 100 });
+    workers[0]!.ready();
+    await client.ready;
+    void client.load({ files: { a: '' } });
+    workers[0]!.reply({ id: 1, type: 'loaded', project: 1, outline: {}, ms: 1 });
+    const stalled = client.simulate({ project: 1, scenario: { event: 'push' }, assume: [], detail: 'steps' });
+    const waitingCase = client.case({
+      project: 1,
+      workflow: 'ci.yml',
+      scenario: { event: 'push' },
+      assume: [],
+      detail: 'jobs',
+      format: 'test',
+    });
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(workers).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(101);
+    expect(await stalled).toMatchObject({
+      type: 'error',
+      kind: 'engine',
+      message: 'the engine did not start',
+    });
+    expect(await waitingCase).toMatchObject({ type: 'error', kind: 'engine' });
+    const after = createEngineClient({ spawn });
+    workers[2]!.ready();
+    await after.ready;
+    after.terminate();
+    expect(workers[2]!.terminated).toBe(true);
+    const late = await after.load({ files: {} });
+    expect(late).toMatchObject({ type: 'error', kind: 'engine', message: 'the engine was shut down' });
+    expect(workers).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(workers).toHaveLength(3);
+  });
+
+  it('gives a page a fresh restart budget once a plan comes back', async () => {
+    const client = createEngineClient({ spawn });
+    workers[0]!.ready();
+    await client.ready;
+    void client.load({ files: { a: '' } });
+    workers[0]!.reply({ id: 1, type: 'loaded', project: 1, outline: {}, ms: 1 });
+    for (let round = 0; round < 3; round++) {
+      const sim = client.simulate({ project: 1, scenario: { event: 'push' }, assume: [], detail: 'steps' });
+      await vi.advanceTimersByTimeAsync(3001);
+      const w = workers.at(-1)!;
+      w.ready();
+      await client.ready;
+      await vi.advanceTimersByTimeAsync(0);
+      w.reply({ id: w.sent[0]!.id, type: 'loaded', project: 1, outline: {}, ms: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      w.reply({ ...plan(w.sent[1]!.id), project: 1 });
+      expect((await sim).type).toBe('plan');
+      expect(client.restarts()).toBe(0);
+    }
+    expect(workers).toHaveLength(4);
   });
 
   it('rejects ready on a protocol mismatch and when the worker never starts', async () => {

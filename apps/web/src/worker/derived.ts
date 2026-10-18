@@ -51,7 +51,9 @@ function record(
 }
 
 function walkWorkflow(wf: WorkflowPlan, outline: Outline, d: Derived, parentLoc: Loc | undefined): void {
-  const loc = triggerLoc(wf, outline) ?? parentLoc;
+  // A called workflow is decided by the calling job: its deciding line is the caller's, its own `on:` only as a fallback.
+  const own = triggerLoc(wf, outline);
+  const loc = wf.depth === 0 ? own : decisionLoc(wf.triggered, parentLoc, own);
   record(d, wf.id, 'workflow', wf.triggered, loc);
   for (const job of wf.jobs) walkJob(job, wf, outline, d);
 }

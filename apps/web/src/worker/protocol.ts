@@ -93,7 +93,7 @@ export interface CaseResponse {
 export interface InvalidResponse {
   id: number;
   type: 'invalid';
-  what: 'scenario' | 'assume';
+  what: 'scenario' | 'assume' | 'workflow';
   issues: { path: (string | number)[]; message: string }[];
 }
 

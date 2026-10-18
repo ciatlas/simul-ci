@@ -175,6 +175,72 @@ describe('the worker handler', () => {
     expect(c.case?.then).toMatchObject({ run: ['build'], skip: ['deploy'], conclusion: 'failure' });
   });
 
+  it('names the member issue of a union and refuses a case for a workflow the project lacks', () => {
+    const { state, project } = loaded();
+    const r = handle(
+      state,
+      sim({
+        project,
+        scenario: { event: 'push', branch: 'main', changed: [{ path: 'a', status: 'moved' }] } as never,
+      }),
+    );
+    expect(r.response).toMatchObject({ type: 'invalid', what: 'scenario' });
+    if (r.response.type !== 'invalid') return;
+    expect(r.response.issues.some((i) => i.path.join('.') === 'changed.0.status')).toBe(true);
+    expect(r.response.issues.every((i) => i.message !== 'Invalid input')).toBe(true);
+    const c = handle(state, {
+      id: 4,
+      type: 'case',
+      project,
+      workflow: 'nope.yml',
+      scenario: { event: 'push', branch: 'main' },
+      assume: [],
+      detail: 'jobs',
+      format: 'test',
+    }).response;
+    expect(c).toMatchObject({ type: 'invalid', what: 'workflow', issues: [{ path: ['workflow'] }] });
+  });
+
+  it("points a called workflow at the caller's decision and reports what the converter rejected", () => {
+    const r = handle(initialState(), {
+      id: 1,
+      type: 'load',
+      files: {
+        '.github/workflows/caller.yml':
+          "on: push\njobs:\n  detect:\n    runs-on: ubuntu-latest\n    outputs:\n      go: ${{ steps.d.outputs.go }}\n    steps:\n      - id: d\n        run: ./decide.sh\n  call:\n    needs: detect\n    if: needs.detect.outputs.go == '1'\n    uses: ./.github/workflows/callee.yml\n",
+        '.github/workflows/callee.yml':
+          'on: workflow_call\njobs:\n  inner:\n    runs-on: ubuntu-latest\n    steps: [{ run: echo }]\n',
+        '.github/workflows/dup.yml':
+          'on:\n  push:\n    branches: [main]\n  push:\n    branches: [dev]\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps: [{ run: echo }]\n',
+        '.github/workflows/bad-on.yml':
+          'on:\n  push:\n    branchez: [main]\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps: [{ run: echo }]\n',
+      },
+    });
+    if (r.response.type !== 'loaded') throw new Error(JSON.stringify(r.response));
+    const { outline } = r.response;
+    const dup = outline.workflows.find((w) => w.path.endsWith('dup.yml'))!;
+    expect(dup.events[0]!.loc).toEqual({ line: 2, filters: { branches: 3 } });
+    const badOn = outline.files.find((f) => f.path.endsWith('bad-on.yml'))!;
+    expect(badOn.errors.length).toBeGreaterThan(0);
+    expect(badOn.errors[0]!.message).toMatch(/branchez/);
+    const p = handle(
+      r.state,
+      sim({ project: r.response.project, scenario: { event: 'push', branch: 'main' } }),
+    );
+    if (p.response.type !== 'plan') throw new Error(p.response.type);
+    const caller = p.response.plan.workflows.find((w) => w.path.endsWith('caller.yml'))!;
+    const callee = caller.jobs[1]!.legs[0]!.call!;
+    expect(callee.triggered.verdict).toBe('maybe');
+    expect(p.response.derived.decidingLoc[callee.id]).toMatchObject({
+      file: '.github/workflows/caller.yml',
+      line: 12,
+    });
+    expect(p.response.derived.decidingLoc[callee.jobs[0]!.id]).toMatchObject({
+      file: '.github/workflows/caller.yml',
+      line: 12,
+    });
+  });
+
   it('accepts only well-formed requests', () => {
     expect(isEngineRequest({ id: 1, type: 'load', files })).toBe(true);
     expect(isEngineRequest(sim())).toBe(true);

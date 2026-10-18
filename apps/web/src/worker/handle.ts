@@ -102,11 +102,28 @@ function validate(request: SimulateRequest | CaseRequest): InvalidResponse | und
   return undefined;
 }
 
-const issuesOf = (issues: { path: PropertyKey[]; message: string }[]): InvalidResponse['issues'] =>
-  issues.map((i) => ({
-    path: i.path.map((p) => (typeof p === 'number' ? p : String(p))),
-    message: i.message,
-  }));
+interface ZodIssueLike {
+  path: PropertyKey[];
+  message: string;
+  /** zod 4: the issues of each union member that was tried. */
+  errors?: ZodIssueLike[][];
+}
+
+/** The leaf issues: a union's own "Invalid input" says less than the issues of the member that was meant. */
+const issuesOf = (issues: ZodIssueLike[]): InvalidResponse['issues'] =>
+  issues
+    .flatMap((i) => leaves(i, []))
+    .map((i) => ({
+      path: i.path.map((p) => (typeof p === 'number' ? p : String(p))),
+      message: i.message,
+    }));
+
+/** A member's issues have paths relative to the union; they are returned under the full path. */
+function leaves(issue: ZodIssueLike, prefix: PropertyKey[]): ZodIssueLike[] {
+  const path = [...prefix, ...issue.path];
+  const nested = (issue.errors ?? []).flat().flatMap((e) => leaves(e, path));
+  return nested.length ? nested : [{ ...issue, path }];
+}
 
 function plan(project: NonNullable<WorkerState['project']>, request: SimulateRequest): EngineResponse {
   const started = performance.now();
@@ -131,6 +148,16 @@ function plan(project: NonNullable<WorkerState['project']>, request: SimulateReq
 }
 
 function testCase(project: NonNullable<WorkerState['project']>, request: CaseRequest): EngineResponse {
+  const known = project.outline.workflows.some(
+    (w) => w.path === request.workflow || w.path.endsWith(`/${request.workflow}`),
+  );
+  if (!known)
+    return {
+      id: request.id,
+      type: 'invalid',
+      what: 'workflow',
+      issues: [{ path: ['workflow'], message: `no workflow at ${request.workflow}` }],
+    };
   const result = simulate({
     project: project.loaded,
     scenario: request.scenario,

@@ -52,7 +52,6 @@ export function App() {
       live = false;
     };
   }, [client, yaml, event]);
-  useEffect(() => () => client.terminate(), [client]);
   const text = textOf(result);
   return (
     <main className="mx-auto grid max-w-6xl gap-4 p-4 md:grid-cols-2">
