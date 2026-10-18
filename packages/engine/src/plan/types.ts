@@ -177,12 +177,16 @@ export interface StepPlan {
   env: Record<string, Value<string>>;
   outputs: Record<string, Value<string>>;
   composite?: ActionPlan;
+  /** Where the step is declared. */
+  loc?: Loc;
 }
 
 /** A composite action's main steps, nested under the step that uses it. */
 export interface ActionPlan {
   id: NodeId;
   path: string;
+  /** The `inputs` context the inner steps read: the step's `with:` over the action's defaults. */
+  inputs: Record<string, Value<Json>>;
   steps: StepPlan[];
   outputs: Record<string, Value<string>>;
 }
@@ -223,6 +227,8 @@ export interface JobPlan {
   with?: Record<string, Value<Json>>;
   secrets?: Record<string, Value<boolean>>;
   legs: LegPlan[];
+  /** Where the job is declared. */
+  loc?: Loc;
 }
 
 export interface WorkflowPlan {

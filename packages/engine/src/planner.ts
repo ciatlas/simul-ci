@@ -48,6 +48,7 @@ import type {
   JobPlan,
   Json,
   LegPlan,
+  Loc,
   MatrixPlan,
   MockLayer,
   NodeId,
@@ -500,14 +501,7 @@ class Planner {
     const aggregate = combine(directResults, (rs) =>
       rs.some((r) => r === 'failure') ? 'failure' : rs.every((r) => r === 'success') ? 'success' : 'skipped',
     );
-    const ifReason = this.ifReason(
-      writtenIf(job),
-      ctx.settings.if,
-      aggregate,
-      cond,
-      job.ifSite?.loc,
-      ctx.wf.path,
-    );
+    const ifReason = this.ifReason(writtenIf(job), ctx.settings.if, aggregate, cond, job.ifSite?.loc);
     const parent: Reason = { kind: 'parent', node: ctx.wfNode, verdict: ctx.triggered.verdict };
     const runs = decide(ctx.triggered, cond.value, [parent, ifReason]);
     if (runs.verdict === 'maybe') this.noteValue(cond.value, jobNode);
@@ -606,10 +600,7 @@ class Planner {
     };
     if (combo) leg.origin = combo.origin;
     if (job.runsOn) leg.runsOn = this.runsOn(job, ctx.wf, state, legId);
-    if (job.environment)
-      leg.environment = job.environment.dynamic
-        ? unknown([`${legId}.environment`])
-        : known(job.environment.name);
+    if (job.environment) leg.environment = this.environment(job, ctx.wf, state, legId);
     if (job.uses) {
       this.planCall(leg, state, seg, ctx);
       return leg;
@@ -654,6 +645,20 @@ class Planner {
     const v = site ? evaluateValue(site.text, state) : unknown<string>([`${legId}.runs-on`]);
     this.noteValue(v);
     return v.known ? known([v.value]) : unknown<string[]>(v.unknowns);
+  }
+
+  /** The environment of a leg: as declared, or an `environment: ${{ … }}` (or its `name:`) evaluated for the leg. */
+  private environment(job: JobDecl, wf: WorkflowDecl, state: ContextState, legId: NodeId): Value<string> {
+    const decl = job.environment!;
+    if (!decl.dynamic) return known(decl.name);
+    const site = wf.sites.find((s) => {
+      if (s.job !== job.id || s.step !== undefined) return false;
+      const tail = s.yamlPath.slice(-2);
+      return tail.at(-1) === 'environment' || (tail[0] === 'environment' && tail[1] === 'name');
+    });
+    const v = site ? evaluateValue(site.text, state) : unknown<string>([`${legId}.environment`]);
+    this.noteValue(v);
+    return v;
   }
 
   /** A reusable workflow called by the leg: nested with the caller's inputs and secrets, its result from its jobs. */
@@ -789,7 +794,6 @@ class Planner {
       statusAsResult(status),
       cond,
       step.ifSite?.loc,
-      undefined,
     );
     const runs = decide(parentRuns, cond.value, [parent, ifReason]);
     if (runs.verdict === 'maybe') this.noteValue(cond.value, sid);
@@ -995,6 +999,7 @@ class Planner {
     return {
       id,
       path: action.path,
+      inputs,
       steps: inner.plans,
       outputs: this.outputsOf(action.outputs, { ...state, inputs, steps }),
     };
@@ -1007,8 +1012,7 @@ class Planner {
     evaluated: string,
     status: Value<Result>,
     cond: Condition,
-    loc: { line: number; column: number } | undefined,
-    file: string | undefined,
+    loc: Loc | undefined,
   ): IfReason {
     const reason: IfReason = {
       kind: 'if',
@@ -1019,7 +1023,7 @@ class Planner {
       value: cond.value,
       reads: cond.reads,
     };
-    if (loc && file !== undefined) reason.loc = { file, line: loc.line, column: loc.column };
+    if (loc) reason.loc = locOf(loc);
     return reason;
   }
 
@@ -1155,6 +1159,7 @@ function jobShell(
   };
   if (job.name !== undefined) plan.name = job.name;
   if (job.uses) plan.uses = job.uses.raw;
+  plan.loc = locOf(job.loc);
   return plan;
 }
 
@@ -1193,8 +1198,12 @@ function stepShell(
   if (step.name !== undefined) plan.name = step.name;
   if (step.uses) plan.uses = step.uses.raw;
   if (step.run !== undefined) plan.run = true;
+  plan.loc = locOf(step.loc);
   return plan;
 }
+
+/** A plan position from a core one: file, line and column. */
+const locOf = (loc: Loc): Loc => ({ file: loc.file, line: loc.line, column: loc.column });
 
 function legValues(combo: Combination | undefined, legId: NodeId): Record<string, Value<Json>> {
   if (!combo) return {};
