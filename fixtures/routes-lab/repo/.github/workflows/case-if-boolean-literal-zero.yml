@@ -1,0 +1,16 @@
+# Case 16 (part) - if-boolean-literal-zero: `if: 0` and `if: 1`, isolated in case they do not parse.
+name: case-if-boolean-literal-zero
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: if 0
+        if: 0
+        run: 'echo "probe: if-0=ran"'
+      - name: if 1
+        if: 1
+        run: 'echo "probe: if-1=ran"'
+      - name: probe
+        if: always()
+        run: 'echo "probe: a=ran"'

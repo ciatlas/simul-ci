@@ -1,0 +1,13 @@
+# Case 16 (part) - if-boolean-literal-empty: `if: ''`, isolated in case it does not parse.
+name: case-if-boolean-literal-empty
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: if empty
+        if: ''
+        run: 'echo "probe: if-empty=ran"'
+      - name: probe
+        if: always()
+        run: 'echo "probe: a=ran"'

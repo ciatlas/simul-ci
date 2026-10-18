@@ -1,0 +1,12 @@
+# Case 18 - filter-branches-and-paths: branches and paths together (both must match).
+name: case-filter-branches-and-paths
+on:
+  push:
+    branches: [main]
+    paths: ['src/**']
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: ref=${{ github.ref }}"'

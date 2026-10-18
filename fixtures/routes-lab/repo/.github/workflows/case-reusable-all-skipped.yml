@@ -1,0 +1,24 @@
+# Case 9 - reusable-all-skipped: a reusable workflow whose jobs are all skipped, seen by the caller's dependents.
+name: case-reusable-all-skipped
+on: [push, workflow_dispatch]
+jobs:
+  call:
+    uses: ./.github/workflows/callee-skipped.yml
+  b:
+    needs: call
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        env:
+          OUTPUTS: ${{ toJSON(needs.call.outputs) }}
+        run: |
+          echo "probe: needs.call.result=${{ needs.call.result }}"
+          echo "probe: needs.call.outputs.o=${{ needs.call.outputs.o }}"
+          echo "probe: needs.call.outputs=$(jq -c . <<< "$OUTPUTS")"
+  c:
+    needs: call
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.call.result=${{ needs.call.result }}"'

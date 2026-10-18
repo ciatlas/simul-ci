@@ -1,0 +1,37 @@
+# Case 11 - output-last-write: a step output written twice, and a heredoc (multi-line) output, read in-job and cross-job.
+name: case-output-last-write
+on: [push, workflow_dispatch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    outputs:
+      k: ${{ steps.w.outputs.k }}
+      m: ${{ steps.w.outputs.m }}
+    steps:
+      - name: write
+        id: w
+        run: |
+          echo "k=first" >> "$GITHUB_OUTPUT"
+          echo "k=second" >> "$GITHUB_OUTPUT"
+          {
+            echo "m<<EOF"
+            echo "line one"
+            echo "line two"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: probe
+        env:
+          M: ${{ toJSON(steps.w.outputs.m) }}
+        run: |
+          echo "probe: steps.w.outputs.k=${{ steps.w.outputs.k }}"
+          echo "probe: steps.w.outputs.m=$M"
+  b:
+    needs: a
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        env:
+          M: ${{ toJSON(needs.a.outputs.m) }}
+        run: |
+          echo "probe: needs.a.outputs.k=${{ needs.a.outputs.k }}"
+          echo "probe: needs.a.outputs.m=$M"

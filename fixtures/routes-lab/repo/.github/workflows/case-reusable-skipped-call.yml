@@ -1,0 +1,20 @@
+# Case 10 - reusable-skipped-call: a caller job with if: false; which checks the run reports for it.
+name: case-reusable-skipped-call
+on: [push, workflow_dispatch]
+jobs:
+  call:
+    if: false
+    uses: ./.github/workflows/callee-echo.yml
+  b:
+    needs: call
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.call.result=${{ needs.call.result }}"'
+  c:
+    needs: call
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: 'echo "probe: needs.call.result=${{ needs.call.result }}"'
