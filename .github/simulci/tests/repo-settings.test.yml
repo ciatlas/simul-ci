@@ -1,0 +1,18 @@
+# The settings-as-code workflow: apply on main, check on pull requests, only when the settings change.
+workflow: repo-settings.yml
+cases:
+  - name: a ruleset change on main is applied
+    when: { event: push, branch: main, changed: [.github/rulesets/main.json] }
+    then:
+      run: [apply]
+      skip:
+        - check: if
+  - name: a ruleset change in a pull request is checked, not applied
+    when: { event: pull_request, base: main, head: feat/x, changed: [.github/rulesets/main.json] }
+    then:
+      run: [check]
+      skip:
+        - apply: if
+  - name: a change elsewhere starts nothing
+    when: { event: push, branch: main, changed: [packages/engine/src/x.ts] }
+    then: { because: paths }
