@@ -123,6 +123,15 @@ describe('the action in test mode', () => {
     const mocked = fake(ws, { assume: 'build.t=failure', filter: 'main' });
     await run(mocked);
     expect(mocked.outputs).toMatchObject({ failed: 1 });
+    const mapping = fake(ws, {
+      assume: '{ step: build.t,  outcome: failure }\n{ step: build.t, outputs: { x: 1 } }',
+      filter: 'main',
+    });
+    await run(mapping);
+    expect(mapping.failures).toEqual(['simulci test: 1 failed, 0 invalid, 0 passed (exit 1)']);
+    const missing = fake(ws, { files: '.github/simulci/tests/nope.test.yml' });
+    await run(missing);
+    expect(missing.failures).toEqual(['T000 .github/simulci/tests/nope.test.yml: no such test file']);
     const escaped = fake(ws, { junit: '../outside.xml', filter: 'main' });
     await run(escaped);
     expect(escaped.failures).toEqual([

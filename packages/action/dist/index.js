@@ -47240,7 +47240,7 @@ function renderMarkdownReport(result, opts = {}) {
 	}))]);
 	const max = opts.maxFailures ?? 50;
 	for (const item of failed.slice(0, max)) {
-		lines.push("", `<details><summary>${EMOJI.failed} ${md(item.name)} — ${md(item.failures[0].headline)}</summary>`, "", "```");
+		lines.push("", `<details><summary>${EMOJI.failed} ${inline(item.name)} — ${inline(item.failures[0].headline)}</summary>`, "", "```");
 		for (const f of item.failures) lines.push(...failureLines(f, ""), "");
 		lines.push("```", "", "</details>");
 	}
@@ -47248,7 +47248,10 @@ function renderMarkdownReport(result, opts = {}) {
 	return `${lines.join("\n")}\n`;
 }
 /** A table cell: backslashes and pipes escaped, newlines flattened. */
-const md = (s) => s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
+const md = (s) => html(s).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
+/** Text inside the raw HTML of a summary line: tags and entities escaped, newlines flattened. */
+const inline = (s) => html(s).replace(/\n/g, " ");
+const html = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function renderJUnit(result) {
 	const suites = result.files.map(suite);
 	const totals = count(result.files.flatMap((f) => f.cases), result.files);
@@ -47808,7 +47811,7 @@ var AssumeError = class extends Error {
 function parseAssume(items, fileText) {
 	const entries = items.map(parseOne);
 	if (fileText !== void 0) {
-		const list = (0, import_dist.parse)(fileText);
+		const list = yaml(fileText, "the assume file");
 		if (!Array.isArray(list)) throw new AssumeError("an assume file is a YAML list of entries");
 		entries.push(...list);
 	}
@@ -47818,14 +47821,14 @@ function parseAssume(items, fileText) {
 }
 function parseOne(text) {
 	const trimmed = text.trim();
-	if (trimmed.startsWith("{")) return (0, import_dist.parse)(trimmed);
+	if (trimmed.startsWith("{")) return yaml(trimmed, `'${text}'`);
 	const eq = trimmed.indexOf("=");
 	if (eq === -1) throw new AssumeError(`'${text}' is not <unit>=<outcome>, <unit>.outputs.<name>=<value> or a YAML mapping`);
 	const left = trimmed.slice(0, eq);
 	const value = trimmed.slice(eq + 1);
 	const field = /^(.+)\.(outputs|env)\.([^.=]+)$/.exec(left);
 	if (field) return {
-		step: field[1],
+		...unitOf(field[1]),
 		[field[2]]: { [field[3]]: value }
 	};
 	if (value.startsWith("as:")) return {
@@ -47836,6 +47839,14 @@ function parseOne(text) {
 		...unitOf(left),
 		outcome: value
 	};
+}
+/** YAML, or an AssumeError naming what could not be read. */
+function yaml(text, what) {
+	try {
+		return (0, import_dist.parse)(text);
+	} catch (e) {
+		throw new AssumeError(`${what} is not valid YAML: ${e instanceof Error ? e.message.split("\n")[0] ?? e.message : String(e)}`);
+	}
 }
 /** A path with a step names a step; a bare job id names the job. */
 function unitOf(path) {
@@ -47890,11 +47901,25 @@ function discoverTests(root, named = []) {
 	if (!existsSync(dir)) return [];
 	return walk(dir).filter((f) => /\.test\.ya?ml$/.test(f) && !f.includes("/__snapshots__/")).map((f) => relative(root, f).split("\\").join("/")).sort((x, y) => x.localeCompare(y));
 }
-/** The test files as the runner takes them: their checkout-relative path and text. */
-const readTests = (root, files) => files.map((path) => ({
-	path,
-	text: readFileSync(join(root, path), "utf8")
-}));
+var TestsError = class extends Error {
+	name = "TestsError";
+};
+/** The test files as the runner takes them: their checkout-relative path and text (T000 when one cannot be read). */
+function readTests(root, files) {
+	return files.map((path) => {
+		try {
+			return {
+				path,
+				text: readFileSync(join(root, path), "utf8")
+			};
+		} catch (e) {
+			const code = e.code;
+			if (code === "ENOENT") throw new TestsError(`T000 ${path}: no such test file`);
+			if (code === "EISDIR") throw new TestsError(`T000 ${path}: is a directory, not a test file`);
+			throw e;
+		}
+	});
+}
 /** Test files under `.github/workflows`, which GitHub would try to run. */
 const misplacedTests = (files) => files.filter((f) => /(^|\/)\.github\/workflows\//.test(f));
 function walk(dir) {
@@ -47977,7 +48002,7 @@ async function test(ctx) {
 	try {
 		result = runTests(loadFiles(ctx.workflows), readTests(root, files), testOptions(ctx));
 	} catch (e) {
-		if (!(e instanceof MocksError)) throw e;
+		if (!(e instanceof MocksError || e instanceof TestsError)) throw e;
 		ports.fail(e.message);
 		return;
 	}
@@ -48068,7 +48093,7 @@ function inWorkspace(ctx, a) {
 /** Writes a report under the workspace; a path that escapes it is refused. */
 function writeReport(ctx, path, content) {
 	const file = resolve(ctx.ports.workspace, path);
-	if (!(file === ctx.ports.workspace || file.startsWith(`${ctx.ports.workspace}${sep}`))) {
+	if (!insideWorkspace(ctx.ports.workspace, file)) {
 		ctx.ports.fail(`${path} is outside the workspace; reports are written under it`);
 		return;
 	}
@@ -48076,7 +48101,19 @@ function writeReport(ctx, path, content) {
 	writeFileSync(file, content);
 	ctx.ports.setOutput("junit", file);
 }
-const lines = (text) => text.split(/\r?\n|\s{2,}/).map((l) => l.trim()).filter(Boolean);
+/** By real paths, so a symbolic link in the checkout cannot point the report elsewhere. */
+function insideWorkspace(workspace, file) {
+	let dir = file;
+	while (!existsSync(dir)) {
+		const parent = dirname(dir);
+		if (parent === dir) return false;
+		dir = parent;
+	}
+	const base = realpathSync.native(workspace);
+	const target = realpathSync.native(dir);
+	return target === base || target.startsWith(`${base}${sep}`);
+}
+const lines = (text) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 function bool(ports, name, fallback = false) {
 	const v = ports.input(name).toLowerCase();
 	if (v === "") return fallback;
@@ -48084,26 +48121,30 @@ function bool(ports, name, fallback = false) {
 }
 //#endregion
 //#region src/index.ts
-await run({
-	input: (name) => getInput(name).trim(),
-	setOutput: (name, value) => setOutput(name, value),
-	annotate: (a) => {
-		const props = {
-			file: a.file,
-			startLine: a.line,
-			startColumn: a.col,
-			title: a.title
-		};
-		if (a.level === "error") error$1(a.message, props);
-		else notice(a.message, props);
-	},
-	summary: async (markdown) => {
-		summary.addRaw(markdown, true);
-		await summary.write();
-	},
-	log: (text) => info(text),
-	fail: (message) => setFailed(message),
-	workspace: process.env.GITHUB_WORKSPACE ?? process.cwd()
-});
+try {
+	await run({
+		input: (name) => getInput(name).trim(),
+		setOutput: (name, value) => setOutput(name, value),
+		annotate: (a) => {
+			const props = {
+				file: a.file,
+				startLine: a.line,
+				startColumn: a.col,
+				title: a.title
+			};
+			if (a.level === "error") error$1(a.message, props);
+			else notice(a.message, props);
+		},
+		summary: async (markdown) => {
+			summary.addRaw(markdown, true);
+			await summary.write();
+		},
+		log: (text) => info(text),
+		fail: (message) => setFailed(message),
+		workspace: process.env.GITHUB_WORKSPACE ?? process.cwd()
+	});
+} catch (e) {
+	setFailed(e instanceof Error ? e.message : String(e));
+}
 //#endregion
 export {};

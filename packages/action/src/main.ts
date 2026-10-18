@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   type Annotation,
@@ -27,6 +27,7 @@ import {
   readTests,
   readWorkflowFiles,
   TESTS_DIR,
+  TestsError,
 } from '@simulci/node';
 import { parse } from 'yaml';
 
@@ -102,7 +103,7 @@ async function test(ctx: Context): Promise<void> {
   try {
     result = runTests(loadFiles(ctx.workflows), readTests(root, files), testOptions(ctx));
   } catch (e) {
-    if (!(e instanceof MocksError)) throw e;
+    if (!(e instanceof MocksError || e instanceof TestsError)) throw e;
     ports.fail(e.message);
     return;
   }
@@ -199,8 +200,7 @@ function inWorkspace(ctx: Context, a: Annotation): Annotation {
 /** Writes a report under the workspace; a path that escapes it is refused. */
 function writeReport(ctx: Context, path: string, content: string): void {
   const file = resolve(ctx.ports.workspace, path);
-  const inside = file === ctx.ports.workspace || file.startsWith(`${ctx.ports.workspace}${sep}`);
-  if (!inside) {
+  if (!insideWorkspace(ctx.ports.workspace, file)) {
     ctx.ports.fail(`${path} is outside the workspace; reports are written under it`);
     return;
   }
@@ -209,9 +209,22 @@ function writeReport(ctx: Context, path: string, content: string): void {
   ctx.ports.setOutput('junit', file);
 }
 
+/** By real paths, so a symbolic link in the checkout cannot point the report elsewhere. */
+function insideWorkspace(workspace: string, file: string): boolean {
+  let dir = file;
+  while (!existsSync(dir)) {
+    const parent = dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+  const base = realpathSync.native(workspace);
+  const target = realpathSync.native(dir);
+  return target === base || target.startsWith(`${base}${sep}`);
+}
+
 const lines = (text: string): string[] =>
   text
-    .split(/\r?\n|\s{2,}/)
+    .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
