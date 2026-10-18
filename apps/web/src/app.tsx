@@ -1,6 +1,6 @@
 import { renderText } from '@simulci/engine';
 import { useEffect, useMemo, useState } from 'react';
-import { EngineClient } from './worker/client';
+import { createEngineClient } from './worker/client';
 import type { WorkerResponse } from './worker/protocol';
 
 const SAMPLE = `on:
@@ -22,7 +22,7 @@ jobs:
 
 /** The skeleton: paste a workflow, pick an event, read the plan. The simulate view replaces this screen. */
 export function App() {
-  const client = useMemo(() => new EngineClient(), []);
+  const client = useMemo(() => createEngineClient(), []);
   const [yaml, setYaml] = useState(SAMPLE);
   const [event, setEvent] = useState('push');
   const [response, setResponse] = useState<WorkerResponse | undefined>();
