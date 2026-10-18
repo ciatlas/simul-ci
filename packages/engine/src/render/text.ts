@@ -41,7 +41,7 @@ function jobLines(job: JobPlan, steps: boolean, depth: number): string[] {
   const lines = [`${pad}${MARK[job.runs.verdict]} ${job.jobId}${why}`];
   if (job.runs.verdict === 'no') return lines;
   const single = job.legs.length === 1 && job.legs[0]!.legKey === '';
-  for (const leg of job.legs) lines.push(...legLines(leg, steps, single ? depth : depth + 1, single));
+  for (const leg of job.legs) lines.push(...legLines(leg, steps, depth + 1, single));
   return lines;
 }
 
