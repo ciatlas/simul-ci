@@ -36,7 +36,8 @@ jobs:
       # Dogfood: the route tests under .github/simulci/tests, run with the bundle that was just built.
       - run: node packages/cli/dist/index.js test
       - run: pnpm coverage
-      - if: always() && matrix.node == '24'
+      - id: upload
+        if: always() && matrix.node == '24'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage
@@ -65,7 +66,8 @@ jobs:
       - run: pnpm exec fallow dead-code
       - run: pnpm exec fallow dupes
       - run: pnpm exec fallow architecture
-      - if: github.event_name == 'pull_request'
+      - id: audit
+        if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
         run: pnpm exec fallow audit --base "origin/$BASE_REF"
