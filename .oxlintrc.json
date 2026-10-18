@@ -16,12 +16,18 @@
     "unicorn/no-array-sort": "off",
     "unicorn/consistent-function-scoping": "off",
     "unicorn/no-thenable": "off",
-    "no-await-in-loop": "off"
+    "no-await-in-loop": "off",
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/*.css"]
+      }
+    ]
   },
   "ignorePatterns": ["fixtures/**", "schemas/**", "**/dist/**", "**/coverage/**", ".claude/**"],
   "overrides": [
     {
-      "files": ["packages/engine/src/**", "packages/document/src/**"],
+      "files": ["packages/engine/src/**", "packages/document/src/**", "apps/web/src/**"],
       "rules": {
         "import/no-nodejs-modules": "error"
       }
