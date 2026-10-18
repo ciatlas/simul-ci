@@ -9,7 +9,7 @@ import * as events from "events";
 import "child_process";
 import "timers";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 //#region \0rolldown/runtime.js
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -17616,7 +17616,7 @@ var Parser = class {
 	}
 };
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/expressions.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/expressions.ts
 /** Every named context the GitHub Actions runtime knows about. */
 const KNOWN_CONTEXTS = [
 	"github",
@@ -18161,7 +18161,7 @@ function evaluateTemplate(text, resolve, options = {}) {
 	return known$2(out, mergeTaint(...parts));
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/ir.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/ir.ts
 /** Case-insensitive lookup of an own key, matching how GitHub resolves context property names. */
 function lookup(rec, key) {
 	if (Object.hasOwn(rec, key)) return rec[key];
@@ -18390,7 +18390,7 @@ function matrixResolver(combo) {
 	};
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/checks.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/checks.ts
 /**
 * Check-run names of jobs, as GitHub reports them (and as branch protection requires them).
 *
@@ -18523,7 +18523,7 @@ function skippedCheckName(job) {
 	return kind.kind === "static" ? kind.text || job.id : kind.template.trim();
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/text.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/text.ts
 /**
 * `s` without runs of `ch` at its end (and at its start with `start: true`). A loop rather than `/x+$/`, which
 * backtracks quadratically on long runs that are not at the end (CodeQL js/polynomial-redos).
@@ -18560,7 +18560,7 @@ function didYouMean(name, candidates) {
 	return best.d <= Math.max(2, Math.floor(name.length / 3)) ? best.c : void 0;
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/glob.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/glob.ts
 /** Minimal glob: `*` matches within a segment, `**` across segments; plain strings match as path prefixes. */
 function matchesPattern(path, pattern) {
 	if (!pattern.includes("*")) return path === pattern || path.startsWith(pattern.endsWith("/") ? pattern : `${pattern}/`);
@@ -18568,7 +18568,7 @@ function matchesPattern(path, pattern) {
 }
 const escapeRe = (s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/queries.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/queries.ts
 /** Every reference in a unit's expressions, with the site it is in. */
 function* refsOf(unit) {
 	for (const site of unit.sites) for (const seg of site.segments) for (const ref of seg.refs) yield {
@@ -18579,7 +18579,7 @@ function* refsOf(unit) {
 /** Secrets every workflow can read without declaring them (lowercase): the automatic `GITHUB_TOKEN`. */
 const BUILTIN_SECRETS = /* @__PURE__ */ new Set(["github_token"]);
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/graph.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/graph.ts
 /** A path segment that names no key: the end of the path, a `*` filter or a `?` computed index. */
 const computed = (s) => s === void 0 || s === "*" || s === "?";
 /** Whether a path segment names the property `key` (lowercase): GitHub looks properties up ignoring case. */
@@ -25985,7 +25985,7 @@ var require_public_api = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.stringify = stringify;
 }));
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/source.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/source.ts
 var import_dist = (/* @__PURE__ */ __commonJSMin(((exports) => {
 	var composer = require_composer();
 	var Document = require_Document();
@@ -26060,7 +26060,7 @@ function formatLoc(loc) {
 	return `${loc.file}:${loc.line}:${loc.column}`;
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/logger.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/logger.ts
 const ORDER = {
 	silent: 0,
 	error: 1,
@@ -26125,7 +26125,45 @@ function createLogger(options = {}) {
 }
 const silentLogger = createLogger({ level: "silent" });
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/parse.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/posix.ts
+/**
+* POSIX path arithmetic for repository-relative paths, with Node's `path.posix` semantics for what the parser and the
+* loader need, so the browser entry carries no `node:path`.
+*/
+const posixIsAbsolute = (path) => path.startsWith("/");
+/** `a/./b/../c` → `a/c`, `` → `.`, `/..` → `/`; a trailing slash is kept, as `path.posix.normalize` keeps it. */
+function posixNormalize(path) {
+	if (path === "") return ".";
+	const absolute = path.startsWith("/");
+	const trailing = path.endsWith("/");
+	const out = [];
+	for (const segment of path.split("/")) step(out, segment, absolute);
+	if (out.length === 0) return absolute ? "/" : trailing ? "./" : ".";
+	return `${absolute ? "/" : ""}${out.join("/")}${trailing ? "/" : ""}`;
+}
+/** One segment onto the normalized path: `.` and empty ones vanish, `..` pops (or stays, when relative and nothing is above). */
+function step(out, segment, absolute) {
+	if (segment === "" || segment === ".") return;
+	if (segment !== "..") {
+		out.push(segment);
+		return;
+	}
+	if (out.length && out.at(-1) !== "..") out.pop();
+	else if (!absolute) out.push("..");
+}
+/** The non-empty parts joined and normalized; `.` when there is nothing. */
+function posixJoin(...parts) {
+	const joined = parts.filter((p) => p !== "").join("/");
+	return joined === "" ? "." : posixNormalize(joined);
+}
+/** The last segment, trailing slashes ignored; `` for `/` and ``. */
+function posixBasename(path) {
+	const trimmed = path.replace(/\/+$/, "");
+	const i = trimmed.lastIndexOf("/");
+	return i === -1 ? trimmed : trimmed.slice(i + 1);
+}
+//#endregion
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/parse.ts
 function createParseContext(repository) {
 	let id = 0;
 	return {
@@ -26743,7 +26781,7 @@ function outputDecls(unit, node, base, valueKey) {
 const WORKFLOW_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$/;
 /** `a/./b/` → `a/b`, `` → `.`. Anything escaping the root (`../x`) keeps its `..` and is never read. */
 function normalizeRelative(path) {
-	return trimChar(posix.normalize(trimChar(path, "/") || "."), "/") || ".";
+	return trimChar(posixNormalize(trimChar(path, "/") || "."), "/") || ".";
 }
 function classifyUses(raw, at, loc, ctx) {
 	const value = raw.trim();
@@ -33675,7 +33713,7 @@ function parseAction(entryFile, contextOrTrace) {
 	};
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/schema.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/schema.ts
 /** Root definitions @actions/workflow-parser validates against (the strict ones its editor tooling uses). */
 const SCHEMA_ROOT = {
 	workflow: "workflow-root-strict",
@@ -33771,7 +33809,7 @@ function mappingsAt(schema, root, path) {
 	return [...out];
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/validate.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/validate.ts
 /**
 * The parser's errors for an invalid `${{ }}`: those of the expression lexer and parser (@actions/expressions, which
 * the sites' own expression parse uses too), and the template reader's for a `${{` without `}}`.
@@ -34167,7 +34205,7 @@ function mergeFix(key, where, whole) {
 	return whole && single ? `${repeat}, or alias ${whole} instead.` : `${repeat}.`;
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/script-writes.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/script-writes.ts
 const escapes$1 = (path) => path === ".." || path.startsWith("../");
 /** `cmd` or `sudo -E cmd`: words that run the next word as the command. */
 const PREFIXES = /* @__PURE__ */ new Set([
@@ -34335,10 +34373,10 @@ function resolveWord(word, cwd) {
 	}
 	if (base === void 0 || w === "" || /[$`*?[\]{}~]/.test(w) || w.startsWith("/")) return void 0;
 	if (/^[A-Za-z][\w+.-]*:/.test(w)) return void 0;
-	const path = normalizeRelative(posix.join(base, w));
+	const path = normalizeRelative(posixJoin(base, w));
 	return escapes$1(path) ? void 0 : path;
 }
-const basename$1 = (word) => posix.basename(word.replaceAll("\\", "/").replace(/\/+$/, ""));
+const basename$1 = (word) => posixBasename(word.replaceAll("\\", "/").replace(/\/+$/, ""));
 /**
 * Paths an inline script writes to: destinations of copies, moves, links and `mkdir`, clones and worktrees,
 * extractions (`tar -C`, `unzip -d`), downloads (`-o`, `--output`) and redirections. Variables other than
@@ -34465,7 +34503,7 @@ function writesTo(write, path, isRepoDir) {
 	return write.path !== "." && path.startsWith(`${write.path}/`) && !isRepoDir(write.path);
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/workspace.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/workspace.ts
 /**
 * Before any checkout, assume this repository at the workspace root: most jobs check it out there, possibly through
 * a step flowpact cannot see into, and a `./` action is unusable otherwise.
@@ -34840,106 +34878,10 @@ function workspaceResolver(opts) {
 	};
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+852776fb87daeb7010eafbce3cda467d415ec70f/node_modules/@ciatlas/core/src/project.ts
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/project.ts
 const WORKFLOWS_DIR = ".github/workflows";
-/** How many links one path may go through (the OS's ELOOP limit), and how many linked directories one walk expands. */
-const MAX_LINKS = 40;
-const MAX_LINKED_DIRS = 1e3;
 const ACTIONS_DIR = ".github/actions";
 const toPosix = (p) => p.split("\\").join("/");
-/**
-* Whether `abs` (after following symlinks) is inside the repository at `root` and outside its `.git` directory. A
-* checkout can contain symlinks; this keeps a caller from reading e.g. /etc or the persisted git credentials, and from
-* writing through a link. A path that does not exist yet is judged by its nearest existing parent.
-*/
-function insideRepository(root, abs) {
-	let realRoot;
-	try {
-		realRoot = realpathSync(root);
-	} catch {
-		realRoot = resolve(root);
-	}
-	let target = resolve(abs);
-	let rest = "";
-	for (;;) try {
-		target = join(realpathSync(target), rest);
-		break;
-	} catch {
-		const parent = dirname(target);
-		if (parent === target) return false;
-		rest = join(basename(target), rest);
-		target = parent;
-	}
-	const rel = toPosix(relative(realRoot, target));
-	if (rel === "") return true;
-	if (escapesRoot(rel)) return false;
-	return rel !== ".git" && !rel.startsWith(".git/");
-}
-function nodeFileSystem(root) {
-	const abs = (p) => join(root, p);
-	const listings = /* @__PURE__ */ new Map();
-	/** On case-insensitive file systems, `.GitHub/x.YML` opens `.github/x.yml`; GitHub (Linux) would not find it. */
-	const exactCase = (p) => {
-		let dir = root;
-		for (const part of toPosix(p).split("/").filter((x) => x && x !== ".")) {
-			if (part === "..") return false;
-			let names = listings.get(dir);
-			if (!names) {
-				try {
-					names = new Set(readdirSync(dir));
-				} catch {
-					return false;
-				}
-				listings.set(dir, names);
-			}
-			if (!names.has(part)) return false;
-			dir = join(dir, part);
-		}
-		return true;
-	};
-	/** Follows symlinks and accepts only existing targets inside the repository (see insideRepository). */
-	const inside = (p) => existsSync(abs(p)) && exactCase(p) && insideRepository(root, abs(p));
-	const isFile = (p) => inside(p) && statSync(abs(p)).isFile();
-	return {
-		read: (p) => isFile(p) ? readFileSync(abs(p), "utf8") : void 0,
-		list: (dir) => {
-			if (!inside(dir) || !statSync(abs(dir)).isDirectory()) return [];
-			return readdirSync(abs(dir)).map((name) => toPosix(join(dir, name))).filter((f) => isFile(f));
-		},
-		walk: (dir) => {
-			if (!inside(dir) || !statSync(abs(dir)).isDirectory()) return [];
-			const out = [];
-			let linked = 0;
-			const queue = [{
-				dir: toPosix(dir),
-				above: /* @__PURE__ */ new Set(),
-				links: 0
-			}];
-			for (let i = 0; i < queue.length; i++) {
-				const next = queue[i];
-				const real = realpathSync(abs(next.dir));
-				if (next.above.has(real)) continue;
-				const above = new Set(next.above).add(real);
-				for (const name of readdirSync(abs(next.dir))) {
-					if (name === "node_modules" || name === ".git") continue;
-					const p = toPosix(join(next.dir, name));
-					if (isFile(p)) out.push(p);
-					else if (inside(p) && statSync(abs(p)).isDirectory()) {
-						const link = lstatSync(abs(p)).isSymbolicLink();
-						if (link && (next.links >= MAX_LINKS || linked++ >= MAX_LINKED_DIRS)) continue;
-						queue.push({
-							dir: p,
-							above,
-							links: next.links + (link ? 1 : 0)
-						});
-					}
-				}
-			}
-			return out;
-		},
-		isDir: (p) => inside(p) && statSync(abs(p)).isDirectory()
-	};
-}
 /** The prefix of the paths below `dir`: `a/` for `a`, `a/`, `./a` or `./a/`, and `` for the root (`.`, `./`, ``). */
 const dirPrefix = (dir) => {
 	const d = toPosix(dir).replace(/^\.(\/|$)/, "").replace(/\/$/, "");
@@ -34965,10 +34907,12 @@ const isWorkflowFile = (p) => /^\.github\/workflows\/[^/]+\.ya?ml$/i.test(p);
 /** GitHub matches the directory of a called workflow exactly, whatever the file system's case sensitivity. */
 const isCallableWorkflowPath = (p) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(p.replace(/\.ya?ml$/i, (e) => e.toLowerCase()));
 /** Local `uses:` targets must stay inside the repository. */
-const escapesRoot = (p) => p === ".." || p.startsWith("../") || isAbsolute(p);
-function loadProject(opts) {
+const escapesRoot = (p) => p === ".." || p.startsWith("../") || posixIsAbsolute(p);
+/** Loads a project through a host (`loadProject` of the Node and browser entries wire one in). */
+function loadProjectWith(opts, host) {
 	const logger = (opts.logger ?? silentLogger).child("load");
-	const fs = opts.fs ?? nodeFileSystem(opts.root);
+	const fs = opts.fs ?? host.defaultFs?.(opts.root);
+	if (!fs) throw new Error("loadProject needs a file system here: pass fs (memoryFileSystem(files))");
 	const ctx = createParseContext(opts.repository);
 	const workflows = /* @__PURE__ */ new Map();
 	const actions = /* @__PURE__ */ new Map();
@@ -35034,7 +34978,7 @@ function loadProject(opts) {
 	let wholeRepository = false;
 	const ignoredTargets = [];
 	for (const p of opts.paths ?? []) {
-		const rel = toPosix(relative(opts.root, resolve(opts.root, p))) || ".";
+		const rel = host.relativeTo(opts.root, p) || ".";
 		if (rel === "." || rel === "") {
 			wholeRepository = true;
 			continue;
@@ -35142,6 +35086,119 @@ function externalUnits(remotes = [], ctx) {
 		});
 	}
 	return { external: out };
+}
+//#endregion
+//#region ../../node_modules/.pnpm/@ciatlas+core@https+++codeload.github.com+ciatlas+core+tar.gz+cf55cd8373233ba8a821439697c996db4188ecc3/node_modules/@ciatlas/core/src/node-fs.ts
+/** The project loader on a Node.js host: the working tree on disk, and `owner/repo` from the environment or git. */
+/** How many links one path may go through (the OS's ELOOP limit), and how many linked directories one walk expands. */
+const MAX_LINKS = 40;
+const MAX_LINKED_DIRS = 1e3;
+/**
+* Whether `abs` (after following symlinks) is inside the repository at `root` and outside its `.git` directory. A
+* checkout can contain symlinks; this keeps a caller from reading e.g. /etc or the persisted git credentials, and from
+* writing through a link. A path that does not exist yet is judged by its nearest existing parent.
+*/
+function insideRepository(root, abs) {
+	let realRoot;
+	try {
+		realRoot = realpathSync(root);
+	} catch {
+		realRoot = resolve(root);
+	}
+	let target = resolve(abs);
+	let rest = "";
+	for (;;) try {
+		target = join(realpathSync(target), rest);
+		break;
+	} catch {
+		const parent = dirname(target);
+		if (parent === target) return false;
+		rest = join(basename(target), rest);
+		target = parent;
+	}
+	const rel = toPosix(relative(realRoot, target));
+	if (rel === "") return true;
+	if (rel === ".." || rel.startsWith("../")) return false;
+	return rel !== ".git" && !rel.startsWith(".git/");
+}
+function nodeFileSystem(root) {
+	const abs = (p) => join(root, p);
+	const listings = /* @__PURE__ */ new Map();
+	/** On case-insensitive file systems, `.GitHub/x.YML` opens `.github/x.yml`; GitHub (Linux) would not find it. */
+	const exactCase = (p) => {
+		let dir = root;
+		for (const part of toPosix(p).split("/").filter((x) => x && x !== ".")) {
+			if (part === "..") return false;
+			let names = listings.get(dir);
+			if (!names) {
+				try {
+					names = new Set(readdirSync(dir));
+				} catch {
+					return false;
+				}
+				listings.set(dir, names);
+			}
+			if (!names.has(part)) return false;
+			dir = join(dir, part);
+		}
+		return true;
+	};
+	/** Follows symlinks and accepts only existing targets inside the repository (see insideRepository). */
+	const inside = (p) => existsSync(abs(p)) && exactCase(p) && insideRepository(root, abs(p));
+	const isFile = (p) => inside(p) && statSync(abs(p)).isFile();
+	/** One directory of the walk: its files to `out`, its subdirectories to `queue`. */
+	const expand = (next, out, queue, budget) => {
+		const real = realpathSync(abs(next.dir));
+		if (next.above.has(real)) return;
+		const above = new Set(next.above).add(real);
+		for (const name of readdirSync(abs(next.dir))) {
+			if (name === "node_modules" || name === ".git") continue;
+			const p = toPosix(join(next.dir, name));
+			if (isFile(p)) out.push(p);
+			else if (inside(p) && statSync(abs(p)).isDirectory()) enqueue(p, next, above, queue, budget);
+		}
+	};
+	/** A subdirectory onto the queue, unless it is a link past the depth or count the walk allows. */
+	const enqueue = (p, next, above, queue, budget) => {
+		const link = lstatSync(abs(p)).isSymbolicLink();
+		if (link && (next.links >= MAX_LINKS || budget.linked++ >= MAX_LINKED_DIRS)) return;
+		queue.push({
+			dir: p,
+			above,
+			links: next.links + (link ? 1 : 0)
+		});
+	};
+	return {
+		read: (p) => isFile(p) ? readFileSync(abs(p), "utf8") : void 0,
+		list: (dir) => {
+			if (!inside(dir) || !statSync(abs(dir)).isDirectory()) return [];
+			return readdirSync(abs(dir)).map((name) => toPosix(join(dir, name))).filter((f) => isFile(f));
+		},
+		walk: (dir) => {
+			if (!inside(dir) || !statSync(abs(dir)).isDirectory()) return [];
+			const out = [];
+			const queue = [{
+				dir: toPosix(dir),
+				above: /* @__PURE__ */ new Set(),
+				links: 0
+			}];
+			const budget = { linked: 0 };
+			for (let i = 0; i < queue.length; i++) expand(queue[i], out, queue, budget);
+			return out;
+		},
+		isDir: (p) => inside(p) && statSync(abs(p)).isDirectory()
+	};
+}
+const nodeHost = {
+	defaultFs: (root) => nodeFileSystem(root),
+	relativeTo: (root, p) => {
+		const rel = relative(root, resolve(root, p));
+		return isAbsolute(rel) ? ".." : toPosix(rel);
+	}
+};
+/** Loads the project at `root`: from disk unless `fs` says otherwise. */
+function loadProject(opts) {
+	return loadProjectWith(opts, nodeHost);
 }
 new Set(CONTEXT_FUNCTIONS.map((f) => f.name.toLowerCase()));
 //#endregion
