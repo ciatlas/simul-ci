@@ -294,3 +294,93 @@ jobs:
     expect(codes(plan)).toEqual([]);
   });
 });
+
+describe('folded script writes', () => {
+  it('knows literal outputs and env, last write winning, and a conditional one as candidates (lab 8, 11)', () => {
+    const plan = run(
+      `
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    outputs:
+      k: \${{ steps.w.outputs.k }}
+      m: \${{ steps.w.outputs.m }}
+    steps:
+      - id: w
+        run: |
+          echo "k=first" >> "$GITHUB_OUTPUT"
+          echo "k=second" >> "$GITHUB_OUTPUT"
+          {
+            echo "m<<EOF"
+            echo "line one"
+            echo "line two"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "MODE=ci" >> "$GITHUB_ENV"
+      - if: env.MODE == 'ci' && steps.w.outputs.k == 'second'
+        run: echo gated
+  b:
+    needs: a
+    if: needs.a.outputs.k == 'second' && contains(needs.a.outputs.m, 'two')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        n: [1, 2]
+    steps:
+      - id: v
+        run: |
+          if [ "\${{ matrix.n }}" = "2" ]; then
+            echo "v=" >> "$GITHUB_OUTPUT"
+          else
+            echo "v=\${{ matrix.n }}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - if: steps.v.outputs.v == ''
+        run: echo empty
+`,
+      { event: 'push' },
+      [],
+    );
+    const [a, b] = plan.workflows[0]!.jobs;
+    expect(a!.outputs).toEqual({
+      k: { known: true, value: 'second' },
+      m: { known: true, value: 'line one\nline two' },
+    });
+    expect(a!.legs[0]!.steps![1]!.runs.verdict).toBe('yes');
+    expect(b!.runs.verdict).toBe('yes');
+    const [leg1, leg2] = b!.legs;
+    expect(leg1!.steps![0]!.outputs.v).toEqual({
+      known: false,
+      unknowns: [`${leg1!.steps![0]!.id}.outputs.v`],
+      oneOf: ['', '1'],
+    });
+    expect(leg2!.steps![0]!.outputs.v).toEqual({
+      known: false,
+      unknowns: [`${leg2!.steps![0]!.id}.outputs.v`],
+      oneOf: ['', '2'],
+    });
+    expect(leg1!.steps![0]!.outputs.sha).toEqual({
+      known: false,
+      unknowns: [`${leg1!.steps![0]!.id}.outputs.sha`],
+    });
+    expect(leg1!.steps![1]!.runs.verdict).toBe('maybe');
+    expect(
+      run(
+        `
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - id: v
+        run: echo "v=\${{ github.event_name }}" >> "$GITHUB_OUTPUT"
+      - if: steps.v.outputs.v == 'push'
+        run: echo
+`,
+        { event: 'push' },
+        [],
+      ).workflows[0]!.jobs[0]!.legs[0]!.steps![1]!.runs.verdict,
+    ).toBe('yes');
+  });
+});

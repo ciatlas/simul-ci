@@ -3,6 +3,7 @@ import {
   definitelyTruthy,
   type EvaluateOptions,
   type EvalValue,
+  evaluate,
   evaluateTemplate,
   findTemplateSegments,
   parseExpression,
@@ -10,6 +11,7 @@ import {
 import { type ContextState, contextResolver, lookupContext } from './contexts';
 import type { IfReason, Json, Value } from './plan/types';
 import { known, unknown } from './plan/values';
+import { UNKNOWN_MARKER } from './script-outputs';
 import type { StatusAnswers } from './status';
 
 /** A condition evaluated against the plan state: its verdict, and every read with its value. */
@@ -74,4 +76,22 @@ export function stringOf(value: Json): string {
   if (value === null) return '';
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
+}
+
+/**
+ * A script with its `${{ }}` segments replaced by their values, for folding what it writes; a segment the plan cannot
+ * evaluate becomes `UNKNOWN_MARKER`, which taints any write that includes it.
+ */
+export function substituteTemplates(text: string, state: ContextState): string {
+  const segments = findTemplateSegments(text);
+  if (segments.length === 0) return text;
+  const resolve = contextResolver(state);
+  let out = '';
+  let cursor = 0;
+  for (const seg of segments) {
+    const v = seg.expr.ast ? evaluate(seg.expr.ast, resolve) : undefined;
+    out += text.slice(cursor, seg.start) + (v?.known ? stringOf(v.value) : UNKNOWN_MARKER);
+    cursor = seg.end;
+  }
+  return out + text.slice(cursor);
 }

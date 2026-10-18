@@ -8,6 +8,7 @@ export * from './planner';
 export * from './render/index';
 export * from './scenario';
 export * from './schemas';
+export * from './script-outputs';
 export * from './settings';
 export * from './status';
 export * from './triggers';

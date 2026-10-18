@@ -19,7 +19,7 @@ import {
 } from '@ciatlas/core';
 import { z } from 'zod';
 import type { ContextState, NeedState, StepState } from './contexts';
-import { type Condition, evaluateCondition, evaluateValue, stringOf } from './evaluate';
+import { type Condition, evaluateCondition, evaluateValue, stringOf, substituteTemplates } from './evaluate';
 import { type AssumeEntry, AssumeListSchema, type Facts, type MockLayers, MockResolver } from './mocks/index';
 import type { Location, LocationLink } from './paths';
 import {
@@ -55,6 +55,7 @@ import type {
 } from './plan/types';
 import { candidates, combine, known, unknown } from './plan/values';
 import { parseScenario, type Scenario, type ScenarioInput } from './scenario';
+import { foldWrites } from './script-outputs';
 import {
   type Expression,
   type JobSettings,
@@ -792,7 +793,7 @@ class Planner {
   ): StepProduct {
     if (runs.verdict === 'no') return { outcome: known('skipped'), outputs: {}, open: false, envWrites: {} };
     const facts = this.mocks.factsFor(location, sid, step.uses?.raw);
-    const envWrites = this.envWritesOf(facts, sid);
+    const envWrites = { ...this.scriptEnv(step, sid, state), ...this.envWritesOf(facts, sid) };
     const { produced, base } = this.producedOutcome(facts, runs, cond, sid);
     if (action?.using === 'composite') {
       return {
@@ -800,7 +801,7 @@ class Planner {
         envWrites,
       };
     }
-    const opaque = this.opaqueOutputs(step, action, sid);
+    const opaque = this.opaqueOutputs(step, action, sid, state);
     const what = step.run !== undefined ? 'the script' : `action ${step.uses?.raw ?? ''}`;
     this.overlayOutputs(opaque.outputs, facts, sid, {
       closed: !opaque.open,
@@ -866,10 +867,19 @@ class Planner {
     step: StepDecl,
     action: ActionDecl | undefined,
     sid: NodeId,
+    state: ContextState,
   ): { outputs: Record<string, Value<string>>; open: boolean } {
     const outputs: Record<string, Value<string>> = {};
     if (step.run !== undefined) {
-      for (const name of step.writesOutputs.names) outputs[name] = this.unknownOutput(sid, name);
+      // Literal `$GITHUB_OUTPUT` writes are known; the names core found that the fold could not value stay unknown.
+      const folded = foldWrites(substituteTemplates(step.run, state), {
+        unknownId: (n) => `${sid}.outputs.${n}`,
+      });
+      for (const name of [...new Set([...step.writesOutputs.names, ...Object.keys(folded)])]) {
+        const v = folded[name] ?? this.unknownOutput(sid, name);
+        this.noteValue(v);
+        outputs[name] = v;
+      }
       return { outputs, open: !(step.writesOutputs.mentions && !step.writesOutputs.dynamic) };
     }
     if (action) {
@@ -877,6 +887,17 @@ class Planner {
       return { outputs, open: false };
     }
     return { outputs, open: true };
+  }
+
+  /** The `$GITHUB_ENV` writes of a script, as the steps after it read them. */
+  private scriptEnv(step: StepDecl, sid: NodeId, state: ContextState): Record<string, Value<string>> {
+    if (step.run === undefined) return {};
+    const folded = foldWrites(substituteTemplates(step.run, state), {
+      file: 'GITHUB_ENV',
+      unknownId: (n) => `${sid}.env.${n}`,
+    });
+    for (const v of Object.values(folded)) this.noteValue(v);
+    return folded;
   }
 
   private unknownOutput(sid: NodeId, name: string): Value<string> {
