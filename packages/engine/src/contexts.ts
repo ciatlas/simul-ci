@@ -192,12 +192,21 @@ function stepsContext(steps: Record<string, StepState>, path: string[]): Value<J
   if (id === undefined) return unknown(['steps']);
   const step = lookup(steps, id);
   if (!step) return known(field === undefined ? null : '');
-  const key = field?.toLowerCase();
+  return stepField(step, id, field?.toLowerCase(), name);
+}
+
+function stepField(
+  step: StepState,
+  id: string,
+  key: string | undefined,
+  name: string | undefined,
+): Value<Json> {
   if (key === 'outcome') return step.outcome;
   if (key === 'conclusion') return step.conclusion;
-  if (key === 'outputs')
-    return name === undefined ? unknown([`steps.${id}.outputs`]) : (lookup(step.outputs, name) ?? known(''));
-  return known(null);
+  if (key !== 'outputs') return known(null);
+  if (name === undefined) return unknown([`steps.${id}.outputs`]);
+  // A step whose interface is open (a script that mentions nothing, a remote action without a model) may have set it.
+  return lookup(step.outputs, name) ?? (step.open ? unknown([`${step.id}.outputs.${name}`]) : known(''));
 }
 
 function matrixContext(matrix: Combination | undefined, path: string[]): Value<Json> {

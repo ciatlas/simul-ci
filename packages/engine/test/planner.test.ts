@@ -219,7 +219,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: detect
-        run: echo "changed=true" >> "$GITHUB_OUTPUT"
+        run: echo "changed=$(./detect.sh)" >> "$GITHUB_OUTPUT"
       - id: s
         if: false
         run: echo "x=1" >> "$GITHUB_OUTPUT"
@@ -354,11 +354,8 @@ runs:
     const [comp, gated] = plan.workflows[0]!.jobs[0]!.legs[0]!.steps!;
     expect(comp!.composite).toMatchObject({ path: '.github/actions/comp' });
     expect(comp!.composite!.steps.map((s) => s.runs.verdict)).toEqual(['yes', 'yes']);
-    expect(comp!.outputs.greeting).toEqual({
-      known: false,
-      unknowns: [`${comp!.composite!.steps[0]!.id}.outputs.text`],
-    });
-    expect(gated!.runs.verdict).toBe('maybe');
+    expect(comp!.outputs.greeting).toEqual({ known: true, value: 'hello world' });
+    expect(gated!.runs.verdict).toBe('yes');
   });
 
   it('reports a dynamic matrix as one placeholder leg and the unknown behind it', () => {
