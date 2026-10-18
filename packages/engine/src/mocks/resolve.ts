@@ -107,9 +107,10 @@ export class MockResolver {
 
   /** The facts the mocks state for the unit, field by field; a shipped model is the layer under them all. */
   factsFor(location: Location, node: NodeId, uses?: string, use?: ModelUse): Facts {
-    const candidates = this.candidates(location, node, uses).map(
-      (compiled): Candidate => ({ compiled, entry: this.effective(compiled, node, use) }),
-    );
+    const candidates = this.candidates(location, node, uses).map((compiled): Candidate => ({
+      compiled,
+      entry: this.effective(compiled, node, use),
+    }));
     const shipped = use ? shippedFacts(use) : undefined;
     const facts: Facts = { outputs: {}, env: {} };
     if (!candidates.length && !shipped) return facts;
@@ -179,7 +180,7 @@ export class MockResolver {
     field: string,
     read: (e: AssumeEntry) => Value<T> | undefined,
   ): { value: Value<T>; by: MockRef } | undefined {
-    for (const layer of [...LAYER_ORDER].reverse()) {
+    for (const layer of LAYER_ORDER.toReversed()) {
       const providing = candidates.filter((c) => c.compiled.layer === layer && read(c.entry) !== undefined);
       if (!providing.length) continue;
       const top = Math.max(...providing.map((c) => c.compiled.rank));

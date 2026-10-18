@@ -149,14 +149,14 @@ for (const [name, want] of Object.entries(environments)) {
       if (!apply) continue;
     }
   }
-  const live = current?.policies?.map((p) => p.name).sort() ?? [];
-  const wanted = [...want.branches].sort();
-  if (current?.policies && JSON.stringify(live) === JSON.stringify(wanted)) {
+  const livePolicies = current?.policies?.map((p) => p.name).sort((a, b) => a.localeCompare(b)) ?? [];
+  const wantedBranches = [...want.branches].sort((a, b) => a.localeCompare(b));
+  if (current?.policies && JSON.stringify(livePolicies) === JSON.stringify(wantedBranches)) {
     log(`- environment **${name}**: up to date`);
     continue;
   }
   log(
-    `- environment **${name}**: deploys from ${current?.policies ? live.join(', ') || 'no branch' : current ? 'any branch' : '(missing)'} → ${wanted.join(', ')}${apply ? ' — updating' : ''}`,
+    `- environment **${name}**: deploys from ${current?.policies ? livePolicies.join(', ') || 'no branch' : current ? 'any branch' : '(missing)'} → ${wantedBranches.join(', ')}${apply ? ' — updating' : ''}`,
   );
   if (!apply) continue;
   try {
@@ -179,23 +179,32 @@ for (const [name, want] of Object.entries(environments)) {
 const security = JSON.parse(readFileSync(join(ROOT, '.github/security.json'), 'utf8'));
 /** One security feature: read the live value (undefined when the token may not read it), compare, apply. */
 async function feature(name, want, read, write) {
-  let live;
+  let current;
   try {
-    live = await read();
+    current = await read();
   } catch {
-    live = undefined;
+    current = undefined;
   }
-  const changes = live === undefined ? [] : diff(want, live);
-  if (live !== undefined && !changes.length) {
+  const delta = current === undefined ? [] : diff(want, current);
+  if (current !== undefined && !delta.length) {
     log(`- ${name}: up to date`);
     return;
   }
-  if (live === undefined) log(`- ${name}: cannot read with this token${apply ? ' — applying' : ''}`);
-  else {
-    log(`- ${name}: ${changes.length} difference(s)${apply ? ' — updating' : ''}`);
-    for (const c of changes) log(`  - \`${c}\``);
-  }
+  describeFeature(name, current, delta);
   if (!apply) return;
+  await applyFeature(name, write);
+}
+
+function describeFeature(name, current, delta) {
+  if (current === undefined) {
+    log(`- ${name}: cannot read with this token${apply ? ' — applying' : ''}`);
+    return;
+  }
+  log(`- ${name}: ${delta.length} difference(s)${apply ? ' — updating' : ''}`);
+  for (const c of delta) log(`  - \`${c}\``);
+}
+
+async function applyFeature(name, write) {
   try {
     await write();
   } catch (err) {
@@ -225,9 +234,9 @@ await feature(
   'secret scanning',
   security.security_and_analysis,
   async () => {
-    const live = (await api('GET', '')).security_and_analysis;
-    if (!live) throw new Error('not readable');
-    return Object.fromEntries(Object.keys(security.security_and_analysis).map((k) => [k, live[k]?.status]));
+    const data = (await api('GET', '')).security_and_analysis;
+    if (!data) throw new Error('not readable');
+    return Object.fromEntries(Object.keys(security.security_and_analysis).map((k) => [k, data[k]?.status]));
   },
   () =>
     api('PATCH', '', {
@@ -240,14 +249,14 @@ await feature(
   'CodeQL default setup',
   security.code_scanning_default_setup,
   async () => {
-    const live = await api('GET', '/code-scanning/default-setup');
+    const data = await api('GET', '/code-scanning/default-setup');
     // GitHub lists `javascript` and `typescript` alongside the combined `javascript-typescript`.
     const languages = [
       ...new Set(
-        live.languages.map((l) => (l === 'javascript' || l === 'typescript' ? 'javascript-typescript' : l)),
+        data.languages.map((l) => (l === 'javascript' || l === 'typescript' ? 'javascript-typescript' : l)),
       ),
     ];
-    return { ...live, languages };
+    return { ...data, languages };
   },
   () => api('PATCH', '/code-scanning/default-setup', security.code_scanning_default_setup),
 );

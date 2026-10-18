@@ -1,5 +1,5 @@
 {
-  // Biome formats and lints the code; flowpact checks the repository's own workflows as you edit them.
-  "recommendations": ["biomejs.biome", "flowpact.vscode-flowpact"],
-  "unwantedRecommendations": ["esbenp.prettier-vscode"]
+  // oxc (oxlint and oxfmt) lints and formats the code; flowpact checks the repository's own workflows as you edit them.
+  "recommendations": ["oxc.oxc-vscode", "flowpact.vscode-flowpact"],
+  "unwantedRecommendations": ["esbenp.prettier-vscode", "biomejs.biome"]
 }

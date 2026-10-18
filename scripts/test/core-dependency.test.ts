@@ -51,10 +51,10 @@ describe('@ciatlas/core', () => {
     for (const version of versions)
       expect(version).toMatch(/^https:\/\/codeload\.github\.com\/ciatlas\/core\/tar\.gz\/[0-9a-f]{40}$/);
     // The commit it pins is the release's: its package.json has the tag's version.
-    const tag = Object.values(specifiers())[0]!.split('#v')[1];
+    const tag = Object.values(specifiers())[0].split('#v')[1];
     for (const url of new Set(versions)) {
       const entry = lockfile.split(`\n  '@ciatlas/core@${url}':\n`)[1]?.split('\n\n')[0] ?? '';
-      expect(entry, url).toMatch(new RegExp(`^ {4}version: ${tag!.replaceAll('.', '\\.')}$`, 'm'));
+      expect(entry, url).toMatch(new RegExp(`^ {4}version: ${tag.replaceAll('.', '\\.')}$`, 'm'));
     }
   });
 });

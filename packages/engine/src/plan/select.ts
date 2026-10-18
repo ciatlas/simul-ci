@@ -1,3 +1,4 @@
+import { stringOf } from '../evaluate';
 import {
   formatUnitPath,
   type PathSegment,
@@ -221,7 +222,7 @@ function legsOf(job: JobPlan, seg: PathSegment, prefix: string): LegPlan[] {
   const legs = job.legs.filter((leg) =>
     want.every(([k, v]) => {
       const cell = Object.entries(leg.values).find(([key]) => key.toLowerCase() === k.toLowerCase())?.[1];
-      return cell?.known === true && String(cell.value) === v;
+      return cell?.known === true && stringOf(cell.value) === v;
     }),
   );
   if (legs.length === 0) {
@@ -260,7 +261,7 @@ function noJob(wf: WorkflowPlan, jobId: string, prefix: string): SelectionError 
 
 function noStep(steps: StepPlan[], want: PathStep, parent: string): SelectionError {
   const names = steps.map((s) =>
-    s.stepId !== undefined ? `${s.stepId}` : `#${s.index + 1}${s.name ? ` '${s.name}'` : ''}`,
+    s.stepId !== undefined ? s.stepId : `#${s.index + 1}${s.name ? ` '${s.name}'` : ''}`,
   );
   const wanted = want.id !== undefined ? `'${want.id}'` : `#${want.index}`;
   const near =

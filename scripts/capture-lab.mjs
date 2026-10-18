@@ -45,7 +45,7 @@ function ghToken() {
     return execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim();
   } catch {
     console.error('no token: set GITHUB_TOKEN or log in with gh');
-    process.exit(2);
+    return process.exit(2);
   }
 }
 
@@ -106,9 +106,13 @@ const once = (key, make) => {
 };
 const tags = once('tags', () => paginate('/tags'));
 const commitFiles = (sha) =>
-  once(`commit:${sha}`, async () => (await api(`/commits/${sha}`)).files.map((f) => f.filename).sort());
+  once(`commit:${sha}`, async () =>
+    (await api(`/commits/${sha}`)).files.map((f) => f.filename).sort((a, b) => a.localeCompare(b)),
+  );
 const pullFiles = (n) =>
-  once(`pull:${n}`, async () => (await paginate(`/pulls/${n}/files`)).map((f) => f.filename).sort());
+  once(`pull:${n}`, async () =>
+    (await paginate(`/pulls/${n}/files`)).map((f) => f.filename).sort((a, b) => a.localeCompare(b)),
+  );
 const checkRuns = (sha) =>
   once(`checks:${sha}`, () => paginate(`/commits/${sha}/check-runs?filter=all`, 'check_runs'));
 
@@ -165,7 +169,7 @@ async function capture(run) {
 async function main() {
   let runs;
   if (args.runs.length) {
-    runs = await Promise.all(args.runs.map((id) => api(`/actions/runs/${id}`)));
+    runs = await Promise.all(args.runs.map((id) => api(`/actions/runs/${String(id)}`)));
   } else {
     runs = (await paginate('/actions/runs', 'workflow_runs')).filter((r) => r.status === 'completed');
   }

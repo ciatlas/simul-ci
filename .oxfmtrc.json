@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 110,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "semi": true,
+  "ignorePatterns": [
+    "fixtures/**",
+    "schemas/**",
+    "**/dist/**",
+    "**/coverage/**",
+    ".claude/**",
+    "pnpm-lock.yaml",
+    "**/*.md",
+    "**/*.mdx",
+    "**/*.yml",
+    "**/*.yaml"
+  ]
+}

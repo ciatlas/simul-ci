@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "oxc", "unicorn", "import"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "rules": {
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "import/no-cycle": "error",
+    "no-console": "off",
+    "typescript/no-unsafe-type-assertion": "off",
+    "unicorn/no-array-sort": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-thenable": "off",
+    "no-await-in-loop": "off"
+  },
+  "ignorePatterns": ["fixtures/**", "schemas/**", "**/dist/**", "**/coverage/**", ".claude/**"],
+  "overrides": [
+    {
+      "files": ["packages/engine/src/**", "packages/document/src/**"],
+      "rules": {
+        "import/no-nodejs-modules": "error"
+      }
+    }
+  ],
+  "options": {
+    "typeAware": true
+  }
+}

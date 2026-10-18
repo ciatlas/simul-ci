@@ -1,0 +1,14 @@
+workflow: pr-title.yml
+cases:
+  - name: opening a pull request checks its title
+    when: { event: pull_request, action: opened, base: main, head: feat/x }
+    then: { run: [title], checks: [Conventional PR title] }
+  - name: editing the title checks it again
+    when: { event: pull_request, action: edited, base: main, head: feat/x }
+    then: { run: [title] }
+  - name: a label does not
+    when: { event: pull_request, action: labeled, base: main, head: feat/x }
+    then: { because: types }
+  - name: a push does not
+    when: { event: push, branch: main }
+    then: { because: event }

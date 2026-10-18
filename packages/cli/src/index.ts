@@ -3,6 +3,7 @@ import { VERSION } from '@simulci/engine';
 import { defineCommand, runMain } from 'citty';
 import { modelsCommand } from './models';
 import { planCommand } from './plan';
+import { testCommand } from './test';
 
 const main = defineCommand({
   meta: {
@@ -10,7 +11,7 @@ const main = defineCommand({
     version: VERSION,
     description: 'Static simulator and test framework for GitHub Actions',
   },
-  subCommands: { plan: planCommand, models: modelsCommand },
+  subCommands: { plan: planCommand, test: testCommand, models: modelsCommand },
 });
 
-runMain(main);
+void runMain(main);

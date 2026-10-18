@@ -86,9 +86,11 @@ export function runTests(project: LoadedProject, files: TestInput[], options: Ru
   const results = files.length ? files.map((f) => runFile(project, f, options)) : [noFiles()];
   const summary = { passed: 0, failed: 0, invalid: 0, skipped: 0 };
   for (const file of results) for (const c of file.cases) summary[c.status]++;
-  const invalid = results.some((f) => f.status === 'invalid' || f.cases.some((c) => c.status === 'invalid'));
-  const failed = results.some((f) => f.status === 'failed' || f.cases.some((c) => c.status === 'failed'));
-  return { files: results, summary, exitCode: invalid ? 2 : failed ? 1 : 0 };
+  const anyInvalid = results.some(
+    (f) => f.status === 'invalid' || f.cases.some((c) => c.status === 'invalid'),
+  );
+  const anyFailed = results.some((f) => f.status === 'failed' || f.cases.some((c) => c.status === 'failed'));
+  return { files: results, summary, exitCode: anyInvalid ? 2 : anyFailed ? 1 : 0 };
 }
 
 /** One case on its own, as the app's panel runs it (no file positions, no snapshot). */
@@ -466,7 +468,7 @@ export function lineDiff(a: string[], b: string[]): string[] {
 function lcsTable(a: string[], b: string[]): number[][] {
   const n = a.length;
   const m = b.length;
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  const lcs: number[][] = Array.from({ length: n + 1 }, () => Array.from({ length: m + 1 }, () => 0));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
       lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
@@ -560,7 +562,7 @@ function notAReason(issue: z.core.$ZodIssue, path: (string | number)[], parsed: 
 
 /** An object whose only keys were unknown also "asserts nothing": the unknown key is the problem to report. */
 function noise(issue: z.core.$ZodIssue, all: z.core.$ZodIssue[]): boolean {
-  if (!/^T102 /.test(issue.message)) return false;
+  if (!issue.message.startsWith('T102 ')) return false;
   const path = dotted(issue.path as (string | number)[]);
   return all.some((o) => o.code === 'unrecognized_keys' && dotted(o.path as (string | number)[]) === path);
 }

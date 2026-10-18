@@ -238,7 +238,7 @@ describe('shipped models: dorny/paths-filter', () => {
     const plan = run(filterWorkflow(FILTERS), { event: 'pull_request' });
     expect(verdicts(plan)).toEqual({ changes: 'yes', test: 'maybe', docs: 'maybe' });
     expect(steps(plan)[0]!.outputs.src).toEqual({ known: false, unknowns: ['scenario.changed'] });
-    const u = plan.unknowns.find((u) => u.id === 'scenario.changed')!;
+    const u = plan.unknowns.find((x) => x.id === 'scenario.changed')!;
     expect(u.kind).toBe('changed-files');
     expect(u.pin).toEqual({ layer: 'scenario', fragment: { changed: ['path/to/file'] }, at: ['when'] });
   });

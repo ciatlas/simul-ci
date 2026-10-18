@@ -210,7 +210,7 @@ function optionals(input: z.output<typeof ScenarioInputSchema>): Partial<Scenari
   for (const key of OPTIONAL_KEYS) if (input[key] !== undefined) out[key] = input[key];
   if (input.changed !== undefined)
     out.changed = input.changed.map((c) => (typeof c === 'string' ? { path: c, status: 'modified' } : c));
-  return out as Partial<Scenario>;
+  return out;
 }
 
 /** The ref the author gave, through `ref:`, `branch:` or `tag:`. */

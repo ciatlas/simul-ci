@@ -1,0 +1,11 @@
+workflow: release.yml
+cases:
+  - name: a push to main runs release-please
+    when: { event: push, branch: main }
+    then: { run: [release-please], conclusion: success }
+  - name: a push to another branch does not
+    when: { event: push, branch: feat/x }
+    then: { because: branches }
+  - name: a pull request does not
+    when: { event: pull_request, base: main, head: feat/x }
+    then: { because: event }
