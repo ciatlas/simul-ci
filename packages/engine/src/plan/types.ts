@@ -104,6 +104,13 @@ export interface IfReason {
   loc?: Loc;
 }
 
+export interface ScheduleReason {
+  kind: 'schedule';
+  crons: string[];
+  cron?: string;
+  matched: boolean;
+}
+
 export interface MatrixReason {
   kind: 'matrix';
   unknown: UnknownId;
@@ -124,6 +131,7 @@ export type Reason =
   | SkipCiReason
   | ParentReason
   | IfReason
+  | ScheduleReason
   | MatrixReason
   | LimitReason;
 

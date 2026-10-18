@@ -1,0 +1,226 @@
+# ref-per-event.yml
+# event -> GITHUB_REF and GITHUB_SHA, copied verbatim from the per-event table
+# on the events page (columns `GITHUB_SHA` and `GITHUB_REF`), plus the
+# contexts-page sentences for github.ref / ref_name / ref_type / base_ref /
+# head_ref / event_name. Fetched 2026-10-17.
+
+sources:
+  events: &events https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+  contexts: &contexts https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+
+# `github_ref` / `github_sha` are the exact cell text. `simulated_ref` is the
+# concrete value shape a simulator should produce; it is derived, so where the
+# docs do not give the literal format it is marked UNVERIFIED.
+table:
+  branch_protection_rule:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  check_run:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  check_suite:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  create:
+    github_sha: Last commit on the created branch or tag
+    github_ref: Branch or tag created
+    simulated_ref: refs/heads/<branch> or refs/tags/<tag>
+  delete:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  deployment:
+    github_sha: Commit to be deployed
+    github_ref: Branch or tag to be deployed (empty if created with a commit SHA)
+    simulated_ref: refs/heads/<branch> | refs/tags/<tag> | "" (deployment created from a SHA)
+  deployment_status:
+    github_sha: Commit to be deployed
+    github_ref: Branch or tag to be deployed (empty if commit)
+    simulated_ref: refs/heads/<branch> | refs/tags/<tag> | "" (deployment created from a SHA)
+  discussion:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  discussion_comment:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  fork:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  gollum:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  image_version:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  issue_comment:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  issues:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  label:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  merge_group:
+    github_sha: SHA of the merge group
+    github_ref: Ref of the merge group
+    simulated_ref: refs/heads/gh-readonly-queue/<target_branch>/pr-<N>-<sha>
+    note: |-
+      UNVERIFIED: the literal `refs/heads/gh-readonly-queue/...` format is not stated on any of the four cited pages; the events table only says "Ref of the merge group". Note also that the merge_group `branches` filter is evaluated against the TARGET branch name, not against this ref (see filters.yml).
+  milestone:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  page_build:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  public:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  pull_request:
+    github_sha: Last merge commit on the `GITHUB_REF` branch
+    github_ref: PR merge branch `refs/pull/PULL_REQUEST_NUMBER/merge`
+    simulated_ref: refs/pull/<N>/merge
+    closed_variant:
+      source: *events
+      quote: |-
+        The value of `GITHUB_REF` varies for a closed pull request depending on whether the pull request has been merged or not. If a pull request was closed but not merged, it will be `refs/pull/PULL_REQUEST_NUMBER/merge`. If a pull request was closed as a result of being merged, it will be the fully qualified `ref` of the branch it was merged into, for example `/refs/heads/main`.
+      simulated_ref_closed_unmerged: refs/pull/<N>/merge
+      simulated_ref_closed_merged: refs/heads/<base_branch>
+      note: |-
+        The docs example `/refs/heads/main` has a leading slash; that is a docs typo (github.ref row on the contexts page gives the format as `refs/heads/<branch_name>`).
+    merge_branch:
+      source: *events
+      quote: |-
+        For open, mergeable pull requests, workflows triggered by the `pull_request` event set `GITHUB_REF` to the merge branch. Because `actions/checkout` uses `GITHUB_REF` by default, it checks out the merge branch. Your CI tests run against the merged result, not just the head branch alone:
+      quote_sha: |-
+        Note that `GITHUB_SHA` for this event is the last merge commit of the pull request merge branch. If you want to get the commit ID for the last commit to the head branch of the pull request, use `github.event.pull_request.head.sha` instead. For more information about merge branches, see Pull requests.
+  pull_request_review:
+    github_sha: Last merge commit on the `GITHUB_REF` branch
+    github_ref: PR merge branch `refs/pull/PULL_REQUEST_NUMBER/merge`
+    simulated_ref: refs/pull/<N>/merge
+  pull_request_review_comment:
+    github_sha: Last merge commit on the `GITHUB_REF` branch
+    github_ref: PR merge branch `refs/pull/PULL_REQUEST_NUMBER/merge`
+    simulated_ref: refs/pull/<N>/merge
+  pull_request_target:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<base_branch>
+    note: |-
+      CONFLICT between pages. Events table: "Default branch". Contexts page (github.ref row): "`pull_request_target` events have the `ref` from the base branch." The simulator should use the PR base branch (the two agree when base == default). UNVERIFIED which is right for a PR into a non-default branch.
+  push:
+    github_sha: Tip commit pushed to the ref. When you delete a branch, the SHA in the workflow run (and its associated refs) reverts to the default branch of the repository.
+    github_ref: Updated ref
+    simulated_ref: refs/heads/<branch> or refs/tags/<tag> (the pushed ref)
+  registry_package:
+    github_sha: Commit of the published package
+    github_ref: Branch or tag of the published package
+    simulated_ref: refs/heads/<branch> or refs/tags/<tag>
+  release:
+    github_sha: Last commit in the tagged release
+    github_ref: Tag ref of release `refs/tags/<tag_name>`
+    simulated_ref: refs/tags/<tag_name>
+  repository_dispatch:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  schedule:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  status:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  watch:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+  workflow_call:
+    github_sha: Same as the caller workflow
+    github_ref: Same as the caller workflow
+    simulated_ref: <caller's ref>
+    source_quote: |-
+      `workflow_call` is used to indicate that a workflow can be called by another workflow. When a workflow is triggered with the `workflow_call` event, the event payload in the called workflow is the same event payload from the calling workflow. For more information, see Reuse workflows.
+  workflow_dispatch:
+    github_sha: Last commit on the `GITHUB_REF` branch or tag
+    github_ref: Branch or tag that received dispatch
+    simulated_ref: refs/heads/<selected_branch> or refs/tags/<selected_tag>
+  workflow_run:
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    simulated_ref: refs/heads/<default_branch>
+
+table_source: *events
+
+# The contexts page's own per-event description of github.ref and friends.
+contexts:
+  - property: github.ref
+    source: *contexts
+    quote: |-
+      The fully-formed ref of the branch or tag that triggered the workflow run. For workflows triggered by `push`, this is the branch or tag ref that was pushed. For workflows triggered by `pull_request` that were not merged, this is the pull request merge branch. If the pull request was merged, this is the branch it was merged into. For workflows triggered by `release`, this is the release tag created. For other triggers, this is the branch or tag ref that triggered the workflow run. This is only set if a branch or tag is available for the event type. The ref given is fully-formed, meaning that for branches the format is `refs/heads/<branch_name>`. For pull request events except `pull_request_target` that were not merged, it is `refs/pull/<pr_number>/merge`. `pull_request_target` events have the `ref` from the base branch. For tags it is `refs/tags/<tag_name>`. For example, `refs/heads/feature-branch-1`. For more information about pull request merge branches, see Pull requests.
+    cases:
+      - { event: push, ref_pushed: refs/heads/main, github_ref: refs/heads/main }
+      - { event: push, ref_pushed: refs/tags/v1.0.0, github_ref: refs/tags/v1.0.0 }
+      - { event: pull_request, number: 42, merged: false, github_ref: refs/pull/42/merge }
+      - { event: pull_request, number: 42, merged: true, base: main, github_ref: refs/heads/main }
+      - { event: pull_request_target, number: 42, base: main, github_ref: refs/heads/main }
+      - { event: release, tag: v2.0.0, github_ref: refs/tags/v2.0.0 }
+  - property: github.ref_name
+    source: *contexts
+    quote: |-
+      The short ref name of the branch or tag that triggered the workflow run. This value matches the branch or tag name shown on GitHub. For example, `feature-branch-1`.
+    quote_2: |-
+      For pull requests that were not merged, the format is `<pr_number>/merge`.
+    cases:
+      - { github_ref: refs/heads/feature-branch-1, ref_name: feature-branch-1 }
+      - { github_ref: refs/heads/releases/10, ref_name: releases/10 }
+      - { github_ref: refs/tags/v1.0.0, ref_name: v1.0.0 }
+      - { github_ref: refs/pull/42/merge, ref_name: 42/merge }
+  - property: github.ref_type
+    source: *contexts
+    quote: |-
+      The type of ref that triggered the workflow run. Valid values are `branch` or `tag`.
+    cases:
+      - { github_ref: refs/heads/main, ref_type: branch }
+      - { github_ref: refs/tags/v1, ref_type: tag }
+      - { github_ref: refs/pull/42/merge, ref_type: UNVERIFIED }   # docs list only branch|tag; real runs report "branch"
+  - property: github.base_ref
+    source: *contexts
+    quote: |-
+      The `base_ref` or target branch of the pull request in a workflow run. This property is only available when the event that triggers a workflow run is either `pull_request` or `pull_request_target`.
+    cases:
+      - { event: pull_request, base: main, base_ref: main }
+      - { event: push, base_ref: "" }
+  - property: github.head_ref
+    source: *contexts
+    quote: |-
+      The `head_ref` or source branch of the pull request in a workflow run. This property is only available when the event that triggers a workflow run is either `pull_request` or `pull_request_target`.
+    cases:
+      - { event: pull_request, head: feature/x, head_ref: feature/x }
+      - { event: push, head_ref: "" }
+  - property: github.event_name
+    source: *contexts
+    quote: |-
+      The name of the event that triggered the workflow run.
+    cases:
+      - { event: pull_request_target, event_name: pull_request_target }   # even though its webhook payload name is `pull_request`
+      - { event: workflow_call, event_name: UNVERIFIED }                  # events page: payload is "Same as the caller workflow"; the docs do not say whether event_name is the caller's event
+  - property: github.sha
+    source: *contexts
+    quote: |-
+      The commit SHA that triggered the workflow. The value of this commit SHA depends on the event that triggered the workflow. For more information, see Events that trigger workflows. For example, `ffac537e6cbbf934b08745a378932722df287a53`.
