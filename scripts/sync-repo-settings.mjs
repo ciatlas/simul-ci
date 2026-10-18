@@ -190,12 +190,21 @@ async function feature(name, want, read, write) {
     log(`- ${name}: up to date`);
     return;
   }
-  if (live === undefined) log(`- ${name}: cannot read with this token${apply ? ' — applying' : ''}`);
-  else {
-    log(`- ${name}: ${changes.length} difference(s)${apply ? ' — updating' : ''}`);
-    for (const c of changes) log(`  - \`${c}\``);
-  }
+  describeFeature(name, current, delta);
   if (!apply) return;
+  await applyFeature(name, write);
+}
+
+function describeFeature(name, current, delta) {
+  if (current === undefined) {
+    log(`- ${name}: cannot read with this token${apply ? ' — applying' : ''}`);
+    return;
+  }
+  log(`- ${name}: ${delta.length} difference(s)${apply ? ' — updating' : ''}`);
+  for (const c of delta) log(`  - \`${c}\``);
+}
+
+async function applyFeature(name, write) {
   try {
     await write();
   } catch (err) {

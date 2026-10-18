@@ -79,6 +79,21 @@ function gateFailed(r: Reason): boolean {
   return gate.known && !gate.value;
 }
 
+/** The unknown ids a reason's gate depends on. */
+export function reasonUnknowns(r: Reason): string[] {
+  switch (r.kind) {
+    case 'if':
+      return r.value.known ? [] : r.value.unknowns;
+    case 'filter':
+    case 'types':
+      return r.matched.known ? [] : r.matched.unknowns;
+    case 'matrix':
+      return [r.unknown];
+    default:
+      return [];
+  }
+}
+
 /** The deciding clause of a decision as a line of text. */
 export function decidingClause(decision: Decision): string {
   const r = decidingReason(decision.chain, decision.verdict);
