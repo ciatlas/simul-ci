@@ -3,7 +3,8 @@
   // Files that something other than an import loads.
   "entry": [
     // Run by the CI and release workflows.
-    "scripts/*.mjs"
+    "scripts/*.mjs",
+    "scripts/*.ts"
   ],
   // The engine is a library inside the workspace: what its index exports, and the members of what it exports, are
   // its API for the CLI, the Action, the web app and the server.

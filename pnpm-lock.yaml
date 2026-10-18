@@ -172,6 +172,9 @@ importers:
       '@ciatlas/core':
         specifier: github:ciatlas/core#v2.3.0
         version: https://codeload.github.com/ciatlas/core/tar.gz/9496bddeae3e4646103f913cc7d50ce748843e82
+      '@simulci/engine':
+        specifier: workspace:*
+        version: link:packages/engine
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2
@@ -193,9 +196,18 @@ importers:
 
   packages/engine:
     dependencies:
+      '@actions/expressions':
+        specifier: ^0.3.61
+        version: 0.3.61
+      '@actions/workflow-parser':
+        specifier: ^0.3.61
+        version: 0.3.61
       '@ciatlas/core':
         specifier: github:ciatlas/core#v2.3.0
         version: https://codeload.github.com/ciatlas/core/tar.gz/9496bddeae3e4646103f913cc7d50ce748843e82
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
 packages:
 
@@ -1057,6 +1069,9 @@ packages:
     engines: {node: '>= 14.6'}
     hasBin: true
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
 snapshots:
 
   '@actions/expressions@0.3.61': {}
@@ -1643,3 +1658,5 @@ snapshots:
   why-is-node-running@3.2.1: {}
 
   yaml@2.9.1: {}
+
+  zod@4.6.7: {}
