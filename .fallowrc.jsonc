@@ -35,6 +35,11 @@
         "files": ["**/test/**"],
         "maxUnitSize": 500,
         "reason": "Test suites: a describe() block groups many it() cases and is long by design"
+      },
+      {
+        "files": ["scripts/**"],
+        "maxCrap": 100,
+        "reason": "Operational scripts run against GitHub's API and have no unit coverage; CRAP assumes none, so any branching function would breach 30"
       }
     ]
   }
