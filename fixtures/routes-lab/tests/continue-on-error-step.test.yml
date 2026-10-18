@@ -1,0 +1,13 @@
+# lab 5
+workflow: case-continue-on-error-step.yml
+given: { event: push, branch: main }
+cases:
+  - name: outcome keeps the real result, conclusion the remapped one
+    when: { assume: [{ step: a.f, outcome: failure }] }
+    then:
+      run: [a, a.#2, a.#4]                 # probe, `on success`
+      skip: [a.#3]                         # `on failure`
+      conclusion: success
+      units:
+        a.f: { outcome: failure, conclusion: success }
+        a: { result: success, conclusion: success }

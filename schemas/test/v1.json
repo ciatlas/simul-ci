@@ -1,0 +1,1040 @@
+{
+  "$id": "https://ciatlas.github.io/simulci/schemas/test/v1.json",
+  "title": "simulci route test",
+  "description": "One workflow, scenario defaults, and cases: a scenario each, and what runs, skips, and why.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "workflow": {
+      "type": "string",
+      "pattern": "^(\\.github\\/workflows\\/)?[^/\\s]+\\.ya?ml$"
+    },
+    "given": {
+      "type": "object",
+      "properties": {
+        "event": {},
+        "action": {},
+        "ref": {},
+        "branch": {},
+        "tag": {},
+        "base": {},
+        "head": {},
+        "number": {},
+        "merged": {},
+        "sha": {},
+        "defaultBranch": {},
+        "repository": {},
+        "message": {},
+        "actor": {},
+        "changed": {},
+        "inputs": {},
+        "vars": {},
+        "secrets": {},
+        "environments": {},
+        "cron": {},
+        "workflow_run": {},
+        "platform": {},
+        "assume": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "workflow": {
+                "type": "string",
+                "minLength": 1
+              },
+              "step": {
+                "type": "string",
+                "minLength": 1
+              },
+              "job": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uses": {
+                "type": "string",
+                "minLength": 1
+              },
+              "matrix": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "success",
+                  "failure",
+                  "cancelled"
+                ]
+              },
+              "outputs": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "unknown": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "unknown"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "env": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "unknown": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "unknown"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "as": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "allowMaybe": {
+          "type": "boolean"
+        },
+        "strictMocks": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "cases": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "when": {
+            "type": "object",
+            "properties": {
+              "event": {},
+              "action": {},
+              "ref": {},
+              "branch": {},
+              "tag": {},
+              "base": {},
+              "head": {},
+              "number": {},
+              "merged": {},
+              "sha": {},
+              "defaultBranch": {},
+              "repository": {},
+              "message": {},
+              "actor": {},
+              "changed": {},
+              "inputs": {},
+              "vars": {},
+              "secrets": {},
+              "environments": {},
+              "cron": {},
+              "workflow_run": {},
+              "platform": {},
+              "assume": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "workflow": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "step": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "job": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uses": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "matrix": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean"
+                        ]
+                      }
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "success",
+                        "failure",
+                        "cancelled"
+                      ]
+                    },
+                    "outputs": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unknown": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "unknown"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "env": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unknown": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "unknown"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "as": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "triggered": {
+                "type": "boolean"
+              },
+              "because": {
+                "type": "string",
+                "enum": [
+                  "event",
+                  "types",
+                  "schedule",
+                  "default-branch",
+                  "skip-ci",
+                  "parent",
+                  "if",
+                  "matrix",
+                  "limit",
+                  "filter",
+                  "branches",
+                  "branches-ignore",
+                  "tags",
+                  "tags-ignore",
+                  "paths",
+                  "paths-ignore",
+                  "workflows"
+                ]
+              },
+              "run": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "enum": [
+                          "event",
+                          "types",
+                          "schedule",
+                          "default-branch",
+                          "skip-ci",
+                          "parent",
+                          "if",
+                          "matrix",
+                          "limit",
+                          "filter",
+                          "branches",
+                          "branches-ignore",
+                          "tags",
+                          "tags-ignore",
+                          "paths",
+                          "paths-ignore",
+                          "workflows"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              "skip": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "enum": [
+                          "event",
+                          "types",
+                          "schedule",
+                          "default-branch",
+                          "skip-ci",
+                          "parent",
+                          "if",
+                          "matrix",
+                          "limit",
+                          "filter",
+                          "branches",
+                          "branches-ignore",
+                          "tags",
+                          "tags-ignore",
+                          "paths",
+                          "paths-ignore",
+                          "workflows"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              "maybe": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "enum": [
+                          "event",
+                          "types",
+                          "schedule",
+                          "default-branch",
+                          "skip-ci",
+                          "parent",
+                          "if",
+                          "matrix",
+                          "limit",
+                          "filter",
+                          "branches",
+                          "branches-ignore",
+                          "tags",
+                          "tags-ignore",
+                          "paths",
+                          "paths-ignore",
+                          "workflows"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              "conclusion": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "success",
+                      "failure",
+                      "cancelled"
+                    ]
+                  },
+                  {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "success",
+                        "failure",
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "unknown": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "unknown"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "checks": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "success",
+                            "failure",
+                            "cancelled",
+                            "skipped"
+                          ]
+                        },
+                        {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "success",
+                              "failure",
+                              "cancelled",
+                              "skipped"
+                            ]
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "unknown": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "unknown"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "unknowns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "units": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "yes",
+                            "no",
+                            "maybe"
+                          ]
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    },
+                    "because": {
+                      "type": "string",
+                      "enum": [
+                        "event",
+                        "types",
+                        "schedule",
+                        "default-branch",
+                        "skip-ci",
+                        "parent",
+                        "if",
+                        "matrix",
+                        "limit",
+                        "filter",
+                        "branches",
+                        "branches-ignore",
+                        "tags",
+                        "tags-ignore",
+                        "paths",
+                        "paths-ignore",
+                        "workflows"
+                      ]
+                    },
+                    "outcome": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "success",
+                            "failure",
+                            "cancelled",
+                            "skipped"
+                          ]
+                        },
+                        {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "success",
+                              "failure",
+                              "cancelled",
+                              "skipped"
+                            ]
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "unknown": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "unknown"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "conclusion": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "success",
+                            "failure",
+                            "cancelled",
+                            "skipped"
+                          ]
+                        },
+                        {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "success",
+                              "failure",
+                              "cancelled",
+                              "skipped"
+                            ]
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "unknown": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "unknown"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "result": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "success",
+                            "failure",
+                            "cancelled",
+                            "skipped"
+                          ]
+                        },
+                        {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "success",
+                              "failure",
+                              "cancelled",
+                              "skipped"
+                            ]
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "unknown": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "unknown"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "with": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          },
+                          {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ]
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "match": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "match"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unknown": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "unknown"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "inputs": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          },
+                          {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ]
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "match": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "match"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unknown": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "unknown"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "env": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          },
+                          {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ]
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "match": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "match"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unknown": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "unknown"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "outputs": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          },
+                          {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ]
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "match": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "match"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unknown": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "unknown"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "environment": {
+                      "anyOf": [
+                        {
+                          "type": [
+                            "string",
+                            "number",
+                            "boolean"
+                          ]
+                        },
+                        {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "match": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "match"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "unknown": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "unknown"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "check": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "allowMaybe": {
+            "type": "boolean"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "steps",
+                  "legs"
+                ]
+              }
+            ]
+          },
+          "skip": {
+            "type": [
+              "boolean",
+              "string"
+            ]
+          },
+          "only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "when"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "workflow",
+    "cases"
+  ],
+  "additionalProperties": false
+}

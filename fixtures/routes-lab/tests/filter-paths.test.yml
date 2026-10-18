@@ -1,0 +1,14 @@
+# lab 18; the maybe and its pin
+workflow: case-filter-paths.yml
+given: { event: push, branch: main }
+cases:
+  - name: a docs-only push starts nothing
+    when: { changed: [docs/a.md] }
+    then: { because: paths }
+  - name: a tag push ignores path filters
+    when: { tag: v0.0.1 }                  # the case's tag replaces the file's branch (ref group)
+    then: { run: [a] }
+  - name: without changed files the filter cannot decide
+    when: {}
+    allowMaybe: true
+    then: { triggered: true, maybe: [a], unknowns: [scenario.changed] }

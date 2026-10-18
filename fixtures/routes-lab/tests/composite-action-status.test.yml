@@ -1,0 +1,14 @@
+# lab 13
+workflow: case-composite-action-status.yml
+given: { event: push, branch: main }
+cases:
+  - name: an inner failure fails the using step; continue-on-error remaps its conclusion
+    when: { assume: [{ step: 'a.u/#1', outcome: failure }] }
+    then:
+      run: [a.u, a.u/#2, a.u/#4, a.#3, a.#5]   # inner failure(), inner always(); probe; job-level success()
+      skip: [a.u/#3, a.#4]                     # inner success(); job-level failure()
+      conclusion: success
+      units:
+        a.u: { outcome: failure, conclusion: success }
+        a.u/#1: { outcome: failure }
+        a: { result: success }

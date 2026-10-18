@@ -1,0 +1,16 @@
+# lab 7
+workflow: case-matrix-one-failed.yml
+given: { event: push, branch: main }
+cases:
+  - name: with fail-fast off the other leg completes and the aggregate is still failure
+    when: { assume: [{ step: 'a[n=2].#1', outcome: failure }] }
+    then:
+      run: [b]
+      skip:
+        - c: if
+      conclusion: failure
+      checks: { 'a (1)': success, 'a (2)': failure, b: success, c: skipped }
+      units:
+        a: { result: failure }
+        'a[n=1]': { result: success }
+        'a[n=2]': { result: failure, conclusion: failure }

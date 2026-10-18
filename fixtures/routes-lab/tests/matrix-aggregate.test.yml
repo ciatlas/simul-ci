@@ -1,0 +1,26 @@
+# lab 6: fail-fast on for a, off for v
+workflow: case-matrix-aggregate.yml
+given: { event: push, branch: main }
+cases:
+  - name: one failed leg fails the aggregate; fail-fast cancels the siblings
+    when:
+      assume:
+        - { step: 'a[n=2].#1', outcome: failure }
+        - { step: 'v[n=2].#1', outcome: failure }
+    then:
+      run: [b, w]
+      conclusion: failure
+      checks:
+        'a (1)': [success, cancelled]      # a race: the leg may finish before the cancel (lab 6, one run in five)
+        'a (2)': failure
+        'a (3)': [success, cancelled]
+        b: success
+        'v (1)': success
+        'v (2)': failure
+        'v (3)': success
+        w: success
+      units:
+        a: { result: failure }
+        'a[n=1]': { result: [success, cancelled] }
+        v: { result: failure }
+        'v[n=1]': { result: success, check: 'v (1)' }

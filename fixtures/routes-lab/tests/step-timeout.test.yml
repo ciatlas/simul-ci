@@ -1,0 +1,14 @@
+# lab 15: a timeout is a plain failure
+workflow: case-step-timeout.yml
+given: { event: push, branch: main }
+cases:
+  - name: a timed-out step fails the job
+    when: { assume: [{ step: a.t, outcome: failure }] }
+    then:
+      run: [a.#2, a.#3]                    # always(), failure()
+      skip: [a.#4, a.#5]                   # cancelled(), success()
+      conclusion: failure
+      checks: { a: failure }
+      units:
+        a.t: { outcome: failure, conclusion: failure }
+        a: { result: failure }
