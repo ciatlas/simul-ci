@@ -167,8 +167,8 @@ importers:
   .:
     devDependencies:
       '@ciatlas/core':
-        specifier: github:ciatlas/core#v2.4.0
-        version: https://codeload.github.com/ciatlas/core/tar.gz/852776fb87daeb7010eafbce3cda467d415ec70f
+        specifier: github:ciatlas/core#v2.5.0
+        version: https://codeload.github.com/ciatlas/core/tar.gz/cf55cd8373233ba8a821439697c996db4188ecc3
       '@simulci/engine':
         specifier: workspace:*
         version: link:packages/engine
@@ -242,8 +242,8 @@ importers:
         specifier: ^0.3.61
         version: 0.3.61
       '@ciatlas/core':
-        specifier: github:ciatlas/core#v2.4.0
-        version: https://codeload.github.com/ciatlas/core/tar.gz/852776fb87daeb7010eafbce3cda467d415ec70f
+        specifier: github:ciatlas/core#v2.5.0
+        version: https://codeload.github.com/ciatlas/core/tar.gz/cf55cd8373233ba8a821439697c996db4188ecc3
       picomatch:
         specifier: ^4.0.7
         version: 4.0.7
@@ -313,9 +313,9 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@ciatlas/core@https://codeload.github.com/ciatlas/core/tar.gz/852776fb87daeb7010eafbce3cda467d415ec70f':
-    resolution: {gitHosted: true, integrity: sha512-fg9Yh0eSLi9vSDUQ0+EBzMErgMkT1uVjFBbH5cL+qUXbABZkUY7Az6XUxVj/46WQfczlr3Zddw4SiD4NQcK5zw==, tarball: https://codeload.github.com/ciatlas/core/tar.gz/852776fb87daeb7010eafbce3cda467d415ec70f}
-    version: 2.4.0
+  '@ciatlas/core@https://codeload.github.com/ciatlas/core/tar.gz/cf55cd8373233ba8a821439697c996db4188ecc3':
+    resolution: {gitHosted: true, integrity: sha512-A5xxC18lF3s2vaavJzv7vVSOT9GHicpuE+z3SqGe7KruKRLBS2D/0x7pRVX+Y0m9VhxVgT23fvhooH1M3S2IPg==, tarball: https://codeload.github.com/ciatlas/core/tar.gz/cf55cd8373233ba8a821439697c996db4188ecc3}
+    version: 2.5.0
     engines: {node: '>=22'}
 
   '@esbuild/aix-ppc64@0.28.2':
@@ -1646,7 +1646,7 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@ciatlas/core@https://codeload.github.com/ciatlas/core/tar.gz/852776fb87daeb7010eafbce3cda467d415ec70f':
+  '@ciatlas/core@https://codeload.github.com/ciatlas/core/tar.gz/cf55cd8373233ba8a821439697c996db4188ecc3':
     dependencies:
       '@actions/expressions': 0.3.61
       '@actions/workflow-parser': 0.3.61
