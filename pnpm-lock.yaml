@@ -205,6 +205,9 @@ importers:
       '@ciatlas/core':
         specifier: github:ciatlas/core#v2.3.0
         version: https://codeload.github.com/ciatlas/core/tar.gz/9496bddeae3e4646103f913cc7d50ce748843e82
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
       zod:
         specifier: ^4.6.7
         version: 4.6.7

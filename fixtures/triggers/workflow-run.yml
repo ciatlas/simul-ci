@@ -1,0 +1,151 @@
+# workflow-run.yml
+# The workflow_run trigger: `workflows`, `types`, `branches`/`branches-ignore`,
+# the triggering run's conclusion, and the default-branch requirement.
+# Every `quote` is verbatim (fetched 2026-10-17).
+
+sources:
+  events: &events https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+  syntax: &syntax https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
+
+overview:
+  - rule: "fires when another workflow run is requested, in progress or completed; gains secrets/write token"
+    source: *events
+    quote: |-
+      This event occurs when a workflow run is requested or completed. It allows you to execute a workflow based on execution or completion of another workflow. The workflow started by the `workflow_run` event is able to access secrets and write tokens, even if the previous workflow was not. This is useful in cases where the previous workflow is intentionally not privileged, but you need to take a privileged action in a later workflow.
+
+types:
+  - rule: "activity types: completed, requested, in_progress; default all; `requested` does not fire on re-run"
+    source: *events
+    quote: |-
+      More than one activity type triggers this event. The `requested` activity type does not occur when a workflow is re-run. For information about each activity type, see Webhook events and payloads. By default, all activity types trigger workflows that run on this event. You can limit your workflow runs to specific activity types using the `types` keyword. For more information, see Workflow syntax for GitHub Actions.
+    types: [completed, requested, in_progress]
+    default: [completed, requested, in_progress]
+    cases:
+      - { types: null, activity: completed, runs: true }
+      - { types: null, activity: requested, runs: true }
+      - { types: null, activity: in_progress, runs: true }
+      - { types: [completed], activity: requested, runs: false }
+      - { types: [completed], activity: completed, runs: true }
+      - { types: [requested], activity: requested, rerun: true, runs: false, note: "requested does not occur on re-run" }
+      - { types: [completed], activity: completed, rerun: true, runs: true, derived: true }
+
+workflows:
+  - rule: "`workflows` names the triggering workflow(s) by `name`; any one of them suffices"
+    source: *events
+    quote: |-
+      If you specify multiple `workflows` for the `workflow_run` event, only one of the workflows needs to run. For example, a workflow with the following trigger will run whenever the "Staging" workflow or the "Lab" workflow completes.
+    cases:
+      - { workflows: [Staging, Lab], triggering_workflow_name: Staging, activity: completed, runs: true }
+      - { workflows: [Staging, Lab], triggering_workflow_name: Lab, activity: completed, runs: true }
+      - { workflows: [Staging, Lab], triggering_workflow_name: Build, activity: completed, runs: false, derived: true }
+  - rule: "`workflows` accepts glob patterns (same character set as branch filters)"
+    source: *syntax
+    quote: |-
+      The `workflows` filters accept glob patterns that use characters like `*`, `**`, `+`, `?`, `!` and others to match more than one workflow name. If a name contains any of these characters and you want a literal match, you need to escape each of these special characters with `\`. For more information about glob patterns, see the Workflow syntax for GitHub Actions.
+    cases:
+      - { workflows: ["Build"], triggering_workflow_name: Build, runs: true }
+      - { workflows: ["Build"], triggering_workflow_name: "Build C++", runs: false, derived: true }
+      - { workflows: ["Build*"], triggering_workflow_name: Build, runs: true, derived: true }
+      - { workflows: ["Build*"], triggering_workflow_name: "Build C++", runs: true }
+      - { workflows: ["Build*"], triggering_workflow_name: "Build/Nightly", runs: false, derived: true, note: "UNVERIFIED: `*` does not match `/` for refs/paths; docs do not say whether that holds for workflow names" }
+      - { workflows: ['Build C\+\+'], triggering_workflow_name: "Build C++", runs: true }
+      - { workflows: ['Build C\+\+'], triggering_workflow_name: "Build C", runs: false, derived: true }
+    quote_examples:
+      - |-
+        For example, a workflow with the following trigger will only run when the workflow named `Build` runs:
+      - |-
+        A workflow with the following trigger will only run when a workflow whose name starts with `Build` completed:
+      - |-
+        A workflow with the following trigger will only run when the workflow named `Build C++` completed:
+    quote_yaml_cpp: |-
+      workflows: ["Build C\\+\\+"]
+  - rule: "is `workflows` required? The docs never show workflow_run without it and never say it is optional."
+    note: UNVERIFIED. Simulator should treat a missing `workflows` as a lint error or as matching nothing.
+
+branches:
+  - rule: "`branches`/`branches-ignore` constrain the branch the TRIGGERING workflow ran on"
+    source: *syntax
+    quote: |-
+      When using the `workflow_run` event, you can specify what branches the triggering workflow must run on in order to trigger your workflow.
+    quote_2: |-
+      You can use the `branches` or `branches-ignore` filter to specify what branches the triggering workflow must run on in order to trigger your workflow. For more information, see Workflow syntax for GitHub Actions. For example, a workflow with the following trigger will only run when the workflow named `Build` runs on a branch named `canary`.
+    source_2: *events
+    cases:
+      - { workflows: [Build], types: [requested], branches: [canary], triggering_branch: canary, runs: true }
+      - { workflows: [Build], types: [requested], branches: [canary], triggering_branch: main, runs: false, derived: true }
+      - { workflows: ["Build"], types: [requested], branches: ["releases/**"], triggering_branch: releases/1, runs: true }
+      - { workflows: ["Build"], types: [requested], branches: ["releases/**"], triggering_branch: main, runs: false, derived: true }
+      - { workflows: ["Build"], types: [requested], branches-ignore: ["canary"], triggering_branch: canary, runs: false }
+      - { workflows: ["Build"], types: [requested], branches-ignore: ["canary"], triggering_branch: main, runs: true, derived: true }
+    quote_examples:
+      - |-
+        For example, a workflow with the following trigger will only run when the workflow named `Build` runs on a branch whose name starts with `releases/`:
+      - |-
+        A workflow with the following trigger will only run when the workflow named `Build` runs on a branch that is not named `canary`:
+  - rule: "ordered negation applies; the docs example also shows `main` excluded by a releases/** positive"
+    source: *syntax
+    quote: |-
+      For example, a workflow with the following trigger will run when the workflow named `Build` runs on a branch that is named `releases/10` or `releases/beta/mona` but will not `releases/10-alpha`, `releases/beta/3-alpha`, or `main`.
+    cases:
+      - { workflows: ["Build"], branches: ["releases/**", "!releases/**-alpha"], triggering_branch: releases/10, runs: true }
+      - { workflows: ["Build"], branches: ["releases/**", "!releases/**-alpha"], triggering_branch: releases/beta/mona, runs: true }
+      - { workflows: ["Build"], branches: ["releases/**", "!releases/**-alpha"], triggering_branch: releases/10-alpha, runs: false }
+      - { workflows: ["Build"], branches: ["releases/**", "!releases/**-alpha"], triggering_branch: releases/beta/3-alpha, runs: false }
+      - { workflows: ["Build"], branches: ["releases/**", "!releases/**-alpha"], triggering_branch: main, runs: false }
+  - rule: "branches and branches-ignore are mutually exclusive on workflow_run"
+    source: *syntax
+    quote: |-
+      You cannot use both the `branches` and `branches-ignore` filters for the same event in a workflow. If you want to both include and exclude branch patterns for a single event, use the `branches` filter along with the `!` character to indicate which branches should be excluded.
+    cases:
+      - { workflows: [Build], branches: [main], branches-ignore: [dev], valid: false }
+  - rule: "what 'branch the triggering workflow ran on' means for a tag- or PR-triggered upstream run"
+    note: |-
+      UNVERIFIED. The docs only speak of branches. The simulator should take github.event.workflow_run.head_branch of the triggering run; the docs do not say what that is for a tag push or a pull_request run (payload field, not described on these pages).
+
+conclusion:
+  - rule: "the run fires regardless of the triggering run's conclusion; gate jobs with github.event.workflow_run.conclusion"
+    source: *events
+    quote: |-
+      A workflow run is triggered regardless of the conclusion of the previous workflow. If you want to run a job or step based on the result of the triggering workflow, you can use a conditional with the `github.event.workflow_run.conclusion` property. For example, this workflow will run whenever a workflow named "Build" completes, but the `on-success` job will only run if the "Build" workflow succeeded, and the `on-failure` job will only run if the "Build" workflow failed:
+    cases:
+      - { workflows: [Build], types: [completed], triggering_conclusion: success, workflow_runs: true, job_on_success_runs: true,  job_on_failure_runs: false }
+      - { workflows: [Build], types: [completed], triggering_conclusion: failure, workflow_runs: true, job_on_success_runs: false, job_on_failure_runs: true }
+      - { workflows: [Build], types: [completed], triggering_conclusion: cancelled, workflow_runs: true, job_on_success_runs: false, job_on_failure_runs: false, derived: true }
+      - { workflows: [Build], types: [completed], triggering_conclusion: skipped, workflow_runs: true, job_on_success_runs: false, job_on_failure_runs: false, derived: true }
+    conclusion_values_seen_in_docs: [success, failure]
+    note: |-
+      UNVERIFIED: the full set of `conclusion` values (cancelled, skipped, timed_out, action_required, neutral, stale, null while in_progress) is not enumerated on these pages.
+    example_ifs:
+      - "${{ github.event.workflow_run.conclusion == 'success' }}"
+      - "${{ github.event.workflow_run.conclusion == 'failure' }}"
+
+default_branch:
+  - rule: "workflow file must be on the default branch; GITHUB_REF/SHA are the default branch"
+    source: *events
+    quote: |-
+      This event will only trigger a workflow run if the workflow file exists on the default branch.
+    github_sha: Last commit on default branch
+    github_ref: Default branch
+    cases:
+      - { workflow_file_on_default_branch: true,  runs: true }
+      - { workflow_file_on_default_branch: false, runs: false }
+      - { triggering_branch: feature/x, github_ref: refs/heads/<default_branch>, note: "the downstream run's ref is the default branch even though the upstream ran on feature/x" }
+
+chain_limit:
+  - rule: "at most three levels of workflow_run chaining"
+    source: *events
+    quote: |-
+      You can't use `workflow_run` to chain together more than three levels of workflows. For example, if you attempt to trigger five workflows (named `B` to `F`) to run sequentially after an initial workflow `A` has run (that is: `A` → `B` → `C` → `D` → `E` → `F`), workflows `E` and `F` will not be run.
+    cases:
+      - { chain: [A, B], depth: 1, last_runs: true }
+      - { chain: [A, B, C], depth: 2, last_runs: true }
+      - { chain: [A, B, C, D], depth: 3, last_runs: true }
+      - { chain: [A, B, C, D, E], depth: 4, last_runs: false }
+      - { chain: [A, B, C, D, E, F], depth: 5, last_runs: false }
+
+payload_access:
+  - rule: "github.event.workflow_run carries the triggering run (id usable for artifact download)"
+    source: *events
+    quote: |-
+      You can access the `workflow_run` event payload that corresponds to the workflow that triggered your workflow. For example, if your triggering workflow generates artifacts, a workflow triggered with the `workflow_run` event can access these artifacts.
+    fields_used_in_docs: ["github.event.workflow_run.id", "github.event.workflow_run.conclusion"]

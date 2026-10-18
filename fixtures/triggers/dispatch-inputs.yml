@@ -1,0 +1,171 @@
+# dispatch-inputs.yml
+# workflow_dispatch inputs: types, limits, defaults, and how the `inputs` and
+# `github.event.inputs` contexts type their values. Every `quote` is verbatim
+# (fetched 2026-10-17). workflow_call inputs are included where the docs state
+# a rule for them that the dispatch section does not (defaults per type).
+
+sources:
+  syntax: &syntax https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
+  events: &events https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+  contexts: &contexts https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+
+types:
+  - rule: "workflow_dispatch input types: boolean, choice, number, environment, string"
+    source: *syntax
+    quote: |-
+      The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `choice`, `number`, `environment` or `string`.
+    allowed: [boolean, choice, number, environment, string]
+    cases:
+      - { type: boolean, valid: true }
+      - { type: choice, valid: true }
+      - { type: number, valid: true }
+      - { type: environment, valid: true }
+      - { type: string, valid: true }
+      - { type: integer, valid: false, derived: true }
+      - { type: enum, valid: false, derived: true }
+  - rule: "workflow_call input types (for contrast): boolean, number, string only, and `type` is required there"
+    source: *syntax
+    quote: |-
+      Required if input is defined for the `on.workflow_call` keyword. The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `number`, or `string`.
+    allowed: [boolean, number, string]
+  - rule: "is `type` required for workflow_dispatch inputs? The docs do not say (they say it IS required for workflow_call)."
+    source: *syntax
+    quote: |-
+      When using the `workflow_dispatch` event, you can optionally specify inputs that are passed to the workflow.
+    note: UNVERIFIED. Simulator should treat a missing `type` on a dispatch input as `string`.
+  - rule: "`required` is a boolean"
+    source: *syntax
+    quote: |-
+      A boolean specifying whether the input must be supplied.
+  - rule: "choice resolves to a single string option"
+    source: *syntax
+    quote: |-
+      The workflow will also receive the inputs in the `github.event.inputs` context. The information in the `inputs` context and `github.event.inputs` context is identical except that the `inputs` context preserves Boolean values as Booleans instead of converting them to strings. The `choice` type resolves to a string and is a single selectable option.
+    cases:
+      - { type: choice, options: [info, warning, debug], value: warning, valid: true }
+      - { type: choice, options: [info, warning, debug], value: trace, valid: false, derived: true, note: "UNVERIFIED: docs do not state validation of a non-option value sent via API" }
+
+limits:
+  - rule: "max 25 top-level inputs"
+    source: *syntax
+    quote: |-
+      The maximum number of top-level properties for `inputs` is 25 .
+    max_inputs: 25
+    cases:
+      - { input_count: 25, valid: true }
+      - { input_count: 26, valid: false }
+    note: |-
+      Quoted exactly, including the stray space before the period on the docs page. The identical sentence appears on the events page under `workflow_dispatch` > Providing inputs.
+  - rule: "max 65,535 characters of inputs payload"
+    source: *syntax
+    quote: |-
+      The maximum payload for `inputs` is 65,535 characters.
+    max_payload_chars: 65535
+
+defaults:
+  - rule: "a `default` may be declared per input (example uses default: 'warning' on a choice)"
+    source: *syntax
+    quote: |-
+      ### Example of `on.workflow_dispatch.inputs`
+    example_yaml: |-
+      on:
+        workflow_dispatch:
+          inputs:
+            logLevel:
+              description: 'Log level'
+              required: true
+              default: 'warning'
+              type: choice
+              options:
+                - info
+                - warning
+                - debug
+            print_tags:
+              description: 'True to print to STDOUT'
+              required: true
+              type: boolean
+            tags:
+              description: 'Test scenario tags'
+              required: true
+              type: string
+            environment:
+              description: 'Environment to run tests against'
+              type: environment
+              required: true
+    cases:
+      - { input: logLevel, provided: null, default: warning, resolved: warning }
+      - { input: logLevel, provided: debug, default: warning, resolved: debug }
+  - rule: "when no default is set the type-zero value applies - stated for workflow_call only"
+    source: *syntax
+    quote: |-
+      If a `default` parameter is not set, the default value of the input is `false` for a boolean, `0` for a number, and `""` for a string.
+    note: |-
+      This sentence lives under `on.workflow_call.inputs`. The workflow_dispatch section has no equivalent sentence. UNVERIFIED that the same zero-values apply to omitted, non-required dispatch inputs; the simulator may assume they do but should flag it.
+    cases:
+      - { event: workflow_call, type: boolean, provided: null, default: null, resolved: false }
+      - { event: workflow_call, type: number, provided: null, default: null, resolved: 0 }
+      - { event: workflow_call, type: string, provided: null, default: null, resolved: "" }
+      - { event: workflow_dispatch, type: boolean, provided: null, default: null, resolved: false, derived: true, note: UNVERIFIED }
+      - { event: workflow_dispatch, type: number, provided: null, default: null, resolved: 0, derived: true, note: UNVERIFIED }
+      - { event: workflow_dispatch, type: string, provided: null, default: null, resolved: "", derived: true, note: UNVERIFIED }
+  - rule: "required inputs must be supplied in the UI before the run starts"
+    source: *events
+    quote: |-
+      If you run this workflow from a browser you must enter values for the required inputs manually before the workflow will run.
+    cases:
+      - { input: environment, required: true, provided: null, default: null, valid: false }
+
+context_typing:
+  - rule: "`inputs` context keeps booleans as booleans; `github.event.inputs` converts them to strings"
+    source: *events
+    quote: |-
+      The workflow will also receive the inputs in the `github.event.inputs` context. The information in the `inputs` context and `github.event.inputs` context is identical except that the `inputs` context preserves Boolean values as Booleans instead of converting them to strings. The `choice` type resolves to a string and is a single selectable option.
+    cases:
+      - { type: boolean, provided: true,  inputs_value: true,  inputs_js_type: boolean, event_inputs_value: "true",  event_inputs_js_type: string }
+      - { type: boolean, provided: false, inputs_value: false, inputs_js_type: boolean, event_inputs_value: "false", event_inputs_js_type: string }
+      - { type: string,  provided: "abc", inputs_value: "abc", inputs_js_type: string,  event_inputs_value: "abc",   event_inputs_js_type: string }
+      - { type: choice,  provided: "warning", inputs_value: "warning", inputs_js_type: string, event_inputs_value: "warning", event_inputs_js_type: string }
+      - { type: environment, provided: "staging", inputs_value: "staging", inputs_js_type: string, event_inputs_value: "staging", event_inputs_js_type: string, derived: true }
+  - rule: "`inputs.<name>` is typed string | number | boolean | choice"
+    source: *contexts
+    quote: |-
+      Each input value passed from an external workflow.
+    quote_type_cell: |-
+      `string` or `number` or `boolean` or `choice`
+    note: |-
+      The docs explicitly promise only that BOOLEANS are preserved in `inputs`. The contexts page lists `number` as a possible type of `inputs.<name>` and its example contents show `"build_id": 123456768` (a JSON number) for a workflow_call input of type number. UNVERIFIED by a direct sentence that a workflow_dispatch `number` input is a number in the `inputs` context; the simulator should type it as number and note the inference.
+    cases:
+      - { type: number, provided: 42, inputs_value: 42, inputs_js_type: number, event_inputs_value: "42", event_inputs_js_type: string, derived: true, note: UNVERIFIED }
+    example_contents_quote: |-
+      The following example contents of the `inputs` context is from a workflow that has defined the `build_id`, `deploy_target`, and `perform_deploy` inputs.
+    example_contents: |-
+      {
+        "build_id": 123456768,
+        "deploy_target": "deployment_sys_1a",
+        "perform_deploy": true
+      }
+  - rule: "`inputs` context is available only for workflow_call and workflow_dispatch"
+    source: *contexts
+    quote: |-
+      This context is only available in a reusable workflow or in a workflow triggered by the `workflow_dispatch` event. You can access this context from any job or step in a workflow. This object contains the properties listed below.
+    cases:
+      - { event: workflow_dispatch, inputs_context_available: true }
+      - { event: workflow_call, inputs_context_available: true }
+      - { event: push, inputs_context_available: false }
+  - rule: "the ref and inputs are supplied at dispatch time; values are read via the `inputs` context"
+    source: *events
+    quote: |-
+      You can configure custom-defined input properties, default input values, and required inputs for the event directly in your workflow. When you trigger the event, you can provide the `ref` and any `inputs`. When the workflow runs, you can access the input values in the `inputs` context. For more information, see Contexts reference.
+  - rule: "boolean input usable directly in `if:` (docs example)"
+    source: *syntax
+    quote: |-
+      if: ${{ inputs.print_tags }}
+    cases:
+      - { type: boolean, provided: true, expr: "${{ inputs.print_tags }}", if_result: true }
+      - { type: boolean, provided: false, expr: "${{ inputs.print_tags }}", if_result: false }
+      - { type: boolean, provided: false, expr: "${{ github.event.inputs.print_tags }}", if_result: true, derived: true, note: "the string 'false' is truthy in expressions; docs do not state this here, derived from the string-conversion sentence" }
+
+cli_example:
+  source: *events
+  quote: |-
+    gh workflow run run-tests.yml -f logLevel=warning -f tags=false -f environment=staging
