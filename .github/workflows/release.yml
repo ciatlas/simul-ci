@@ -233,7 +233,8 @@ jobs:
             if [ "$newest" = "$TAG" ]; then latest=true; fi
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
           fi
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isLatest --jq '"published: draft=\(.isDraft) latest=\(.isLatest)"'
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,publishedAt \
+            --jq '"published: draft=\(.isDraft) prerelease=\(.isPrerelease) at \(.publishedAt)"'
 
   major-tag:
     name: Move the floating tag
