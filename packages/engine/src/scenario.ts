@@ -79,7 +79,7 @@ export const ScenarioInputSchema = z.strictObject({
   changed: z.array(ChangedFileSchema).optional(),
   /** `workflow_dispatch` inputs, typed as the `inputs` context types them. */
   inputs: z.record(z.string(), InputValueSchema).default({}),
-  /** Repository, environment and organization variables, merged as GitHub merges them. */
+  /** The variables that exist (repository, environment and organization, merged as GitHub merges them); any other reads as empty. */
   vars: z.record(z.string(), z.string()).default({}),
   /** The names of the secrets that exist; their values stay opaque. `GITHUB_TOKEN` always exists. */
   secrets: z.array(z.string().min(1)).default([]),

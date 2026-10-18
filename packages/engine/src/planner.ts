@@ -1,0 +1,1054 @@
+import {
+  type ActionDecl,
+  type Binding,
+  type Combination,
+  calledFunctions,
+  expandMatrix,
+  type InputDecl,
+  type JobDecl,
+  jobSegments,
+  loadProject,
+  lookup,
+  type MatrixExpansion,
+  memoryFileSystem,
+  ProjectIndex,
+  parseExpression,
+  type StepDecl,
+  skippedCheckName,
+  type WorkflowDecl,
+} from '@ciatlas/core';
+import type { ContextState, NeedState, StepState } from './contexts';
+import { type Condition, evaluateCondition, evaluateValue, stringOf } from './evaluate';
+import {
+  callNodeId,
+  compositeNodeId,
+  jobNodeId,
+  legKeyOf,
+  legNodeId,
+  stepKeyOf,
+  stepNodeId,
+} from './plan/ids';
+import type {
+  ActionPlan,
+  Decision,
+  Diagnostic,
+  IfReason,
+  JobPlan,
+  Json,
+  LegPlan,
+  MatrixPlan,
+  NodeId,
+  Pin,
+  Reason,
+  Result,
+  RunPlan,
+  StepPlan,
+  Tri,
+  Unknown,
+  UnknownKind,
+  Value,
+  WorkflowPlan,
+} from './plan/types';
+import { candidates, combine, known, unknown } from './plan/values';
+import { parseScenario, type Scenario, type ScenarioInput } from './scenario';
+import {
+  type Expression,
+  type JobSettings,
+  readSettings,
+  type StepSettings,
+  type WorkflowSettings,
+} from './settings';
+import {
+  type JobStatus,
+  jobResult,
+  jobStatusAfter,
+  jobStatusFunctions,
+  legResult,
+  runConclusion,
+  stepConclusion,
+  stepStatusFunctions,
+} from './status';
+import { matchTrigger } from './triggers';
+import { schemaUrl, VERSION } from './version';
+
+/**
+ * The planner: one three-valued pass over the project for a scenario. Workflows → jobs (in `needs` order) → legs
+ * (one per matrix combination) → steps, with reusable workflows nested under the leg that calls them and composite
+ * actions under the step that uses them. Opaque steps succeed with unknown outputs (mocks come in the next milestone).
+ */
+
+export interface SimulateOptions {
+  /** Repository files by path (`.github/workflows/ci.yml`, `.github/actions/x/action.yml`, …), or a project loaded with `loadFiles`. */
+  files?: Record<string, string>;
+  project?: LoadedProject;
+  scenario: ScenarioInput;
+  detail?: 'legs' | 'steps';
+  /** `owner/name`, for `uses:` references to this repository. */
+  repository?: string;
+  /** How deep reusable workflows may nest (GitHub: ten levels). */
+  maxDepth?: number;
+}
+
+/** A project loaded once, to simulate many scenarios against (the app, the test runner, the lab). */
+export interface LoadedProject {
+  index: ProjectIndex;
+  files: Record<string, string>;
+  /** Run settings per workflow path, read on first use. */
+  settings: Map<string, WorkflowSettings>;
+}
+
+/** Loads the workflows and local actions of a repository snapshot (files by repository-relative path). */
+export function loadFiles(files: Record<string, string>, repository?: string): LoadedProject {
+  const project = loadProject({
+    root: '.',
+    fs: memoryFileSystem(files),
+    ...(repository === undefined ? {} : { repository }),
+    validateSchema: false,
+  });
+  return { index: new ProjectIndex(project), files, settings: new Map() };
+}
+
+export function simulate(opts: SimulateOptions): RunPlan {
+  const scenario = parseScenario(opts.scenario);
+  const loaded = opts.project ?? loadFiles(opts.files ?? {}, opts.repository ?? scenario.repository);
+  return new Planner(loaded, scenario, opts.detail ?? 'steps', opts.maxDepth ?? 10).run();
+}
+
+interface WorkflowContext {
+  depth: number;
+  caller?: NodeId;
+  triggered?: Decision;
+  inputs?: Record<string, Value<Json>>;
+  secrets?: string[];
+  checkPrefix: string;
+}
+
+interface JobContext {
+  wf: WorkflowDecl;
+  wfNode: NodeId;
+  wfName: string;
+  triggered: Decision;
+  settings: JobSettings;
+  wfEnv: Record<string, Value<string>>;
+  inputs: Record<string, Value<Json>>;
+  scenario: Scenario;
+  planned: Map<string, JobPlan>;
+  depth: number;
+  checkPrefix: string;
+}
+
+interface LegContext extends JobContext {
+  job: JobDecl;
+  jobNode: NodeId;
+  jobRuns: Decision;
+  needs: Record<string, NeedState>;
+  failFast: Value<boolean>;
+  index: number;
+  total: number;
+}
+
+interface Segment {
+  name: string;
+  certain: boolean;
+}
+
+interface StepsResult {
+  plans: StepPlan[];
+  conclusions: Value<Result>[];
+}
+
+class Planner {
+  private readonly unknowns = new Map<string, Unknown>();
+  private readonly diagnostics: Diagnostic[] = [];
+  private readonly index: ProjectIndex;
+
+  constructor(
+    private readonly loaded: LoadedProject,
+    private readonly scenario: Scenario,
+    private readonly detail: 'legs' | 'steps',
+    private readonly maxDepth: number,
+  ) {
+    this.index = loaded.index;
+  }
+
+  run(): RunPlan {
+    const workflows = [...this.index.project.workflows.values()].sort((a, b) => a.path.localeCompare(b.path));
+    const plans = workflows.map((wf) => this.planWorkflow(wf, { depth: 0, checkPrefix: '' }));
+    return {
+      $schema: schemaUrl('runPlan'),
+      schemaVersion: 1,
+      engine: { name: 'simulci', version: VERSION },
+      scenario: this.scenario,
+      detail: this.detail,
+      workflows: plans,
+      unknowns: [...this.unknowns.values()].sort(
+        (a, b) => b.affects.length - a.affects.length || a.id.localeCompare(b.id),
+      ),
+      mocks: [],
+      models: [],
+      diagnostics: this.diagnostics,
+    };
+  }
+
+  // --- workflows ---------------------------------------------------------------------------------------------------
+
+  private planWorkflow(wf: WorkflowDecl, ctx: WorkflowContext): WorkflowPlan {
+    const settings = this.settingsOf(wf);
+    const id = ctx.caller === undefined ? wf.path : callNodeId(ctx.caller, wf.path);
+    this.settingsDiagnostics(settings, wf.path, id);
+    const scenario = ctx.secrets === undefined ? this.scenario : { ...this.scenario, secrets: ctx.secrets };
+    const triggered = ctx.triggered ?? this.triggerDecision(settings, id);
+    const inputs = ctx.inputs ?? dispatchInputs(wf, scenario);
+    const plan = workflowShell(wf, id, settings, triggered, inputs, ctx);
+    if (triggered.verdict === 'no') return plan;
+    const wfName = wf.name ?? wf.path;
+    const base: ContextState = { scenario, workflow: wfName, inputs };
+    const wfEnv = this.bindings(wf.env, base);
+    const planned = new Map<string, JobPlan>();
+    const jobCtx = {
+      wf,
+      wfNode: id,
+      wfName,
+      triggered,
+      wfEnv,
+      inputs,
+      scenario,
+      planned,
+      depth: ctx.depth,
+      checkPrefix: ctx.checkPrefix,
+    };
+    for (const jobId of topoOrder(wf)) {
+      const settingsOfJob = settings.jobs[jobId] ?? { id: jobId, if: 'success()', steps: [] };
+      planned.set(jobId, this.planJob(wf.jobs[jobId]!, { ...jobCtx, settings: settingsOfJob }));
+    }
+    plan.jobs = Object.keys(wf.jobs).map((k) => planned.get(k)!);
+    plan.conclusion = runConclusion(plan.jobs.map((j) => j.result));
+    plan.outputs = this.callOutputs(wf, plan, { ...base, env: wfEnv });
+    return plan;
+  }
+
+  private settingsOf(wf: WorkflowDecl): WorkflowSettings {
+    let s = this.loaded.settings.get(wf.path);
+    if (!s) {
+      s = readSettings(wf.path, this.loaded.files[wf.path] ?? wf.source.text);
+      this.loaded.settings.set(wf.path, s);
+    }
+    return s;
+  }
+
+  private settingsDiagnostics(settings: WorkflowSettings, file: string, node: NodeId): void {
+    for (const e of settings.errors) {
+      const d: Diagnostic = { severity: 'warning', code: 'parse', message: e.message, node };
+      if (e.line !== undefined) d.loc = { file, line: e.line, column: e.column ?? 1 };
+      this.diagnostics.push(d);
+    }
+  }
+
+  private triggerDecision(settings: WorkflowSettings, node: NodeId): Decision {
+    const m = matchTrigger(settings.events, this.scenario);
+    for (const u of m.unknowns) this.register(u, m.decision.verdict === 'maybe' ? node : undefined);
+    return m.decision;
+  }
+
+  /** The outputs a reusable workflow declares, read from its jobs. */
+  private callOutputs(
+    wf: WorkflowDecl,
+    plan: WorkflowPlan,
+    base: ContextState,
+  ): Record<string, Value<string>> {
+    if (!wf.call) return {};
+    const jobs = Object.fromEntries(
+      plan.jobs.map((j) => [j.jobId, { result: j.result, outputs: j.outputs }]),
+    );
+    return this.outputsOf(wf.call.outputs, { ...base, jobs });
+  }
+
+  // --- jobs --------------------------------------------------------------------------------------------------------
+
+  private planJob(job: JobDecl, ctx: JobContext): JobPlan {
+    const jobNode = jobNodeId(ctx.wfNode, job.id);
+    const direct = job.needs.map((n) => n.id);
+    const directResults = direct.map((n) => ctx.planned.get(n)?.result ?? known<Result>('skipped'));
+    const ifState: ContextState = {
+      scenario: ctx.scenario,
+      workflow: ctx.wfName,
+      job: job.id,
+      env: ctx.wfEnv,
+      inputs: ctx.inputs,
+      needs: needState(closure(ctx.wf, job.id), ctx.planned),
+    };
+    const { runs, cond } = this.jobDecision(job, ctx, jobNode, directResults, ifState);
+    const continueOnError = this.setting(ctx.settings.continueOnError, false, `${jobNode}.continue-on-error`);
+    const exp = expandMatrix(job.matrix);
+    const segments = jobSegments(job, checkInputs(ctx.inputs));
+    const plan = jobShell(job, jobNode, ctx, runs, continueOnError, segments);
+    if (job.uses) plan.with = this.bindingsJson(job.with, ifState);
+    if (job.matrix) plan.matrix = this.matrixPlan(job, exp, ctx, jobNode);
+    if (runs.verdict === 'no') {
+      plan.legs = [skippedLeg(jobNode)];
+      return plan;
+    }
+    const legCtx: Omit<LegContext, 'index'> = {
+      ...ctx,
+      job,
+      jobNode,
+      jobRuns: runs,
+      needs: needState(direct, ctx.planned),
+      failFast: plan.matrix?.failFast ?? known(true),
+      total: exp.combos.length || 1,
+    };
+    plan.legs = this.legsOf(job, exp, segments, legCtx);
+    plan.result = this.jobResultOf(runs, cond, continueOnError, plan.legs);
+    plan.outputs = this.jobOutputs(job, plan, jobNode);
+    return plan;
+  }
+
+  /** The job-level `if:` under the workflow's trigger, with the status functions answered from the direct needs. */
+  private jobDecision(
+    job: JobDecl,
+    ctx: JobContext,
+    jobNode: NodeId,
+    directResults: Value<Result>[],
+    ifState: ContextState,
+  ): { runs: Decision; cond: Condition } {
+    const cond = evaluateCondition(ctx.settings.if, ifState, jobStatusFunctions(directResults));
+    const aggregate = combine(directResults, (rs) =>
+      rs.some((r) => r === 'failure') ? 'failure' : rs.every((r) => r === 'success') ? 'success' : 'skipped',
+    );
+    const ifReason = this.ifReason(
+      writtenIf(job),
+      ctx.settings.if,
+      aggregate,
+      cond,
+      job.ifSite?.loc,
+      ctx.wf.path,
+    );
+    const parent: Reason = { kind: 'parent', node: ctx.wfNode, verdict: ctx.triggered.verdict };
+    const runs = decide(ctx.triggered, cond.value, [parent, ifReason]);
+    if (runs.verdict === 'maybe') this.noteValue(cond.value, jobNode);
+    return { runs, cond };
+  }
+
+  private matrixPlan(job: JobDecl, exp: MatrixExpansion, ctx: JobContext, jobNode: NodeId): MatrixPlan {
+    const matrix: MatrixPlan = {
+      keys: exp.keys,
+      exact: exp.exact,
+      dynamic: exp.dynamic,
+      truncated: exp.truncated,
+      failFast: this.setting(ctx.settings.failFast, true, `${jobNode}.strategy.fail-fast`),
+      loc: { file: ctx.wf.path, line: job.matrix!.loc.line, column: job.matrix!.loc.column },
+    };
+    if (!exp.dynamic && !exp.truncated) matrix.count = exp.combos.length;
+    if (ctx.settings.maxParallel !== undefined)
+      matrix.maxParallel = this.setting(ctx.settings.maxParallel, 0, `${jobNode}.strategy.max-parallel`);
+    return matrix;
+  }
+
+  /** One leg per combination; a matrix only the run knows gives one placeholder leg. */
+  private legsOf(
+    job: JobDecl,
+    exp: MatrixExpansion,
+    segments: Segment[],
+    ctx: Omit<LegContext, 'index'>,
+  ): LegPlan[] {
+    const fallback: Segment = { name: job.id, certain: false };
+    if (!job.matrix) return [this.planLeg(undefined, segments[0] ?? fallback, { ...ctx, index: 0 })];
+    if (!exp.dynamic && !exp.truncated) {
+      return exp.combos.map((combo, i) => this.planLeg(combo, segments[i] ?? fallback, { ...ctx, index: i }));
+    }
+    const matrixUnknown = `${ctx.jobNode}.matrix`;
+    this.note([matrixUnknown], ctx.jobNode);
+    const leg = this.planLeg(undefined, segments[0] ?? fallback, { ...ctx, index: 0 });
+    leg.legKey = '*';
+    leg.id = legNodeId(ctx.jobNode, '*');
+    const verdict: Tri = ctx.jobRuns.verdict === 'yes' ? 'maybe' : ctx.jobRuns.verdict;
+    leg.runs = { verdict, chain: [...leg.runs.chain, { kind: 'matrix', unknown: matrixUnknown }] };
+    return [leg];
+  }
+
+  private jobResultOf(
+    runs: Decision,
+    cond: Condition,
+    continueOnError: Value<boolean>,
+    legs: LegPlan[],
+  ): Value<Result> {
+    const result = jobResult({ skipped: false, continueOnError, legResults: legs.map((l) => l.result) });
+    if (runs.verdict !== 'maybe') return result;
+    return unknown(cond.value.known ? [] : cond.value.unknowns, ['skipped', ...(candidates(result) ?? [])]);
+  }
+
+  /** A job's outputs as readers see them: the legs' values, where an empty value never wins and the last to finish does (lab 8). */
+  private jobOutputs(job: JobDecl, plan: JobPlan, jobNode: NodeId): Record<string, Value<string>> {
+    const out: Record<string, Value<string>> = {};
+    // A call job's outputs are the called workflow's; a plain job declares its own.
+    const names = job.uses
+      ? [...new Set(plan.legs.flatMap((l) => Object.keys(l.outputs)))]
+      : Object.keys(job.outputs);
+    for (const name of names) {
+      const values = plan.legs.map((l) => l.outputs[name] ?? known(''));
+      const ids = values.flatMap((v) => (v.known ? [] : v.unknowns));
+      const nonEmpty = [...new Set(values.flatMap((v) => (v.known && v.value !== '' ? [v.value] : [])))];
+      if (ids.length) out[name] = unknown(ids);
+      else if (nonEmpty.length <= 1) out[name] = known(nonEmpty[0] ?? '');
+      else {
+        const race = `race:matrix-outputs:${jobNode}.${name}`;
+        this.note([race]);
+        out[name] = unknown([race], nonEmpty);
+      }
+    }
+    return out;
+  }
+
+  // --- legs --------------------------------------------------------------------------------------------------------
+
+  private planLeg(combo: Combination | undefined, seg: Segment, ctx: LegContext): LegPlan {
+    const { job, jobNode } = ctx;
+    const legKey = legKeyOf(combo);
+    const legId = legNodeId(jobNode, legKey);
+    const state = this.legState(combo, ctx);
+    const runs: Decision = {
+      verdict: ctx.jobRuns.verdict,
+      chain: [{ kind: 'parent', node: jobNode, verdict: ctx.jobRuns.verdict }],
+    };
+    const leg: LegPlan = {
+      id: legId,
+      legKey,
+      values: legValues(combo, legId),
+      runs,
+      result: known('success'),
+      env: state.env ?? {},
+      outputs: {},
+    };
+    if (combo) leg.origin = combo.origin;
+    if (job.runsOn) leg.runsOn = this.runsOn(job, ctx.wf, state, legId);
+    if (job.environment)
+      leg.environment = job.environment.dynamic
+        ? unknown([`${legId}.environment`])
+        : known(job.environment.name);
+    if (job.uses) {
+      this.planCall(leg, state, seg, ctx);
+      return leg;
+    }
+    leg.check = { name: `${ctx.checkPrefix}${seg.name}`, certain: seg.certain };
+    const steps = this.planSteps(job.steps, ctx.settings.steps, legId, runs, state, undefined);
+    if (this.detail === 'steps') leg.steps = steps.plans;
+    leg.result = legResult(steps.conclusions);
+    leg.outputs = this.outputsOf(job.outputs, state);
+    return leg;
+  }
+
+  private legState(combo: Combination | undefined, ctx: LegContext): ContextState {
+    const state: ContextState = {
+      scenario: ctx.scenario,
+      workflow: ctx.wfName,
+      job: ctx.job.id,
+      inputs: ctx.inputs,
+      needs: ctx.needs,
+      status: known('success'),
+      steps: {},
+      strategy: { failFast: ctx.failFast, jobIndex: ctx.index, jobTotal: ctx.total },
+    };
+    if (combo) state.matrix = combo;
+    if (ctx.job.runsOn) state.runsOn = ctx.job.runsOn.labels;
+    state.env = { ...ctx.wfEnv, ...this.bindings(ctx.job.env, state) };
+    return state;
+  }
+
+  /** The labels of a leg: as declared, or a `runs-on: ${{ … }}` evaluated for the leg (its matrix values). */
+  private runsOn(job: JobDecl, wf: WorkflowDecl, state: ContextState, legId: NodeId): Value<string[]> {
+    if (!job.runsOn?.dynamic) return known(job.runsOn?.labels ?? []);
+    const site = wf.sites.find(
+      (s) => s.job === job.id && s.step === undefined && s.yamlPath.at(-1) === 'runs-on',
+    );
+    const v = site ? evaluateValue(site.text, state) : unknown<string>([`${legId}.runs-on`]);
+    this.noteValue(v);
+    return v.known ? known([v.value]) : unknown<string[]>(v.unknowns);
+  }
+
+  /** A reusable workflow called by the leg: nested with the caller's inputs and secrets, its result from its jobs. */
+  private planCall(leg: LegPlan, state: ContextState, seg: Segment, ctx: LegContext): void {
+    const { job } = ctx;
+    const callee = this.index.calleeOf(job);
+    if (!callee) {
+      this.unsupportedCall(leg, job);
+      return;
+    }
+    if (ctx.depth + 1 >= this.maxDepth) {
+      leg.runs = { verdict: 'no', chain: [...leg.runs.chain, { kind: 'limit', limit: 'nesting' }] };
+      leg.result = known('skipped');
+      return;
+    }
+    const inputs = callInputs(job, callee, state);
+    for (const v of Object.values(inputs)) this.noteValue(v);
+    leg.call = this.planWorkflow(callee, {
+      depth: ctx.depth + 1,
+      caller: leg.id,
+      triggered: {
+        verdict: leg.runs.verdict,
+        chain: [{ kind: 'parent', node: leg.id, verdict: leg.runs.verdict }],
+      },
+      inputs,
+      secrets: job.secretsInherit ? ctx.scenario.secrets : Object.keys(job.secrets),
+      checkPrefix: `${ctx.checkPrefix}${seg.name} / `,
+    });
+    const legResults = leg.call.jobs.map((j) => j.result);
+    leg.result =
+      leg.runs.verdict === 'no'
+        ? known('skipped')
+        : jobResult({ skipped: false, continueOnError: known(false), legResults });
+    leg.outputs = leg.call.outputs;
+  }
+
+  private unsupportedCall(leg: LegPlan, job: JobDecl): void {
+    const why =
+      job.uses?.kind === 'remote-workflow'
+        ? 'a remote reusable workflow is not loaded'
+        : 'the called workflow was not found or cannot be called';
+    this.diagnostics.push({
+      severity: 'warning',
+      code: 'unsupported',
+      message: `${job.uses?.raw}: ${why}`,
+      node: leg.id,
+    });
+    leg.result =
+      leg.runs.verdict === 'no'
+        ? known('skipped')
+        : unknown([`${leg.id}.call`], ['success', 'failure', 'skipped']);
+    this.noteValue(leg.result);
+  }
+
+  // --- steps -------------------------------------------------------------------------------------------------------
+
+  private planSteps(
+    steps: StepDecl[],
+    settings: StepSettings[],
+    parentId: NodeId,
+    parentRuns: Decision,
+    state: ContextState,
+    inputs: Record<string, Value<Json>> | undefined,
+  ): StepsResult {
+    const taken = new Set<string>();
+    const out: StepsResult = { plans: [], conclusions: [] };
+    const stepsState: Record<string, StepState> = {};
+    let status: Value<JobStatus> = known('success');
+    for (const step of steps) {
+      const sid = stepNodeId(parentId, stepKeyOf(step, taken));
+      const stepState: ContextState = {
+        ...state,
+        steps: stepsState,
+        status,
+        env: { ...state.env, ...this.bindings(step.env, state) },
+      };
+      if (inputs) stepState.inputs = inputs;
+      const { plan, open } = this.planStep(
+        step,
+        settings[step.index],
+        sid,
+        parentId,
+        parentRuns,
+        stepState,
+        status,
+      );
+      out.plans.push(plan);
+      if (step.id !== undefined)
+        stepsState[step.id] = {
+          id: sid,
+          outcome: plan.outcome,
+          conclusion: plan.conclusion,
+          outputs: plan.outputs,
+          open,
+        };
+      out.conclusions.push(plan.conclusion);
+      status = jobStatusAfter(out.conclusions);
+    }
+    return out;
+  }
+
+  private planStep(
+    step: StepDecl,
+    st: StepSettings | undefined,
+    sid: NodeId,
+    parentId: NodeId,
+    parentRuns: Decision,
+    state: ContextState,
+    status: Value<JobStatus>,
+  ): { plan: StepPlan; open: boolean } {
+    const evaluated = st?.if ?? impliedIf(step);
+    const cond = evaluateCondition(evaluated, state, stepStatusFunctions(status));
+    const parent: Reason = { kind: 'parent', node: parentId, verdict: parentRuns.verdict };
+    const ifReason = this.ifReason(
+      writtenIf(step),
+      evaluated,
+      statusAsResult(status),
+      cond,
+      step.ifSite?.loc,
+      undefined,
+    );
+    const runs = decide(parentRuns, cond.value, [parent, ifReason]);
+    if (runs.verdict === 'maybe') this.noteValue(cond.value, sid);
+    const continueOnError = this.setting(st?.continueOnError, false, `${sid}.continue-on-error`);
+    const action = step.uses ? this.index.actionOf(step) : undefined;
+    const { outcome, outputs, open, composite } = this.stepOutcome(step, action, sid, runs, cond, state);
+    const plan = stepShell(step, sid, parentId, runs, outcome, continueOnError, outputs);
+    plan.with = this.bindings(step.with, state);
+    plan.env = this.bindings(step.env, state);
+    if (composite) plan.composite = composite;
+    return { plan, open };
+  }
+
+  /** What a step produces: skipped when it does not run; else success with its outputs unknown, or a composite's inner result. */
+  private stepOutcome(
+    step: StepDecl,
+    action: ActionDecl | undefined,
+    sid: NodeId,
+    runs: Decision,
+    cond: Condition,
+    state: ContextState,
+  ): {
+    outcome: Value<Result>;
+    outputs: Record<string, Value<string>>;
+    open: boolean;
+    composite?: ActionPlan;
+  } {
+    if (runs.verdict === 'no') return { outcome: known('skipped'), outputs: {}, open: false };
+    const base: Value<Result> =
+      runs.verdict === 'yes'
+        ? known('success')
+        : unknown(cond.value.known ? [] : cond.value.unknowns, ['success', 'skipped']);
+    if (action?.using === 'composite') {
+      const composite = this.planComposite(action, step, sid, state, runs);
+      const inner = legResult(composite.steps.map((s) => s.conclusion));
+      const outcome = combine([base, inner] as Value<Result>[], ([o, i]) =>
+        o === 'skipped' ? 'skipped' : (i as Result),
+      );
+      return { outcome, outputs: composite.outputs, open: false, composite };
+    }
+    return { outcome: base, ...this.opaqueOutputs(step, action, sid) };
+  }
+
+  /** The outputs an opaque step may set: a script's literal names, a local action's declared ones; the rest open. */
+  private opaqueOutputs(
+    step: StepDecl,
+    action: ActionDecl | undefined,
+    sid: NodeId,
+  ): { outputs: Record<string, Value<string>>; open: boolean } {
+    const outputs: Record<string, Value<string>> = {};
+    if (step.run !== undefined) {
+      for (const name of step.writesOutputs.names) outputs[name] = this.unknownOutput(sid, name);
+      return { outputs, open: !(step.writesOutputs.mentions && !step.writesOutputs.dynamic) };
+    }
+    if (action) {
+      for (const name of Object.keys(action.outputs)) outputs[name] = this.unknownOutput(sid, name);
+      return { outputs, open: false };
+    }
+    return { outputs, open: true };
+  }
+
+  private unknownOutput(sid: NodeId, name: string): Value<string> {
+    const id = `${sid}.outputs.${name}`;
+    this.note([id]);
+    return unknown([id]);
+  }
+
+  private planComposite(
+    action: ActionDecl,
+    step: StepDecl,
+    stepNode: NodeId,
+    state: ContextState,
+    runs: Decision,
+  ): ActionPlan {
+    const id = compositeNodeId(stepNode, action.path);
+    const given = this.bindings(step.with, state);
+    const inputs: Record<string, Value<Json>> = {};
+    for (const [name, decl] of Object.entries(action.inputs))
+      inputs[name] = lookup(given, name) ?? inputDefault(decl);
+    for (const [name, v] of Object.entries(given)) if (!(name in inputs)) inputs[name] = v;
+    const inner = this.planSteps(
+      action.steps,
+      [],
+      id,
+      runs,
+      { ...state, steps: {}, status: known('success') },
+      inputs,
+    );
+    const steps = Object.fromEntries(
+      inner.plans
+        .filter((p) => p.stepId !== undefined)
+        .map((p) => [
+          p.stepId!,
+          { id: p.id, outcome: p.outcome, conclusion: p.conclusion, outputs: p.outputs },
+        ]),
+    );
+    return {
+      id,
+      path: action.path,
+      steps: inner.plans,
+      outputs: this.outputsOf(action.outputs, { ...state, inputs, steps }),
+    };
+  }
+
+  // --- values ------------------------------------------------------------------------------------------------------
+
+  private ifReason(
+    expr: string,
+    evaluated: string,
+    status: Value<Result>,
+    cond: Condition,
+    loc: { line: number; column: number } | undefined,
+    file: string | undefined,
+  ): IfReason {
+    const reason: IfReason = {
+      kind: 'if',
+      expr,
+      evaluated,
+      implicitSuccess: expr.trim() !== evaluated,
+      status,
+      value: cond.value,
+      reads: cond.reads,
+    };
+    if (loc && file !== undefined) reason.loc = { file, line: loc.line, column: loc.column };
+    return reason;
+  }
+
+  /** Declared outputs (`outputs:` of a job, a reusable workflow or a composite action), evaluated in `state`. */
+  private outputsOf(
+    decls: Record<string, { value?: unknown; site?: { text: string } }>,
+    state: ContextState,
+  ): Record<string, Value<string>> {
+    const out: Record<string, Value<string>> = {};
+    for (const [name, decl] of Object.entries(decls)) {
+      const v = decl.site
+        ? evaluateValue(decl.site.text, state)
+        : known(stringOf((decl.value ?? null) as Json));
+      this.noteValue(v);
+      out[name] = v;
+    }
+    return out;
+  }
+
+  private bindings(bindings: Record<string, Binding>, state: ContextState): Record<string, Value<string>> {
+    const out: Record<string, Value<string>> = {};
+    for (const [name, b] of Object.entries(bindings)) {
+      const v = b.site ? evaluateValue(b.site.text, state) : known(stringOf(b.value as Json));
+      this.noteValue(v);
+      out[name] = v;
+    }
+    return out;
+  }
+
+  private bindingsJson(bindings: Record<string, Binding>, state: ContextState): Record<string, Value<Json>> {
+    const out: Record<string, Value<Json>> = {};
+    for (const [name, b] of Object.entries(bindings)) {
+      const v: Value<Json> = b.site ? evaluateValue(b.site.text, state) : known(b.value as Json);
+      this.noteValue(v);
+      out[name] = v;
+    }
+    return out;
+  }
+
+  private setting<T extends boolean | number>(
+    value: T | Expression | undefined,
+    fallback: T,
+    id: string,
+  ): Value<T> {
+    if (value === undefined) return known(fallback);
+    if (typeof value === 'object') {
+      this.note([id]);
+      return unknown([id]);
+    }
+    return known(value);
+  }
+
+  // --- unknowns ----------------------------------------------------------------------------------------------------
+
+  private register(u: Unknown, affects: NodeId | undefined): void {
+    const existing = this.unknowns.get(u.id);
+    const entry = existing ?? u;
+    if (!existing) this.unknowns.set(u.id, entry);
+    if (affects !== undefined && !entry.affects.includes(affects)) entry.affects.push(affects);
+  }
+
+  private note(ids: readonly string[], affects?: NodeId): void {
+    for (const id of ids) {
+      const u: Unknown = { id, kind: kindOf(id), reads: [], affects: [] };
+      const pin = pinFor(id);
+      if (pin) u.pin = pin;
+      this.register(u, affects);
+    }
+  }
+
+  private noteValue(v: Value<unknown>, affects?: NodeId): void {
+    if (!v.known) this.note(v.unknowns, affects);
+  }
+}
+
+// --- helpers without state -----------------------------------------------------------------------------------------
+
+function workflowShell(
+  wf: WorkflowDecl,
+  id: NodeId,
+  settings: WorkflowSettings,
+  triggered: Decision,
+  inputs: Record<string, Value<Json>>,
+  ctx: WorkflowContext,
+): WorkflowPlan {
+  const plan: WorkflowPlan = {
+    id,
+    path: wf.path,
+    on: Object.keys(settings.events),
+    triggered,
+    conclusion: known('skipped'),
+    inputs,
+    jobs: [],
+    outputs: {},
+    depth: ctx.depth,
+  };
+  if (wf.name !== undefined) plan.name = wf.name;
+  if (ctx.caller !== undefined) plan.caller = ctx.caller;
+  if (settings.concurrency) {
+    plan.concurrency = {};
+    if (settings.concurrency.group !== undefined) plan.concurrency.group = settings.concurrency.group;
+    const cip = settings.concurrency.cancelInProgress;
+    if (cip !== undefined)
+      plan.concurrency.cancelInProgress =
+        typeof cip === 'boolean' ? known(cip) : unknown([`${id}.concurrency`]);
+  }
+  return plan;
+}
+
+function jobShell(
+  job: JobDecl,
+  jobNode: NodeId,
+  ctx: JobContext,
+  runs: Decision,
+  continueOnError: Value<boolean>,
+  segments: Segment[],
+): JobPlan {
+  const segment = segments[0] as (Segment & { stem?: string }) | undefined;
+  const plan: JobPlan = {
+    id: jobNode,
+    jobId: job.id,
+    needs: job.needs.map((n) => jobNodeId(ctx.wfNode, n.id)),
+    runs,
+    result: known('skipped'),
+    outputs: {},
+    check: {
+      stem: `${ctx.checkPrefix}${segment?.stem ?? job.id}`,
+      skippedName: `${ctx.checkPrefix}${skippedCheckName(job)}`,
+      certain: segments.every((s) => s.certain),
+    },
+    continueOnError,
+    legs: [],
+  };
+  if (job.name !== undefined) plan.name = job.name;
+  if (job.uses) plan.uses = job.uses.raw;
+  return plan;
+}
+
+const skippedLeg = (jobNode: NodeId): LegPlan => ({
+  id: legNodeId(jobNode, ''),
+  legKey: '',
+  values: {},
+  runs: { verdict: 'no', chain: [{ kind: 'parent', node: jobNode, verdict: 'no' }] },
+  result: known('skipped'),
+  env: {},
+  outputs: {},
+});
+
+function stepShell(
+  step: StepDecl,
+  sid: NodeId,
+  parentId: NodeId,
+  runs: Decision,
+  outcome: Value<Result>,
+  continueOnError: Value<boolean>,
+  outputs: Record<string, Value<string>>,
+): StepPlan {
+  const plan: StepPlan = {
+    id: sid,
+    key: sid.slice(parentId.length + 1),
+    index: step.index,
+    runs,
+    outcome,
+    conclusion: stepConclusion(outcome, continueOnError),
+    continueOnError,
+    with: {},
+    env: {},
+    outputs,
+  };
+  if (step.id !== undefined) plan.stepId = step.id;
+  if (step.name !== undefined) plan.name = step.name;
+  if (step.uses) plan.uses = step.uses.raw;
+  if (step.run !== undefined) plan.run = true;
+  return plan;
+}
+
+function legValues(combo: Combination | undefined, legId: NodeId): Record<string, Value<Json>> {
+  if (!combo) return {};
+  return Object.fromEntries(
+    Object.entries(combo.values).map(([k, c]) => [
+      k,
+      c.known ? known(c.value as Json) : unknown([`${legId}.matrix.${k}`]),
+    ]),
+  );
+}
+
+/** The verdict under a parent and an `if:` value: the first `no` wins, an unknown makes it `maybe`. */
+function decide(parent: Decision, value: Value<boolean>, chain: Reason[]): Decision {
+  if (parent.verdict === 'no') return { verdict: 'no', chain: chain.slice(0, 1) };
+  let verdict: Tri;
+  if (!value.known) verdict = 'maybe';
+  else if (!value.value) verdict = 'no';
+  else verdict = parent.verdict;
+  return { verdict, chain };
+}
+
+/** The `if:` as written: the expression text, a YAML boolean as text, or empty. */
+function writtenIf(unit: { ifSite?: { text: string }; ifValue?: boolean }): string {
+  return unit.ifSite?.text ?? (unit.ifValue === undefined ? '' : String(unit.ifValue));
+}
+
+/** The job status as a result, for the reason chain. */
+const statusAsResult = (status: Value<JobStatus>): Value<Result> => combine([status], ([s]) => s as Result);
+
+/** A step's `if:` as GitHub evaluates it when the settings adapter has not seen the file (composite actions). */
+function impliedIf(step: StepDecl): string {
+  const written = writtenIf(step);
+  if (written.trim() === '') return 'success()';
+  const names = calledFunctions(parseExpression(written)).map((n) => n.toLowerCase());
+  return names.some((n) => ['success', 'failure', 'cancelled', 'always'].includes(n))
+    ? written
+    : `success() && (${written})`;
+}
+
+/** The `inputs` context of a dispatched workflow: the declared inputs with the scenario's values or their defaults. */
+function dispatchInputs(wf: WorkflowDecl, scenario: Scenario): Record<string, Value<Json>> {
+  if (scenario.event !== 'workflow_dispatch' || !wf.dispatch) return {};
+  const out: Record<string, Value<Json>> = {};
+  for (const [name, decl] of Object.entries(wf.dispatch.inputs)) {
+    const given = lookup(scenario.inputs, name);
+    out[name] = given === undefined ? inputDefault(decl) : known(coerceInput(decl, given));
+  }
+  for (const [name, value] of Object.entries(scenario.inputs)) if (!(name in out)) out[name] = known(value);
+  return out;
+}
+
+/** The values a caller passes to a reusable workflow, typed as the callee declares them; missing ones take their defaults. */
+function callInputs(job: JobDecl, callee: WorkflowDecl, state: ContextState): Record<string, Value<Json>> {
+  const out: Record<string, Value<Json>> = {};
+  for (const [name, decl] of Object.entries(callee.call?.inputs ?? {})) {
+    const b = lookup(job.with, name);
+    if (!b) {
+      out[name] = inputDefault(decl);
+      continue;
+    }
+    const v: Value<Json> = b.site ? evaluateValue(b.site.text, state) : known(b.value as Json);
+    out[name] = v.known ? known(coerceInput(decl, v.value)) : v;
+  }
+  return out;
+}
+
+/** An input's value when not given: its default, else `false` for a boolean, `0` for a number and `''` otherwise. */
+function inputDefault(decl: InputDecl): Value<Json> {
+  if (decl.hasDefault) {
+    if (decl.defaultSite) return unknown([`inputs.${decl.name}.default`]);
+    return known(coerceInput(decl, (decl.default ?? null) as Json));
+  }
+  return known(decl.type === 'boolean' ? false : decl.type === 'number' ? 0 : '');
+}
+
+function coerceInput(decl: InputDecl, value: Json): Json {
+  if (decl.type === 'boolean') return value === true || value === 'true';
+  if (decl.type === 'number') return typeof value === 'number' ? value : Number(value);
+  if (value === null) return '';
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+/** Core's `InputValues` for check names, from the inputs context. */
+function checkInputs(
+  inputs: Record<string, Value<Json>>,
+): Record<string, { known: true; value: Json } | { known: false }> {
+  return Object.fromEntries(
+    Object.entries(inputs).map(([k, v]) => [
+      k,
+      v.known ? { known: true as const, value: v.value } : { known: false as const },
+    ]),
+  );
+}
+
+function needState(ids: string[], planned: Map<string, JobPlan>): Record<string, NeedState> {
+  const out: Record<string, NeedState> = {};
+  for (const id of ids) {
+    const p = planned.get(id);
+    if (p) out[id] = { result: p.result, outputs: p.outputs };
+  }
+  return out;
+}
+
+/** Every ancestor through `needs`, nearest first. */
+function closure(wf: WorkflowDecl, jobId: string): string[] {
+  const seen: string[] = [];
+  const visit = (id: string) => {
+    for (const n of wf.jobs[id]?.needs ?? []) {
+      if (seen.includes(n.id)) continue;
+      seen.push(n.id);
+      visit(n.id);
+    }
+  };
+  visit(jobId);
+  return seen;
+}
+
+/** Jobs in an order that plans every need first; a cycle leaves the rest in declaration order. */
+function topoOrder(wf: WorkflowDecl): string[] {
+  const ids = Object.keys(wf.jobs);
+  const done = new Set<string>();
+  const order: string[] = [];
+  for (let progress = true; progress; ) {
+    progress = false;
+    for (const id of ids) {
+      if (done.has(id) || !wf.jobs[id]!.needs.every((n) => done.has(n.id) || !(n.id in wf.jobs))) continue;
+      done.add(id);
+      order.push(id);
+      progress = true;
+    }
+  }
+  for (const id of ids) if (!done.has(id)) order.push(id);
+  return order;
+}
+
+const KINDS: [RegExp, UnknownKind][] = [
+  [/^vars\./, 'var'],
+  [/^inputs\./, 'input'],
+  [/^secrets\./, 'secret'],
+  [/^scenario\.changed$/, 'changed-files'],
+  [/^(github|scenario)\./, 'event'],
+  [/^runner\./, 'runner'],
+  [/^race:/, 'race'],
+  [/\.outputs\./, 'step-output'],
+  [/\.outcome$/, 'outcome'],
+  [/matrix/, 'matrix'],
+  [/hashfiles/i, 'hashfiles'],
+];
+
+function kindOf(id: string): UnknownKind {
+  return KINDS.find(([re]) => re.test(id))?.[1] ?? 'unsupported';
+}
+
+const SCENARIO_PINS: [RegExp, (name: string) => Json][] = [
+  [/^vars\.(.+)$/, (name) => ({ vars: { [name]: '' } })],
+  [/^inputs\.((?!.*\.default$).+)$/, (name) => ({ inputs: { [name]: '' } })],
+  [/^github\.(sha)$/, () => ({ sha: '' })],
+  [/^github\.(actor|triggering_actor)$/, () => ({ actor: { login: '' } })],
+  [/^github\.(repository|repository_owner)$/, () => ({ repository: 'owner/name' })],
+  [/^github\.(ref|ref_name|ref_type)$/, () => ({ tag: '' })],
+];
+
+/** The scenario field that would pin an unknown read, when there is one. */
+function pinFor(id: string): Pin | undefined {
+  for (const [re, fragment] of SCENARIO_PINS) {
+    const m = re.exec(id);
+    if (m) return { layer: 'scenario', fragment: fragment(m[1]!), at: ['when'] };
+  }
+  return undefined;
+}
