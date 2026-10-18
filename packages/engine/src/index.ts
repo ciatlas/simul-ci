@@ -12,6 +12,7 @@ export * from './schemas';
 export * from './script-outputs';
 export * from './settings';
 export * from './status';
+export * from './test/index';
 export * from './triggers';
 export * from './triggers-data';
 export * from './version';

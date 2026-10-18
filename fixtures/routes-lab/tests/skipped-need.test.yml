@@ -1,0 +1,22 @@
+# lab 1: a skipped need, its dependents, and the qualifier (no assume)
+workflow: case-skipped-need.yml
+given: { event: push, branch: main }
+cases:
+  - name: dependents of a skipped need
+    when: { message: 'feat: probe' }
+    then:
+      run: [c, e]
+      skip: [a, b, d, f, a.#1]            # a.#1 is unexpanded (a skips): skip passes by inheritance
+      conclusion: success
+      checks: [a, b, c, d, e, f]
+      unknowns: []
+      units:
+        a: { runs: no, because: if, result: skipped, check: a, conclusion: skipped }
+        b: { because: if }                 # the needs cascade: success() reads needs.a.result = skipped
+        c.#1: { outcome: success, conclusion: success }
+  - name: skip ci suppresses every push workflow (lab 21)
+    when: { message: 'docs [skip ci]' }
+    then: { because: skip-ci }
+  - name: a workflow this push does not trigger, through the qualifier
+    when: { changed: [docs/a.md] }
+    then: { units: { 'case-filter-paths.yml:a': { runs: no, because: parent } } }

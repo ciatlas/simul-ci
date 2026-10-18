@@ -1,0 +1,15 @@
+# lab 4: the check reports failure, dependents read success, the run succeeds
+workflow: case-continue-on-error-job.yml
+given: { event: push, branch: main }
+cases:
+  - name: a job failing under continue-on-error reads as success downstream
+    when:
+      assume: [{ step: a.#1, outcome: failure }]
+    then:
+      run: [b, d]
+      skip:
+        - c: if                            # failure() → false: needs.a.result is success
+      conclusion: success
+      checks: { a: failure, b: success, c: skipped, d: success }
+      units:
+        a: { result: success, conclusion: failure }   # result = what dependents read · conclusion = what the check reports

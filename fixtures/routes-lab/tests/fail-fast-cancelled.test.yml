@@ -1,0 +1,16 @@
+# lab 14: cancelled legs read as failure, cancelled() stays false
+workflow: case-fail-fast-cancelled.yml
+given: { event: push, branch: main }
+cases:
+  - name: dependents of a fail-fast matrix
+    when: { assume: [{ step: 'a[n=2].#1', outcome: failure }] }
+    then:
+      run: [d, e]
+      skip:
+        - b: if                            # the implicit success()
+        - c: if                            # cancelled() is false: nobody cancelled the run
+      conclusion: failure
+      units:
+        a: { result: failure }
+        'a[n=1]': { result: [success, cancelled] }
+        'a[n=3]': { result: [success, cancelled] }
