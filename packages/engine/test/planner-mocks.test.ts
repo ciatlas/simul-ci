@@ -229,9 +229,12 @@ jobs:
     const [build, other] = plan.workflows[0]!.jobs;
     expect(build!.legs[0]!.steps![1]!.runs.verdict).toBe('no');
     expect(other!.legs[0]!.steps![1]!.runs.verdict).toBe('yes');
-    expect(plan.mocks.map((m) => [m.ref, m.provides])).toEqual([
-      ['assume[0]', ['outputs.cache-hit']],
-      ['assume[1]', ['outputs.cache-hit']],
+    // The shipped actions/cache model is the layer under the author's entries: it values what they do not.
+    expect(plan.mocks.map((m) => [m.ref, m.layer, m.provides])).toEqual([
+      ['assume[0]', 'case', ['outputs.cache-hit']],
+      ['model:actions/cache', 'shipped', ['outputs.cache-primary-key', 'outputs.cache-matched-key']],
+      ['assume[1]', 'case', ['outputs.cache-hit']],
+      ['model:actions/cache', 'shipped', ['outputs.cache-primary-key', 'outputs.cache-matched-key']],
     ]);
   });
 });

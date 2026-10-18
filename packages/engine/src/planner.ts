@@ -20,7 +20,15 @@ import {
 import { z } from 'zod';
 import type { ContextState, NeedState, StepState } from './contexts';
 import { type Condition, evaluateCondition, evaluateValue, stringOf, substituteTemplates } from './evaluate';
-import { type AssumeEntry, AssumeListSchema, type Facts, type MockLayers, MockResolver } from './mocks/index';
+import {
+  type AssumeEntry,
+  AssumeListSchema,
+  type Facts,
+  type MockLayers,
+  MockResolver,
+  type ModelUse,
+} from './mocks/index';
+import { type ModelContext, modelFor } from './models/index';
 import type { Location, LocationLink } from './paths';
 import {
   callNodeId,
@@ -41,6 +49,7 @@ import type {
   Json,
   LegPlan,
   MatrixPlan,
+  MockLayer,
   NodeId,
   Pin,
   Reason,
@@ -189,6 +198,20 @@ interface StepProduct {
   envWrites: Record<string, Value<string>>;
 }
 
+/** What an opaque step is: a local action, a remote action a shipped model knows, or neither. */
+interface StepTarget {
+  action?: ActionDecl;
+  model?: ModelUse;
+}
+
+/** The outputs an opaque step may set before mocks: the names of its interface, those already valued, and whether it is open. */
+interface Opaque {
+  outputs: Record<string, Value<string>>;
+  names: string[];
+  open: boolean;
+  what: string;
+}
+
 interface StepsResult {
   plans: StepPlan[];
   conclusions: Value<Result>[];
@@ -200,6 +223,7 @@ class Planner {
   private readonly unknowns = new Map<string, Unknown>();
   private readonly diagnostics: Diagnostic[] = [];
   private readonly applied: AppliedMock[] = [];
+  private readonly models = new Map<string, string>();
   private readonly index: ProjectIndex;
 
   constructor(
@@ -226,7 +250,9 @@ class Planner {
         (a, b) => b.affects.length - a.affects.length || a.id.localeCompare(b.id),
       ),
       mocks: this.applied,
-      models: [],
+      models: [...this.models]
+        .map(([id, version]) => ({ id, version }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
       diagnostics: this.finishDiagnostics(),
     };
   }
@@ -444,6 +470,7 @@ class Planner {
         });
       }
       outputs[name] = fact.value.known ? { ...fact.value, by: fact.by } : fact.value;
+      this.noteValue(fact.value);
       this.record(fact.by, node, `outputs.${name}`);
     }
   }
@@ -454,8 +481,7 @@ class Planner {
       if (!existing.provides.includes(provides)) existing.provides.push(provides);
       return;
     }
-    const layer = ref.startsWith('given') ? 'given' : ref.startsWith('cli') ? 'cli' : 'case';
-    this.applied.push({ ref, layer, at, provides: [provides] });
+    this.applied.push({ ref, layer: layerOf(ref), at, provides: [provides] });
   }
 
   /** The job-level `if:` under the workflow's trigger, with the status functions answered from the direct needs. */
@@ -764,10 +790,11 @@ class Planner {
     const runs = decide(parentRuns, cond.value, [parent, ifReason]);
     if (runs.verdict === 'maybe') this.noteValue(cond.value, sid);
     const continueOnError = this.setting(st?.continueOnError, false, `${sid}.continue-on-error`);
-    const action = step.uses ? this.index.actionOf(step) : undefined;
+    const withValues = this.bindings(step.with, state);
+    const target = this.stepTarget(step, sid, withValues);
     const { outcome, outputs, open, composite, envWrites } = this.stepOutcome(
       step,
-      action,
+      target,
       sid,
       runs,
       cond,
@@ -775,16 +802,30 @@ class Planner {
       location,
     );
     const plan = stepShell(step, sid, parentId, runs, outcome, continueOnError, outputs);
-    plan.with = this.bindings(step.with, state);
+    plan.with = withValues;
     plan.env = this.bindings(step.env, state);
     if (composite) plan.composite = composite;
     return { plan, open, envWrites };
   }
 
+  /** A `uses:` step's local action, or the shipped model of a remote one with what it sees (scenario, `with:`, `@ref`). */
+  private stepTarget(step: StepDecl, sid: NodeId, withValues: Record<string, Value<string>>): StepTarget {
+    if (!step.uses) return {};
+    const action = this.index.actionOf(step);
+    if (action) return { action };
+    const model = modelFor(step.uses.raw);
+    if (!model) return {};
+    this.models.set(model.id, model.version);
+    const ctx: ModelContext = { scenario: this.scenario, with: withValues, node: sid };
+    const at = step.uses.raw.indexOf('@');
+    if (at !== -1) ctx.ref = step.uses.raw.slice(at + 1);
+    return { model: { model, ctx } };
+  }
+
   /** What a step produces: skipped when it does not run; else as mocked or success, with outputs; a composite's inner steps decide unless mocked. */
   private stepOutcome(
     step: StepDecl,
-    action: ActionDecl | undefined,
+    target: StepTarget,
     sid: NodeId,
     runs: Decision,
     cond: Condition,
@@ -792,23 +833,30 @@ class Planner {
     location: Location,
   ): StepProduct {
     if (runs.verdict === 'no') return { outcome: known('skipped'), outputs: {}, open: false, envWrites: {} };
-    const facts = this.mocks.factsFor(location, sid, step.uses?.raw);
+    const facts = this.mocks.factsFor(location, sid, step.uses?.raw, target.model);
     const envWrites = { ...this.scriptEnv(step, sid, state), ...this.envWritesOf(facts, sid) };
     const { produced, base } = this.producedOutcome(facts, runs, cond, sid);
-    if (action?.using === 'composite') {
+    if (target.action?.using === 'composite') {
       return {
-        ...this.compositeProduct(action, step, sid, state, runs, location, facts, produced, base),
+        ...this.compositeProduct(target.action, step, sid, state, runs, location, facts, produced, base),
         envWrites,
       };
     }
-    const opaque = this.opaqueOutputs(step, action, sid, state);
-    const what = step.run !== undefined ? 'the script' : `action ${step.uses?.raw ?? ''}`;
+    const opaque = this.opaqueOutputs(step, target, sid, state);
     this.overlayOutputs(opaque.outputs, facts, sid, {
       closed: !opaque.open,
-      names: Object.keys(opaque.outputs),
-      what,
+      names: opaque.names,
+      what: opaque.what,
     });
-    return { outcome: base, ...opaque, envWrites };
+    return { outcome: base, outputs: this.finishOutputs(opaque, sid), open: opaque.open, envWrites };
+  }
+
+  /** The outputs in interface order, then the names only a mock added; a name nothing valued stays unknown. */
+  private finishOutputs(opaque: Opaque, sid: NodeId): Record<string, Value<string>> {
+    const out: Record<string, Value<string>> = {};
+    for (const name of opaque.names) out[name] = opaque.outputs[name] ?? this.unknownOutput(sid, name);
+    for (const [name, v] of Object.entries(opaque.outputs)) out[name] ??= v;
+    return out;
   }
 
   private envWritesOf(facts: Facts, sid: NodeId): Record<string, Value<string>> {
@@ -862,31 +910,34 @@ class Planner {
     return { outcome, outputs, open: false, composite };
   }
 
-  /** The outputs an opaque step may set: a script's literal names, a local action's declared ones; the rest open. */
-  private opaqueOutputs(
-    step: StepDecl,
-    action: ActionDecl | undefined,
-    sid: NodeId,
-    state: ContextState,
-  ): { outputs: Record<string, Value<string>>; open: boolean } {
+  /** The outputs an opaque step may set: a script's literal names, a local action's or a model's declared ones; the rest open. */
+  private opaqueOutputs(step: StepDecl, target: StepTarget, sid: NodeId, state: ContextState): Opaque {
+    if (step.run !== undefined) return this.scriptOutputs(step, sid, state);
+    const uses = step.uses?.raw ?? '';
+    if (target.action) {
+      const names = Object.keys(target.action.outputs);
+      return { outputs: {}, names, open: false, what: `action ${uses}` };
+    }
+    if (target.model) {
+      const iface = target.model.model.interface(target.model.ctx);
+      return { outputs: {}, names: iface.names, open: iface.open, what: `${target.model.model.id} (model)` };
+    }
+    return { outputs: {}, names: [], open: true, what: `action ${uses}` };
+  }
+
+  /** Literal `$GITHUB_OUTPUT` writes are known; the names core found that the fold could not value stay unknown. */
+  private scriptOutputs(step: StepDecl, sid: NodeId, state: ContextState): Opaque {
     const outputs: Record<string, Value<string>> = {};
-    if (step.run !== undefined) {
-      // Literal `$GITHUB_OUTPUT` writes are known; the names core found that the fold could not value stay unknown.
-      const folded = foldWrites(substituteTemplates(step.run, state), {
-        unknownId: (n) => `${sid}.outputs.${n}`,
-      });
-      for (const name of [...new Set([...step.writesOutputs.names, ...Object.keys(folded)])]) {
-        const v = folded[name] ?? this.unknownOutput(sid, name);
-        this.noteValue(v);
-        outputs[name] = v;
-      }
-      return { outputs, open: !(step.writesOutputs.mentions && !step.writesOutputs.dynamic) };
+    const folded = foldWrites(substituteTemplates(step.run ?? '', state), {
+      unknownId: (n) => `${sid}.outputs.${n}`,
+    });
+    for (const name of [...new Set([...step.writesOutputs.names, ...Object.keys(folded)])]) {
+      const v = folded[name] ?? this.unknownOutput(sid, name);
+      this.noteValue(v);
+      outputs[name] = v;
     }
-    if (action) {
-      for (const name of Object.keys(action.outputs)) outputs[name] = this.unknownOutput(sid, name);
-      return { outputs, open: false };
-    }
-    return { outputs, open: true };
+    const open = !(step.writesOutputs.mentions && !step.writesOutputs.dynamic);
+    return { outputs, names: Object.keys(outputs), open, what: 'the script' };
   }
 
   /** The `$GITHUB_ENV` writes of a script, as the steps after it read them. */
@@ -1289,6 +1340,13 @@ const KINDS: [RegExp, UnknownKind][] = [
   [/hashfiles/i, 'hashfiles'],
 ];
 
+/** The layer a mock ref belongs to: `model:<id>` is shipped, `given[i]`, `assume[i]` (the case) and `cli[i]` are the author's. */
+function layerOf(ref: string): MockLayer {
+  if (ref.startsWith('model:')) return 'shipped';
+  if (ref.startsWith('given')) return 'given';
+  return ref.startsWith('cli') ? 'cli' : 'case';
+}
+
 function kindOf(id: string): UnknownKind {
   return KINDS.find(([re]) => re.test(id))?.[1] ?? 'unsupported';
 }
@@ -1300,6 +1358,7 @@ const SCENARIO_PINS: [RegExp, (name: string) => Json][] = [
   [/^github\.(actor|triggering_actor)$/, () => ({ actor: { login: '' } })],
   [/^github\.(repository|repository_owner)$/, () => ({ repository: 'owner/name' })],
   [/^github\.(ref|ref_name|ref_type)$/, () => ({ tag: '' })],
+  [/^scenario\.changed$/, () => ({ changed: ['path/to/file'] })],
 ];
 
 /** The scenario field that would pin an unknown read, when there is one. */

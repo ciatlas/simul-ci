@@ -2,6 +2,7 @@ export * from './contexts';
 export * from './evaluate';
 export * from './filters';
 export * from './mocks/index';
+export * from './models/index';
 export * from './paths';
 export * from './plan/index';
 export * from './planner';

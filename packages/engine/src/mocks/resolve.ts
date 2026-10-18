@@ -1,3 +1,4 @@
+import type { ActionModel, ModelContext } from '../models/types';
 import {
   type Location,
   parseUnitPath,
@@ -31,17 +32,38 @@ export interface CompiledEntry {
   matched: NodeId[];
 }
 
-export interface Facts {
-  outcome?: { value: Value<Result>; by: MockRef };
-  outputs: Record<string, { value: Value<string>; by: MockRef }>;
-  env: Record<string, { value: Value<string>; by: MockRef }>;
+/** A value and the mock that stated it. */
+export interface Fact<T> {
+  value: Value<T>;
+  by: MockRef;
 }
+
+export interface Facts {
+  outcome?: Fact<Result>;
+  outputs: Record<string, Fact<string>>;
+  env: Record<string, Fact<string>>;
+}
+
+/** A shipped model at a step, with what it sees. */
+export interface ModelUse {
+  model: ActionModel;
+  ctx: ModelContext;
+}
+
+interface Candidate {
+  compiled: CompiledEntry;
+  /** The entry with its `as:` preset folded in. */
+  entry: AssumeEntry;
+}
+
+type Shipped = Pick<Facts, 'outcome' | 'outputs'>;
 
 const LAYER_ORDER: AssumeLayer[] = ['given', 'case', 'cli'];
 
 export class MockResolver {
   readonly entries: CompiledEntry[] = [];
   readonly diagnostics: Diagnostic[] = [];
+  private readonly reported = new Set<MockRef>();
 
   constructor(layers: MockLayers) {
     for (const layer of LAYER_ORDER) {
@@ -83,53 +105,96 @@ export class MockResolver {
     return out;
   }
 
-  /** The facts the mocks state for the unit, field by field. */
-  factsFor(location: Location, node: NodeId, uses?: string): Facts {
-    const facts: Facts = { outputs: {}, env: {} };
-    const candidates = this.candidates(location, node, uses);
-    if (!candidates.length) return facts;
-    const outcome = this.pick(candidates, node, 'outcome', (e) =>
-      e.outcome === undefined ? undefined : known<Result>(e.outcome),
+  /** The facts the mocks state for the unit, field by field; a shipped model is the layer under them all. */
+  factsFor(location: Location, node: NodeId, uses?: string, use?: ModelUse): Facts {
+    const candidates = this.candidates(location, node, uses).map(
+      (compiled): Candidate => ({ compiled, entry: this.effective(compiled, node, use) }),
     );
+    const shipped = use ? shippedFacts(use) : undefined;
+    const facts: Facts = { outputs: {}, env: {} };
+    if (!candidates.length && !shipped) return facts;
+    const outcome =
+      this.pick(candidates, node, 'outcome', (e) =>
+        e.outcome === undefined ? undefined : known<Result>(e.outcome),
+      ) ?? shipped?.outcome;
     if (outcome) facts.outcome = outcome;
-    for (const name of names(candidates, 'outputs')) {
-      const v = this.pick(candidates, node, `outputs.${name}`, (e) =>
-        mockValue(e.outputs?.[name], `${node}.outputs.${name}`),
-      );
-      if (v) facts.outputs[name] = v;
-    }
-    for (const name of names(candidates, 'env')) {
-      const v = this.pick(candidates, node, `env.${name}`, (e) =>
-        mockValue(e.env?.[name], `${node}.env.${name}`),
-      );
-      if (v) facts.env[name] = v;
-    }
+    facts.outputs = this.pickRecord(candidates, node, 'outputs', shipped?.outputs);
+    facts.env = this.pickRecord(candidates, node, 'env');
     return facts;
+  }
+
+  /** One group of named fields: the author's layers decide each name, else the model's. */
+  private pickRecord(
+    candidates: Candidate[],
+    node: NodeId,
+    field: 'outputs' | 'env',
+    shipped: Record<string, Fact<string>> = {},
+  ): Record<string, Fact<string>> {
+    const out: Record<string, Fact<string>> = {};
+    for (const name of names(candidates, field, shipped)) {
+      const v =
+        this.pick(candidates, node, `${field}.${name}`, (e) =>
+          mockValue(e[field]?.[name], `${node}.${field}.${name}`),
+        ) ?? shipped[name];
+      if (v) out[name] = v;
+    }
+    return out;
+  }
+
+  /** The entry with its `as:` preset resolved against the unit's model: the preset's facts under the entry's own. */
+  private effective(c: CompiledEntry, node: NodeId, use: ModelUse | undefined): AssumeEntry {
+    const { entry } = c;
+    if (entry.as === undefined) return entry;
+    const preset = use?.model.preset(entry.as, use.ctx);
+    if (!preset) {
+      this.reportPreset(c, node, use);
+      return entry;
+    }
+    const merged: AssumeEntry = { ...entry, outputs: { ...preset.outputs, ...entry.outputs } };
+    const outcome = entry.outcome ?? preset.outcome;
+    if (outcome !== undefined) merged.outcome = outcome;
+    return merged;
+  }
+
+  /** An `as:` that names no preset of the unit's model, or a unit without one (SC105), once per entry. */
+  private reportPreset(c: CompiledEntry, node: NodeId, use: ModelUse | undefined): void {
+    if (this.reported.has(c.ref)) return;
+    this.reported.add(c.ref);
+    const what = use
+      ? `${use.model.id} (presets: ${use.model.presets.join(', ') || 'none'})`
+      : 'a unit without a model';
+    this.diagnostics.push({
+      severity: 'error',
+      code: 'SC105',
+      message: `${c.ref}: as '${c.entry.as}' names no preset of ${what}`,
+      node,
+      mock: c.ref,
+    });
   }
 
   /** The value of one field from the closest layer's best-ranked entries; equal rank and different values conflict (SC103). */
   private pick<T>(
-    candidates: CompiledEntry[],
+    candidates: Candidate[],
     node: NodeId,
     field: string,
     read: (e: AssumeEntry) => Value<T> | undefined,
   ): { value: Value<T>; by: MockRef } | undefined {
     for (const layer of [...LAYER_ORDER].reverse()) {
-      const providing = candidates.filter((c) => c.layer === layer && read(c.entry) !== undefined);
+      const providing = candidates.filter((c) => c.compiled.layer === layer && read(c.entry) !== undefined);
       if (!providing.length) continue;
-      const top = Math.max(...providing.map((c) => c.rank));
-      const best = providing.filter((c) => c.rank === top);
-      const values = best.map((c) => ({ by: c.ref, value: read(c.entry)! }));
+      const top = Math.max(...providing.map((c) => c.compiled.rank));
+      const best = providing.filter((c) => c.compiled.rank === top);
+      const values = best.map((c) => ({ by: c.compiled.ref, value: read(c.entry)! }));
       const distinct = new Set(values.map((v) => JSON.stringify(v.value)));
       if (distinct.size > 1) {
         this.diagnostics.push({
           severity: 'error',
           code: 'SC103',
-          message: `${best.map((c) => c.ref).join(' and ')} both set ${field} of ${node} to different values`,
+          message: `${best.map((c) => c.compiled.ref).join(' and ')} both set ${field} of ${node} to different values`,
           node,
-          mock: best[0]!.ref,
+          mock: best[0]!.compiled.ref,
         });
-        return { value: unknown<T>([`conflict:${node}.${field}`]), by: best[0]!.ref };
+        return { value: unknown<T>([`conflict:${node}.${field}`]), by: best[0]!.compiled.ref };
       }
       return values[0]!;
     }
@@ -180,8 +245,25 @@ function usesEntryNames(
   return !c.path || pathMatches(c.path, { workflow: location.workflow, chain: location.chain.slice(0, -1) });
 }
 
-function names(candidates: CompiledEntry[], field: 'outputs' | 'env'): string[] {
-  return [...new Set(candidates.flatMap((c) => Object.keys(c.entry[field] ?? {})))];
+/** What a shipped model produces at the unit, as the layer under the author's. */
+function shippedFacts(use: ModelUse): Shipped {
+  const by = `model:${use.model.id}`;
+  const product = use.model.produce(use.ctx);
+  const outputs = Object.fromEntries(
+    Object.entries(product.outputs).map(([name, value]) => [name, { value, by }]),
+  );
+  return product.outcome ? { outcome: { value: product.outcome, by }, outputs } : { outputs };
+}
+
+/** The field names any layer states: the model's first, in its order, then the author's. */
+function names(
+  candidates: Candidate[],
+  field: 'outputs' | 'env',
+  shipped: Record<string, unknown> = {},
+): string[] {
+  return [
+    ...new Set([...Object.keys(shipped), ...candidates.flatMap((c) => Object.keys(c.entry[field] ?? {}))]),
+  ];
 }
 
 function mockValue(v: MockValue | undefined, unknownId: string): Value<string> | undefined {
