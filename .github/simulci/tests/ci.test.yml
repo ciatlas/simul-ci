@@ -1,0 +1,33 @@
+# Route tests for ci.yml: what runs for a push to main, a pull request, another branch, a skip-ci message.
+workflow: ci.yml
+given: { changed: [packages/engine/src/x.ts] }
+cases:
+  - name: a push to main runs every job; coverage is uploaded from node 24 only
+    when: { event: push, branch: main }
+    then:
+      run: [test, fallow, workflows, zizmor, schemas, ci-passed]
+      conclusion: success
+      checks:
+        - Test (node 22)
+        - Test (node 24)
+        - Code health
+        - Workflows (flowpact)
+        - Workflow security (zizmor)
+        - Schemas up to date
+        - CI passed
+      units:
+        'test[node=22].#9': { runs: no, because: if }
+        'test[node=24].#9': { runs: yes }
+        fallow.#8: { runs: no, because: if } # the fallow audit compares against the base of a pull request
+  - name: a pull request also runs the fallow audit against its base
+    when: { event: pull_request, base: main, head: feat/x }
+    then:
+      run: [test, fallow, workflows, zizmor, schemas, ci-passed]
+      units:
+        fallow.#8: { runs: yes }
+  - name: a push to another branch starts nothing
+    when: { event: push, branch: topic }
+    then: { because: branches }
+  - name: a skip-ci message starts nothing
+    when: { event: push, branch: main, message: 'docs: typo [skip ci]' }
+    then: { because: skip-ci }

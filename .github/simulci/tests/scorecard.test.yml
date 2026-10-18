@@ -1,0 +1,11 @@
+workflow: scorecard.yml
+cases:
+  - name: a push to main runs the analysis
+    when: { event: push, branch: main }
+    then: { run: [analysis], conclusion: success }
+  - name: the weekly schedule runs it too
+    when: { event: schedule, branch: main }
+    then: { run: [analysis] }
+  - name: a pull request does not
+    when: { event: pull_request, base: main, head: feat/x }
+    then: { because: event }
