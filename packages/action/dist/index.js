@@ -47247,7 +47247,8 @@ function renderMarkdownReport(result, opts = {}) {
 	if (failed.length > max) lines.push("", `${failed.length - max} more failed cases are in the log.`);
 	return `${lines.join("\n")}\n`;
 }
-const md = (s) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
+/** A table cell: backslashes and pipes escaped, newlines flattened. */
+const md = (s) => s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
 function renderJUnit(result) {
 	const suites = result.files.map(suite);
 	const totals = count(result.files.flatMap((f) => f.cases), result.files);
