@@ -228,7 +228,8 @@ function hostedRunner(runsOn: readonly string[] | undefined): { os: string; arch
   if (label.startsWith('ubuntu')) return { os: 'Linux', arch: 'X64' };
   if (label.startsWith('windows')) return { os: 'Windows', arch: 'X64' };
   // macos-13 and the large runners are Intel; macos-14 and later are Apple silicon.
-  return { os: 'macOS', arch: /macos-(13|.*large)/.test(label) ? 'X64' : 'ARM64' };
+  const intel = label.startsWith('macos-13') || label.includes('large');
+  return { os: 'macOS', arch: intel ? 'X64' : 'ARM64' };
 }
 
 function strategyContext(strategy: ContextState['strategy'], path: string[]): Value<Json> {
