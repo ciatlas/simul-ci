@@ -165,11 +165,11 @@ for (const [name, want] of Object.entries(environments)) {
     });
     const existingPolicies = (await api('GET', `${path}/deployment-branch-policies?per_page=100`))
       .branch_policies;
-    for (const branch of wanted)
+    for (const branch of wantedBranches)
       if (!existingPolicies.some((p) => p.name === branch))
         await api('POST', `${path}/deployment-branch-policies`, { name: branch, type: 'branch' });
     for (const p of existingPolicies)
-      if (!wanted.includes(p.name)) await api('DELETE', `${path}/deployment-branch-policies/${p.id}`);
+      if (!wantedBranches.includes(p.name)) await api('DELETE', `${path}/deployment-branch-policies/${p.id}`);
   } catch (err) {
     failed = true;
     log(`  - failed: ${err.message}`);
