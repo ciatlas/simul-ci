@@ -154,7 +154,8 @@ export function renderMarkdownReport(
   return `${lines.join('\n')}\n`;
 }
 
-const md = (s: string): string => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+/** A table cell: backslashes and pipes escaped, newlines flattened. */
+const md = (s: string): string => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
 export function renderJUnit(result: RunResult): string {
   const suites = result.files.map(suite);
