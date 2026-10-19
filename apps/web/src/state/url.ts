@@ -152,6 +152,7 @@ export interface UrlSource {
   scenario: ScenarioInput;
   assume: AssumeEntry[];
   focus?: string;
+  sel?: string;
   detail: 'legs' | 'steps';
   ui: { view: 'graph' | 'text'; hideUntriggered: boolean };
 }
@@ -159,6 +160,7 @@ export interface UrlSource {
 export function urlStateOf(s: UrlSource): UrlState {
   const state: UrlState = { scenario: s.scenario, assume: s.assume };
   if (s.focus) state.wf = s.focus;
+  if (s.sel) state.sel = s.sel;
   if (s.detail === 'legs') state.d = 'legs';
   if (s.ui.view === 'text') state.view = 'text';
   if (s.ui.hideUntriggered) state.hide = true;
@@ -170,6 +172,7 @@ export function urlSliceChanged(s: UrlSource, prev: UrlSource): boolean {
     s.scenario !== prev.scenario ||
     s.assume !== prev.assume ||
     s.focus !== prev.focus ||
+    s.sel !== prev.sel ||
     s.detail !== prev.detail ||
     s.ui.view !== prev.ui.view ||
     s.ui.hideUntriggered !== prev.ui.hideUntriggered

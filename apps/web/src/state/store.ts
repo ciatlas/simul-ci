@@ -1,5 +1,6 @@
 import type { AssumeEntry, RunPlan, ScenarioInput } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import type { GraphState, GraphUi } from '../graph/types';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
 import { DEFAULT_PREFS, type Prefs } from './prefs';
 
@@ -74,7 +75,14 @@ export interface SessionState {
   error?: SessionError;
   /** The depth-0 workflow the defaults, the copy and the fit are about. */
   focus?: string;
-  ui: { view: 'graph' | 'text'; hideUntriggered: boolean; prefs: Prefs };
+  /**
+   * The selection, as the URL's `sel` spells it: a unit path within `focus`. Absent, the focused workflow itself is
+   * what the panels are about. A unit path survives a new plan; `plan/index.ts` resolves it to a node.
+   */
+  sel?: string;
+  /** What the canvas shows: committed with its positions, so the previous picture stays until they exist. */
+  graph?: GraphState;
+  ui: Omit<GraphUi, 'hideUntriggered'> & { view: 'graph' | 'text'; hideUntriggered: boolean; prefs: Prefs };
   notices: Notice[];
 }
 
@@ -89,6 +97,12 @@ export interface SessionActions {
   setAssume: (assume: AssumeEntry[]) => void;
   setDetail: (detail: 'legs' | 'steps') => void;
   setFocus: (focus: string | undefined) => void;
+  /** Selects a node by its depth-0 workflow and its unit path; no unit path selects the workflow itself. */
+  select: (focus: string | undefined, sel: string | undefined) => void;
+  toggleExpanded: (job: string) => void;
+  setRepresentative: (job: string, leg: string) => void;
+  toggleOpened: (scope: string) => void;
+  graphReady: (graph: GraphState) => void;
   setView: (view: 'graph' | 'text') => void;
   setHideUntriggered: (hide: boolean) => void;
   setPrefs: (patch: Partial<Prefs>) => void;
@@ -122,7 +136,7 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
     detail: 'steps',
     engine: { status: 'booting', models: [], restarts: 0, busy: false },
     stale: false,
-    ui: { view: 'graph', hideUntriggered: false, prefs },
+    ui: { view: 'graph', hideUntriggered: false, prefs, expanded: [], representative: {}, opened: [] },
     notices: [],
   };
 }
@@ -138,6 +152,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         files: { version: s.files.version + 1, byPath },
         project: { status: 'idle' },
         plan: undefined,
+        graph: undefined,
         stale: false,
         error: s.error?.kind === 'source' ? undefined : s.error,
       })),
@@ -147,8 +162,10 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         files: { version: get().files.version + 1, byPath: {} },
         project: { status: 'idle' },
         plan: undefined,
+        graph: undefined,
         stale: false,
         focus: undefined,
+        sel: undefined,
         error: replaceError(get().error, undefined),
       }),
     setScenario: (scenario, options) =>
@@ -171,6 +188,12 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       set((s) => ({ assume, stale: s.plan !== undefined, error: authorsErrorCleared(s.error, 'assume') })),
     setDetail: (detail) => set((s) => ({ detail, stale: s.plan !== undefined })),
     setFocus: (focus) => set({ focus }),
+    select: (focus, sel) => set({ focus, sel }),
+    toggleExpanded: (job) => set((s) => ({ ui: { ...s.ui, expanded: toggled(s.ui.expanded, job) } })),
+    setRepresentative: (job, leg) =>
+      set((s) => ({ ui: { ...s.ui, representative: { ...s.ui.representative, [job]: leg } } })),
+    toggleOpened: (scope) => set((s) => ({ ui: { ...s.ui, opened: toggled(s.ui.opened, scope) } })),
+    graphReady: (graph) => set({ graph }),
     setView: (view) => set((s) => ({ ui: { ...s.ui, view } })),
     setHideUntriggered: (hideUntriggered) => set((s) => ({ ui: { ...s.ui, hideUntriggered } })),
     setPrefs: (patch) => set((s) => ({ ui: { ...s.ui, prefs: { ...s.ui.prefs, ...patch } } })),
@@ -217,6 +240,9 @@ function withPatch(scenario: ScenarioInput, patch: Partial<ScenarioInput>): Scen
   }
   return next as unknown as ScenarioInput;
 }
+
+const toggled = (list: readonly string[], item: string): string[] =>
+  list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
 
 /** The errors only a reload clears: the engine never started, or it stopped and could not be restarted. */
 export function isBlocking(error: SessionError | undefined): boolean {

@@ -1,9 +1,11 @@
 import { useSession } from './providers';
 import { SourceMenu } from './SourceMenu';
 import { NEXT_THEME } from './theme';
+import { ViewToggle } from './ViewToggle';
 
 const THEME_LABEL = { system: 'Theme: system', light: 'Theme: light', dark: 'Theme: dark' } as const;
 
+/** The page's chrome: the ways in, the scenario id, the engine, the view and the theme. */
 export function TopBar() {
   const scenarioId = useSession((s) => s.plan?.plan.scenario.id);
   const engine = useSession((s) => s.engine);
@@ -38,6 +40,7 @@ export function TopBar() {
                 ? `engine ${engine.version}`
                 : `${ms.toFixed(1)} ms`)}
         </span>
+        <ViewToggle />
         <button
           type="button"
           className="rounded border border-border bg-surface px-2 py-1 text-text hover:border-border-strong"

@@ -1,0 +1,142 @@
+import type { NodeId } from '@simulci/engine';
+import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { memo, type MouseEvent, useMemo } from 'react';
+import { useApp } from '../../app/providers';
+import { cardActions, cardAttrs, resultTone, subline } from '../card';
+import type { JobFlowNode } from '../flow';
+import { Mark } from '../Mark';
+import { gridCells, stripRows } from '../size';
+import { CARD, type JobModel } from '../types';
+import { HoverCard } from './HoverCard';
+import { LegGrid, SkippedGrid } from './LegGrid';
+import { StepList } from './StepList';
+import { StepStrip } from './StepStrip';
+
+/** The handles sit on the header line, where `needs` edges meet a card, and are never seen. */
+const HANDLE = { top: CARD.header / 2 };
+
+/**
+ * A job card, stacked as graph/size.ts measures it: the header (mark, label, a result that is not success, the
+ * step-list toggle), the subline (the verdict word and the deciding clause when it does not plainly run, `×count`,
+ * the `uses:` glyph, the check), the representative leg's steps as a strip, the legs as a grid, then the open step
+ * list. A skipped job keeps the strip's and the grid's room, the grid drawn as skipped cells. A call job's callee is
+ * a node of its own placed below them. Runs have a solid border in the run colour, skipped ones a thin dimmed one,
+ * might-run ones the only dashed border. The toggle is a tab stop only on the card that holds the selection.
+ */
+function JobNodeView({ data, width }: NodeProps<JobFlowNode>) {
+  const { store } = useApp();
+  const act = useMemo(() => cardActions(store), [store]);
+  const { job, state } = data;
+  const toggle = (e: MouseEvent): void => {
+    e.stopPropagation();
+    act.toggleExpanded(job.id);
+  };
+  return (
+    <div className="sc-card" {...cardAttrs(job.verdict, state)}>
+      <Handle type="target" position={Position.Left} isConnectable={false} style={HANDLE} />
+      <Header job={job} tabStop={state.selected} onToggle={toggle} />
+      <Subline job={job} />
+      <Body job={job} width={width ?? CARD.minWidth} selected={state.inner} onPick={act.select} />
+      <Handle type="source" position={Position.Right} isConnectable={false} style={HANDLE} />
+      <HoverCard
+        visible={state.hovered}
+        facts={{
+          verdict: job.verdict,
+          label: job.label,
+          clause: job.clause,
+          check: job.check,
+          result: job.result,
+          needs: data.needs,
+        }}
+      />
+    </div>
+  );
+}
+
+/** The mark, the label, a result badge, and the step-list toggle (a tab stop while the card holds the selection). */
+function Header({
+  job,
+  tabStop,
+  onToggle,
+}: {
+  job: JobModel;
+  tabStop: boolean;
+  onToggle: (e: MouseEvent) => void;
+}) {
+  return (
+    <div className="sc-card-header" style={{ height: CARD.header }}>
+      <Mark verdict={job.verdict} />
+      <span className="sc-card-label">{job.label}</span>
+      {job.result && (
+        <span className="sc-badge font-mono" data-tone={resultTone(job.result)}>
+          {job.result}
+        </span>
+      )}
+      {(job.steps.length > 0 || job.expanded) && (
+        <button
+          type="button"
+          className="sc-toggle nodrag"
+          tabIndex={tabStop ? 0 : -1}
+          aria-expanded={job.expanded}
+          aria-label={job.expanded ? 'Hide the steps' : 'Show the steps'}
+          onClick={onToggle}
+        >
+          {job.expanded ? '▾' : '▸'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Subline({ job }: { job: JobModel }) {
+  const sub = subline(job);
+  return (
+    <p className="sc-card-sub" style={{ height: CARD.subline }}>
+      {sub.status && <span className="sc-sub-status">{sub.status}</span>}
+      {sub.count && <span>{sub.count}</span>}
+      {sub.uses && (
+        <span title={`uses: ${sub.uses}`}>
+          <span aria-hidden="true">↪</span>
+          <span className="sr-only">uses {sub.uses}</span>
+        </span>
+      )}
+      {sub.check && <span className="sc-sub-check">{sub.check}</span>}
+    </p>
+  );
+}
+
+/** The strip, the grid and the open list, each in the room size.ts keeps for it whether the plan fills it or not. */
+function Body({
+  job,
+  width,
+  selected,
+  onPick,
+}: {
+  job: JobModel;
+  width: number;
+  /** The selected leg or step inside the card. */
+  selected?: NodeId;
+  onPick: (id: NodeId) => void;
+}) {
+  const cells = gridCells(job);
+  const strip =
+    job.steps.length > 0 ? (
+      <StepStrip steps={job.steps} width={width - 2 * CARD.padding} selected={selected} onPick={onPick} />
+    ) : (
+      stripRows(job) > 0 && <div className="sc-strip" style={{ height: CARD.stripRow }} />
+    );
+  const grid = job.legs ? (
+    <LegGrid legs={job.legs} representative={job.representative} selected={selected} onPick={onPick} />
+  ) : (
+    cells > 0 && <SkippedGrid count={cells} />
+  );
+  return (
+    <>
+      {strip}
+      {grid}
+      {job.expanded && <StepList steps={job.steps} selected={selected} onPick={onPick} />}
+    </>
+  );
+}
+
+export const JobNode = memo(JobNodeView);

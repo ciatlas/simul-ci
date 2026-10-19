@@ -2,15 +2,17 @@
  * The browser bundle's contract (scripts/check-web-bundle.mjs): its rules on small inputs, then on what the web app's
  * own Vite config builds, so a rule that cannot match Vite's output fails here instead of passing quietly in CI. The
  * built token sheet is checked too: like the fonts, its first paint is what the browser gets before any script runs,
- * and applyTheme is what takes over once one does.
+ * and applyTheme is what takes over once one does. The built layout worker is run as well, in a global scope shaped
+ * like a worker's, which is where ELK's bundle behaves differently from a page or Node.
  */
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { applyTheme } from '../../apps/web/src/app/theme';
+import type { LayoutRequest, LayoutResponse } from '../../apps/web/src/worker/layout-protocol';
 import { chunkProblems, stylesheetProblems } from '../web-bundle-rules.mjs';
 
 const root = join(import.meta.dirname, '../..');
@@ -29,11 +31,14 @@ const WORKER = [
   '../../../../node_modules/.pnpm/@ciatlas+core@x/node_modules/@ciatlas/core/src/project-browser.ts',
   ZOD,
 ];
+const ELKJS = '../../../../node_modules/.pnpm/elkjs@0.12.0/node_modules/elkjs/lib/elk.bundled.js';
+const LAYOUT = ['../../src/worker/layout.worker.ts', '../../src/worker/layout-protocol.ts', ELKJS];
 
 describe('the chunk rules', () => {
-  it('pass the page and the worker as the app builds them', () => {
+  it('pass the page and the workers as the app builds them', () => {
     expect(chunkProblems('index-abc.js', PAGE)).toEqual([]);
     expect(chunkProblems('engine.worker-abc.js', WORKER)).toEqual([]);
+    expect(chunkProblems('layout.worker-abc.js', LAYOUT)).toEqual([]);
   });
 
   it('flag the empty module a client build puts in place of a Node built-in, in any chunk', () => {
@@ -69,6 +74,23 @@ describe('the chunk rules', () => {
         WORKER.filter((s) => !s.includes('project-browser')),
       ),
     ).toEqual(["engine.worker-abc.js was not built from core's browser entry"]);
+  });
+
+  it('keep elkjs in the layout worker, and the engine and what it depends on out of it', () => {
+    expect(chunkProblems('index-abc.js', [...PAGE, ELKJS])).toEqual([
+      `index-abc.js holds ${ELKJS}, which only the layout worker may`,
+    ]);
+    expect(chunkProblems('engine.worker-abc.js', [...WORKER, ELKJS])).toEqual([
+      `engine.worker-abc.js holds ${ELKJS}, which only the layout worker may`,
+    ]);
+    const plan = '../../../../packages/engine/src/plan/index.ts';
+    expect(chunkProblems('layout.worker-abc.js', [...LAYOUT, plan, ZOD])).toEqual([
+      `layout.worker-abc.js holds ${plan}, which only the engine worker may`,
+      `layout.worker-abc.js holds ${ZOD}, which only the engine worker may`,
+    ]);
+    expect(chunkProblems('layout.worker-abc.js', LAYOUT.slice(0, 2))).toEqual([
+      'layout.worker-abc.js holds no elkjs, so nothing lays the graph out',
+    ]);
   });
 });
 
@@ -112,7 +134,8 @@ describe("what the web app's Vite config builds", () => {
         `import ${JSON.stringify(join(web, 'src/index.css'))};`,
         "import './face.css';",
         "import { readFileSync } from 'node:fs';",
-        'console.log(readFileSync);',
+        `import { spawnLayoutWorker } from ${JSON.stringify(join(web, 'src/worker/layout-client.ts'))};`,
+        'console.log(readFileSync, spawnLayoutWorker);',
       ].join('\n'),
     );
     // Under Vite's 4 kB inline limit, whatever the font packages ship.
@@ -154,11 +177,58 @@ describe("what the web app's Vite config builds", () => {
   });
 
   it('leaves a Node built-in where the chunk rules see it', () => {
-    const chunk = assets.find((f) => f.endsWith('.js'))!;
+    const chunk = assets.find((f) => f.startsWith('index-') && f.endsWith('.js'))!;
     const sources: string[] = JSON.parse(read(`${chunk}.map`)).sources;
     expect(chunkProblems(chunk, sources)).toEqual([
       expect.stringContaining(`${chunk} imports a Node built-in`),
     ]);
+  });
+
+  it('builds the layout worker into a chunk of its own, holding elkjs and keeping the rules', () => {
+    const chunks = assets.filter((f) => /^layout\.worker-.*\.js$/.test(f));
+    expect(chunks).toHaveLength(1);
+    const sources: string[] = JSON.parse(read(`${chunks[0]}.map`)).sources;
+    expect(sources.some((s) => s.includes('/elkjs/'))).toBe(true);
+    expect(chunkProblems(chunks[0], sources)).toEqual([]);
+  });
+
+  it('runs the built layout worker where a global scope without a document is what ELK finds', async () => {
+    const listeners: ((event: { origin: string; source: null; data: unknown }) => void)[] = [];
+    const posted: LayoutResponse[] = [];
+    const chunk = assets.find((f) => /^layout\.worker-.*\.js$/.test(f))!;
+    // Node reads a .js file outside a package by its syntax; .mjs says what it is.
+    const copy = join(dir, 'dist/assets', 'layout-worker.mjs');
+    copyFileSync(join(dir, 'dist/assets', chunk), copy);
+    vi.stubGlobal('self', globalThis);
+    vi.stubGlobal('addEventListener', (_: string, l: (typeof listeners)[number]) => listeners.push(l));
+    vi.stubGlobal('postMessage', (m: LayoutResponse) => posted.push(m));
+    try {
+      await import(pathToFileURL(copy).href);
+      const request: LayoutRequest = {
+        id: 1,
+        type: 'layout',
+        scopes: [
+          {
+            id: 'ci.yml',
+            nodes: [
+              { id: 'ci.yml#a', width: 168, height: 50 },
+              { id: 'ci.yml#b', width: 168, height: 50 },
+            ],
+            edges: [{ id: 'ci.yml#a->ci.yml#b', source: 'ci.yml#a', target: 'ci.yml#b' }],
+          },
+        ],
+        known: {},
+      };
+      listeners[0]({ origin: '', source: null, data: request });
+      await vi.waitFor(() => expect(posted).toHaveLength(1));
+      expect(posted[0]).toMatchObject({
+        id: 1,
+        type: 'layout',
+        scopes: { 'ci.yml': { positions: { 'ci.yml#a': { x: 16, y: 40 }, 'ci.yml#b': { x: 232, y: 40 } } } },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

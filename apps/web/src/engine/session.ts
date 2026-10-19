@@ -28,6 +28,8 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
   let request = 0;
   /** Requests of the session the client has not answered yet. */
   let unanswered = 0;
+  /** The files version last loaded: the same files loaded again (a stale reply) keep the author's place. */
+  let loaded: number | undefined;
 
   const busy = (delta: 1 | -1): void => {
     unanswered += delta;
@@ -58,10 +60,13 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
       if (store.getState().files.version !== version) return;
       if (r.type === 'loaded') {
         actions.projectReady(r.project, r.outline, version);
-        if (store.getState().scenarioFrom === 'default') {
+        const fresh = loaded !== version;
+        loaded = version;
+        // New files under the page's own scenario get the defaults for them, and a selection made in other files goes.
+        if (fresh && store.getState().scenarioFrom === 'default') {
           const d = defaultScenario(r.outline);
           actions.setScenario(d.scenario, { assumed: d.assumed, from: 'default' });
-          actions.setFocus(d.focus);
+          actions.select(d.focus, undefined);
           simulate.cancel();
         }
         await run();

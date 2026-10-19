@@ -21,6 +21,7 @@ import { withEvent } from '../src/scenario/form';
 import { createSessionStore, type PlanState, type SessionStore } from '../src/state/store';
 import { validateSearch } from '../src/state/url';
 import { createUrlSync, pageDefault, restoreDefault } from '../src/state/url-sync';
+import { deriveTables } from '../src/worker/derived';
 import type { Outline } from '../src/worker/protocol';
 
 /** A form that cannot render the event `boom`, standing in for any render error under the boundary. */
@@ -37,6 +38,7 @@ vi.mock('../src/app/ScenarioForm', async () => {
 });
 
 const CI = '.github/workflows/ci.yml';
+const RELEASE = '.github/workflows/release.yml';
 
 const outline: Outline = {
   files: [],
@@ -271,6 +273,31 @@ describe('the URL bridge', () => {
     expect(b.history.writes).toEqual([{ search: { event: 'pull_request', base: 'main' }, replace: true }]);
   });
 
+  it('writes a selection in place beside its workflow, and takes back one it did not write', () => {
+    const b = bridge({ event: 'push', branch: 'main', wf: CI });
+    b.store.getState().select(CI, 'test[node=20].#1');
+    vi.advanceTimersByTime(300);
+    expect(b.history.writes).toEqual([
+      { search: { event: 'push', branch: 'main', wf: CI, sel: 'test[node=20].#1' }, replace: true },
+    ]);
+
+    b.history.entries[0] = { event: 'push', branch: 'main', wf: RELEASE, sel: 'publish' };
+    b.routeRenders();
+    expect([b.store.getState().focus, b.store.getState().sel]).toEqual([RELEASE, 'publish']);
+    b.history.entries[0] = { event: 'push', branch: 'main', wf: CI };
+    b.routeRenders();
+    expect([b.store.getState().focus, b.store.getState().sel]).toEqual([CI, undefined]);
+    vi.advanceTimersByTime(300);
+    expect(b.history.writes).toHaveLength(1);
+  });
+
+  it('takes the selection out of the URL when the workflow itself is selected again', () => {
+    const b = bridge({ event: 'push', wf: CI, sel: 'build' });
+    b.store.getState().select(CI, undefined);
+    vi.advanceTimersByTime(300);
+    expect(b.history.writes).toEqual([{ search: { event: 'push', wf: CI }, replace: true }]);
+  });
+
   it('writes nothing for the page default before a project backs it, and nothing once stopped', () => {
     const b = bridge({});
     b.store.getState().setScenario({ event: 'release' }, { from: 'default' });
@@ -291,18 +318,19 @@ describe("the page's own scenario", () => {
     expect(pageDefault(store.getState())).toEqual(defaultScenario(outline));
   });
 
-  it('comes back with its marks and its focus', () => {
+  it('comes back with its marks and its focus, and nothing selected in it', () => {
     const store = createSessionStore();
     store.getState().projectReady(1, outline, 1);
     store.getState().setScenario({ event: 'boom' }, { from: 'url' });
-    store.getState().setFocus(undefined);
+    store.getState().select(undefined, 'build');
     restoreDefault(store);
     const s = store.getState();
-    expect([s.scenario, s.scenarioFrom, s.assumed, s.focus]).toEqual([
+    expect([s.scenario, s.scenarioFrom, s.assumed, s.focus, s.sel]).toEqual([
       { event: 'push', branch: 'main' },
       'default',
       ['event', 'branch'],
       CI,
+      undefined,
     ]);
   });
 });
@@ -358,6 +386,37 @@ describe('the URL bridge under the router', () => {
 
     await r.go(() => r.history.forward());
     expect(r.store.getState().scenario).toEqual({ event: 'pull_request', base: 'main' });
+  });
+
+  it('carries the selection and its workflow through Back and Forward', async () => {
+    const r = await mountRouter('/');
+    loaded(r.store);
+    await r.settle();
+    r.store.getState().select(CI, 'build');
+    await r.settle();
+    expect(r.search()).toEqual({ event: 'push', branch: 'main', wf: CI, sel: 'build' });
+    r.store.getState().setScenario({ event: 'pull_request', base: 'main' });
+    await r.settle();
+    r.store.getState().select(RELEASE, 'publish.#1');
+    await r.settle();
+    expect(r.search()).toEqual({ event: 'pull_request', base: 'main', wf: RELEASE, sel: 'publish.#1' });
+    expect(r.history.length).toBe(2);
+
+    const selection = () => [r.store.getState().focus, r.store.getState().sel];
+    await r.go(() => r.history.back());
+    expect(selection()).toEqual([CI, 'build']);
+    await r.go(() => r.history.forward());
+    expect(selection()).toEqual([RELEASE, 'publish.#1']);
+    expect(r.store.getState().scenario).toEqual({ event: 'pull_request', base: 'main' });
+  });
+
+  it('opens a shared link on its selection', async () => {
+    const r = await mountRouter(
+      `/?event=push&wf=${encodeURIComponent(CI)}&sel=${encodeURIComponent('test[node=20]')}`,
+    );
+    expect([r.store.getState().focus, r.store.getState().sel]).toEqual([CI, 'test[node=20]']);
+    await r.settle();
+    expect(r.search()).toEqual({ event: 'push', wf: CI, sel: 'test[node=20]' });
   });
 
   it("follows the browser's own Back and Forward, and leaves an edit pending at the move unwritten", async () => {
@@ -474,8 +533,10 @@ describe('a scenario the page cannot render', () => {
     a.setFiles(files, { kind: 'sample', name: 'starter' });
     a.projectReady(1, outline, 1);
     const plan = simulate({ files, scenario: { event: 'push' }, assume: [], detail: 'steps' });
-    a.planReceived({ plan, text: 'ci.yml ● build', ms: { simulate: 1, derive: 0 } } as PlanState);
+    const derived = deriveTables(plan, outline);
+    a.planReceived({ plan, derived, text: 'ci.yml ● build', ms: { simulate: 1, derive: 0 } } as PlanState);
     a.setScenario({ event }, { from: 'url' });
+    a.setView('text');
     const app = { store, sources: { canPickFolder: false } } as unknown as App;
     render(createElement(AppProvider, { app, children: createElement(SimulateView) }));
     return store;

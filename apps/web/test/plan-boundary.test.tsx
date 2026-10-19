@@ -6,6 +6,7 @@ import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
 import { SimulateView } from '../src/app/SimulateView';
 import { createSessionStore, type PlanState, type SessionStore } from '../src/state/store';
+import { deriveTables } from '../src/worker/derived';
 import type { Outline } from '../src/worker/protocol';
 
 /** A plan view that cannot show the plan `bad`, standing in for any render error the committed plan causes. */
@@ -34,13 +35,17 @@ const outline: Outline = {
 const files = { [CI]: 'on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps: [{ run: make }]\n' };
 const simulated = simulate({ files, scenario: { event: 'push' }, assume: [], detail: 'steps' });
 
-/** The one simulated plan with the text given, which is all the plan view above reads. */
-const plan = (text: string) => ({ plan: simulated, text, ms: { simulate: 1, derive: 0 } }) as PlanState;
+const derived = deriveTables(simulated, outline);
 
-/** The screen over a loaded project whose plan it can show; the test commits the next plans. */
+/** The one simulated plan with the text given, which is all the plan view above reads. */
+const plan = (text: string) =>
+  ({ plan: simulated, derived, text, ms: { simulate: 1, derive: 0 } }) as PlanState;
+
+/** The screen over a loaded project whose plan it can show as text; the test commits the next plans. */
 function mountView(): SessionStore {
   const store = createSessionStore();
   const a = store.getState();
+  a.setView('text');
   a.setFiles(files, { kind: 'sample', name: 'starter' });
   a.projectReady(1, outline, 1);
   a.setScenario({ event: 'push', branch: 'dev' }, { from: 'url' });

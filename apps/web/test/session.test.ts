@@ -139,6 +139,31 @@ describe('the session', () => {
     expect(f.simulates[1]!.body.scenario).toEqual({ event: 'push', branch: 'release/2' });
   });
 
+  it('selects nothing in new files, and keeps the selection when the same files load again', async () => {
+    const store = createSessionStore();
+    const f = fakeClient();
+    createSession({ store, client: f.client, debounceMs: 100 });
+    store.getState().setFiles({ '.github/workflows/ci.yml': 'on: push' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[0]!({ id: 1, type: 'loaded', project: 1, outline, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().select('.github/workflows/ci.yml', 'test');
+    // A reply for another project: the same files are loaded again, and the author's place stays.
+    f.simulates[0]!.resolve({ id: 2, type: 'error', kind: 'stale', message: 'another project' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[1]!({ id: 3, type: 'loaded', project: 2, outline, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState()).toMatchObject({ focus: '.github/workflows/ci.yml', sel: 'test' });
+    // Other files under the page's own scenario: their default focus, and no selection made in the files before.
+    store.getState().setFiles({ '.github/workflows/ci.yml': 'on: [push]' }, { kind: 'sample', name: 'y' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[2]!({ id: 4, type: 'loaded', project: 3, outline, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().focus).toBe('.github/workflows/ci.yml');
+    expect(store.getState().sel).toBeUndefined();
+    expect(store.getState().scenarioFrom).toBe('default');
+  });
+
   it('keeps the URL scenario, drops answers to older requests and routes invalid, stale and engine errors', async () => {
     const store = createSessionStore();
     store.getState().setScenario({ event: 'pull_request', base: 'main' }, { from: 'url' });
