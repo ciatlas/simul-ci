@@ -1,3 +1,4 @@
+import { CopyAsTest } from '../testcase/CopyAsTest';
 import { useSession } from './providers';
 import { SourceMenu } from './SourceMenu';
 import { NEXT_THEME } from './theme';
@@ -9,7 +10,7 @@ const THEME_LABEL = { system: 'Theme: system', light: 'Theme: light', dark: 'The
  * What the Shortcuts switch turns on and off (app/shortcuts.ts); the canvas's own keys need the focus in it. The
  * switch says on or off in words, so its state does not lean on a colour.
  */
-const KEYS_HINT = 'The single keys t, f, ., 0, r, 1 to 4, [, ] and \\ act on the page while this is on';
+const KEYS_HINT = 'The single keys t, f, ., 0, r, c, 1 to 4, [, ] and \\ act on the page while this is on';
 
 /** The page's chrome: the ways in, the scenario id, the engine, the view, the page keys and the theme. */
 export function TopBar() {
@@ -48,6 +49,7 @@ export function TopBar() {
                 : `${ms.toFixed(1)} ms`)}
         </span>
         <ViewToggle />
+        <CopyAsTest />
         <button
           type="button"
           className="rounded border border-border bg-surface px-2 py-1 text-text hover:border-border-strong"

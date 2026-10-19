@@ -88,6 +88,11 @@ export interface CaseResponse {
   type: 'case';
   text: string;
   case?: GeneratedCase;
+  /**
+   * The error diagnostics of the plan a test case was written from (a mock that matches nothing, a conflict):
+   * `simulci test` reports a case invalid for any of them. Absent when there are none.
+   */
+  errors?: { code: string; message: string }[];
 }
 
 export interface InvalidResponse {

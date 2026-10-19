@@ -110,6 +110,8 @@ export interface SessionState {
   fieldFocus?: FieldFocus;
   /** The line the YAML pane was last asked to show. */
   reveal?: Reveal;
+  /** Whether the Copy as test case dialog is open: the top bar's button and the `c` key open it. */
+  caseOpen: boolean;
   ui: Omit<GraphUi, 'hideUntriggered'> & {
     view: 'graph' | 'text';
     hideUntriggered: boolean;
@@ -158,6 +160,8 @@ export interface SessionActions {
   /** Opens the YAML pane on a file's tab and shows the line. */
   revealLine: (loc: { file: string; line: number }) => void;
   setYamlFile: (file: string | undefined) => void;
+  openCase: () => void;
+  closeCase: () => void;
   projectLoading: () => void;
   projectReady: (version: number, outline: Outline, files: number) => void;
   projectFailed: (error: SessionError) => void;
@@ -188,6 +192,7 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
     detail: 'steps',
     engine: { status: 'booting', models: [], restarts: 0, busy: false },
     stale: false,
+    caseOpen: false,
     ui: { view: 'graph', hideUntriggered: false, prefs, expanded: [], representative: {}, opened: [] },
     notices: [],
   };
@@ -280,6 +285,8 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         },
       })),
     setYamlFile: (yamlFile) => set((s) => ({ ui: withYamlFile(s.ui, yamlFile) })),
+    openCase: () => set({ caseOpen: true }),
+    closeCase: () => set({ caseOpen: false }),
     projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
     projectReady: (version, outline, files) =>
       set((s) => ({

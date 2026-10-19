@@ -9,6 +9,8 @@
     "apps/web/public/*.js",
     // Run in Node by the browser pass (apps/web/e2e/simulate.spec.ts), for the plan it checks the page against.
     "apps/web/e2e/node-plan.ts",
+    // Run in Node by apps/web/e2e/case.spec.ts: the copied case checked against TestFileSchema and run as `simulci test`.
+    "apps/web/e2e/node-case.ts",
   ],
   // Vite serves apps/web/public at the site root, where index.html asks for it.
   "ignoreUnresolvedImports": ["/theme.js"],

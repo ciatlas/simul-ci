@@ -27,6 +27,7 @@ vi.mock('../src/plan/index', () => ({
 }));
 
 const { CI, BUILD, STEP } = ids;
+const CALLEE = '.github/workflows/callee.yml';
 
 const base: PageKey = {
   key: '',
@@ -62,6 +63,13 @@ describe('the page keys', () => {
     expect(page('0', { metaKey: true })).toBeUndefined();
     expect(page('t', { altKey: true })).toBeUndefined();
     expect(page('f', { isComposing: true })).toBeUndefined();
+  });
+
+  it('takes c for Copy as test case, and leaves Ctrl+C and Cmd+C to copying', () => {
+    expect(page('c')).toBe('case');
+    expect(page('c', { ctrlKey: true })).toBeUndefined();
+    expect(page('c', { metaKey: true })).toBeUndefined();
+    expect(page('C')).toBeUndefined();
   });
 
   it('takes [, ] and \\ typed with Option or AltGr, and leaves them to Ctrl alone, Cmd or an IME', () => {
@@ -250,6 +258,62 @@ describe('the page key listener', () => {
     store.getState().setPrefs({ keys: true });
     expect(press('t')).toBe(false);
     expect(store.getState().ui.view).toBe('text');
+  });
+
+  /** A ready project whose plan holds `ci.yml` as a workflow an event starts and a callee, `ci.yml` focused. */
+  const planned = (): void =>
+    store.setState({
+      project: { status: 'ready', version: 1 },
+      plan: {
+        plan: {
+          workflows: [
+            { path: CI, depth: 0 },
+            { path: CALLEE, depth: 1 },
+          ],
+        },
+      } as unknown as PlanState,
+      focus: CI,
+    });
+
+  it('opens Copy as test case with c once there is a plan and a focused workflow an event starts', () => {
+    planned();
+    expect(press('c')).toBe(false);
+    expect(store.getState().caseOpen).toBe(true);
+  });
+
+  it('leaves c unhandled without a plan, without a focused workflow, or on a callee', () => {
+    expect(press('c')).toBe(true);
+    planned();
+    store.getState().setFocus(undefined);
+    expect(press('c')).toBe(true);
+    store.getState().setFocus(CALLEE);
+    expect(press('c')).toBe(true);
+    expect(store.getState().caseOpen).toBe(false);
+  });
+
+  it('leaves c unhandled while the author has turned the page keys off', () => {
+    planned();
+    store.getState().setPrefs({ keys: false });
+    expect(press('c')).toBe(true);
+    expect(store.getState().caseOpen).toBe(false);
+  });
+
+  it('leaves c to a field or an open dialog it is typed in', () => {
+    stop();
+    stop = installShortcuts(store);
+    planned();
+    document.body.innerHTML = `
+      <input id="input"><dialog open><button id="inside">Copy</button></dialog>
+      <div role="dialog"><button id="role">Copy</button></div>`;
+    /** Whether `c` typed at the element went on unhandled. */
+    const typed = (at: Element | null) =>
+      at?.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true, cancelable: true }));
+    const at = (id: string) => typed(document.getElementById(id));
+    expect(['input', 'inside', 'role'].map(at)).toEqual([true, true, true]);
+    expect(store.getState().caseOpen).toBe(false);
+    expect(typed(document.body)).toBe(false);
+    expect(store.getState().caseOpen).toBe(true);
+    document.body.innerHTML = '';
   });
 
   it('stops listening once stopped', () => {

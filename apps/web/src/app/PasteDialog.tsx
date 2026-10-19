@@ -1,5 +1,6 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { nextPastePath } from '../input/paste';
+import { useModal } from './modal';
 import { useApp, useSession } from './providers';
 
 /** A path and a buffer; several add up. The native dialog traps and returns focus. */
@@ -7,19 +8,10 @@ export function PasteDialog({ onClose }: { onClose: () => void }) {
   const { sources } = useApp();
   const source = useSession((s) => s.source);
   const taken = source.kind === 'paste' ? source.buffers.map((b) => b.path) : [];
-  const dialog = useRef<HTMLDialogElement>(null);
+  const dialog = useModal(onClose);
   const [path, setPath] = useState(() => nextPastePath(taken));
   const [text, setText] = useState('');
   const [reason, setReason] = useState<string | undefined>();
-
-  useEffect(() => {
-    const d = dialog.current;
-    if (!d) return undefined;
-    if (!d.open) d.showModal();
-    const close = (): void => onClose();
-    d.addEventListener('close', close);
-    return () => d.removeEventListener('close', close);
-  }, [onClose]);
 
   const submit = (e: FormEvent): void => {
     e.preventDefault();
@@ -71,7 +63,7 @@ export function PasteDialog({ onClose }: { onClose: () => void }) {
           >
             Cancel
           </button>
-          <button type="submit" className="rounded bg-accent px-3 py-1.5 text-sm text-white">
+          <button type="submit" className="rounded bg-accent px-3 py-1.5 text-on-accent text-sm">
             Add
           </button>
         </div>
