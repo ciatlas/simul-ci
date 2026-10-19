@@ -142,6 +142,43 @@ describe('ELK in the layout worker', () => {
     expect(layout.scopes['ci.yml']!.height).toBeGreaterThanOrEqual(card.height + CARD.scopePadding.top);
   });
 
+  it('lays out together the scopes whose callees have sizes, then their callers, as one at a time would', async () => {
+    const m = new Model()
+      .scope('one', ['build', 'sign'], [['build', 'sign']], { depth: 1, caller: 'a.yml#call' })
+      .scope('two', ['x'], [], { depth: 1, caller: 'b.yml#call' })
+      .scope('a.yml', ['call', 'after'], [['call', 'after']])
+      .calls('a.yml#call', 'one')
+      .scope('b.yml', ['lint', 'call'], [['lint', 'call']])
+      .calls('b.yml#call', 'two').model;
+    const request = createLayoutCache().plan(m, tableMetrics).request!;
+    expect(request.scopes.map((s) => s.id)).toEqual(['one', 'a.yml', 'two', 'b.yml']);
+    let running: string[] = [];
+    const starts: string[][] = [];
+    const watched: Pick<InstanceType<typeof ELK>, 'layout'> = {
+      layout: async (graph) => {
+        running.push(graph.id);
+        starts.push([...running]);
+        const laid = await elk.layout(graph);
+        running = running.filter((id) => id !== graph.id);
+        return laid;
+      },
+    };
+    const together = await answerLayout(watched, { id: 1, type: 'layout', ...request });
+    expect(starts).toEqual([['one'], ['one', 'two'], ['a.yml'], ['a.yml', 'b.yml']]);
+    if (together.type !== 'layout') throw new Error(together.message);
+
+    const known = { ...request.known };
+    const alone: Record<string, unknown> = {};
+    for (const scope of request.scopes) {
+      const r = await answerLayout(elk, { id: 1, type: 'layout', scopes: [scope], known });
+      if (r.type !== 'layout') throw new Error(r.message);
+      const laid = r.scopes[scope.id]!;
+      alone[scope.id] = laid;
+      known[scope.id] = { width: laid.width, height: laid.height };
+    }
+    expect(together.scopes).toEqual(alone);
+  });
+
   it('stacks the roots by plan order, an untriggered one collapsed in its slot and never laid out', async () => {
     const m = new Model()
       .scope('a.yml', ['one'])

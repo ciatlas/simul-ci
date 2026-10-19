@@ -59,7 +59,13 @@ export const ELK_OPTIONS: Record<string, string> = {
   'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
 };
 
-/** Lays each scope out in order; any failure answers the whole request with an error, so no partial picture lands. */
+/**
+ * Lays the scopes out a nesting level at a time: every scope whose callees have sizes together, then the scopes that
+ * call them. ELK's bundled build answers each call after two zero-delay timers, and Chromium holds a timer nested more
+ * than five deep to 4 ms, so scopes awaited one by one wait on the clock, not on ELK; the timers of one level run at
+ * once. Each scope is still its own ELK run, so its positions do not depend on what else the request holds. Any
+ * failure answers the whole request with an error, so no partial picture lands.
+ */
 export async function answerLayout(
   elk: Pick<ELK, 'layout'>,
   request: LayoutRequest,
@@ -67,16 +73,35 @@ export async function answerLayout(
   const start = performance.now();
   const sizes = new Map(Object.entries(request.known));
   const scopes: Record<NodeId, ScopeLayout> = {};
+  const layOut = async (scope: LayoutScope): Promise<void> => {
+    const laid = await layOutScope(elk, scope, sizes);
+    scopes[scope.id] = laid;
+    sizes.set(scope.id, { width: laid.width, height: laid.height });
+  };
   try {
-    for (const scope of request.scopes) {
-      const laid = await layOutScope(elk, scope, sizes);
-      scopes[scope.id] = laid;
-      sizes.set(scope.id, { width: laid.width, height: laid.height });
-    }
+    for (const level of nestingLevels(request.scopes)) await Promise.all(level.map(layOut));
   } catch (e) {
     return { id: request.id, type: 'error', message: e instanceof Error ? e.message : String(e) };
   }
   return { id: request.id, type: 'layout', scopes, ms: performance.now() - start };
+}
+
+/**
+ * The scopes by nesting level, in request order within each: a scope one level above the highest callee laid out
+ * earlier in the request, at the bottom when every callee is known (or missing, which `nodeSize` reports).
+ */
+function nestingLevels(scopes: readonly LayoutScope[]): LayoutScope[][] {
+  const levelOf = new Map<NodeId, number>();
+  const levels: LayoutScope[][] = [];
+  for (const scope of scopes) {
+    const level = Math.max(
+      0,
+      ...scope.nodes.map((n) => ('callee' in n ? (levelOf.get(n.callee) ?? -1) + 1 : 0)),
+    );
+    levelOf.set(scope.id, level);
+    (levels[level] ??= []).push(scope);
+  }
+  return levels;
 }
 
 async function layOutScope(
