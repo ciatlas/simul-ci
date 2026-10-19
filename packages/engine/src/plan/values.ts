@@ -1,4 +1,4 @@
-import type { UnknownId, Value } from './types';
+import type { Json, UnknownId, Value } from './types';
 
 /** A known value. */
 export const known = <T>(value: T, by?: string): Value<T> =>
@@ -45,4 +45,11 @@ function* product<T>(lists: readonly (readonly T[])[]): Generator<T[]> {
   }
   const [first, ...rest] = lists;
   for (const value of first!) for (const tail of product(rest)) yield [value, ...tail];
+}
+
+/** A value in GitHub's string form: `null` is empty, objects are JSON, the rest `String()`. */
+export function stringOf(value: Json): string {
+  if (value === null) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
 }

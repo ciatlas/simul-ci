@@ -1,4 +1,4 @@
-import { stringOf } from '../evaluate';
+import { stringOf } from './values';
 import {
   formatUnitPath,
   type PathSegment,

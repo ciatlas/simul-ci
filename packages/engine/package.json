@@ -5,6 +5,7 @@
   "description": "The simulci engine: scenario, run settings, triggers, mocks, planner and RunPlan.",
   "license": "MIT",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "source": "./src/index.ts",
@@ -13,6 +14,10 @@
     "./plan": {
       "source": "./src/plan/index.ts",
       "types": "./src/plan/index.ts"
+    },
+    "./render": {
+      "source": "./src/render/index.ts",
+      "types": "./src/render/index.ts"
     }
   },
   "scripts": {
