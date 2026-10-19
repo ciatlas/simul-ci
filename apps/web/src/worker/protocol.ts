@@ -193,6 +193,8 @@ export interface Derived {
   decidingIndex: Record<NodeId, number>;
   /** Where the deciding reason is written, when the plan or the outline knows. */
   decidingLoc: Record<NodeId, Loc>;
+  /** The needs whose results decided a job through its `if:` (worker/deciding.ts), for jobs that have any. */
+  decidingNeeds: Record<NodeId, NodeId[]>;
   unknownPaths: Record<UnknownId, string>;
 }
 

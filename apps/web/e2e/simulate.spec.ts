@@ -1,10 +1,13 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import type { ScenarioInput } from '@simulci/engine';
 
 /**
- * The run graph in a real browser, over the bundled starter sample: both workers run, the canvas tells each job's
- * run state as the text view tells it, a job picked on the canvas or in the outline is the URL's `sel` and the
- * selected card, the canvas keys walk the graph from a Tab into it and keep the focus on the card they move to, and
- * the viewport stays where the author put it.
+ * The run graph in a real browser, over the bundled starter sample: both workers run, the canvas and the text view
+ * tell each job's run state as the engine tells it in Node for the scenario the form built, a job picked on the
+ * canvas or in the outline is the URL's `sel` and the selected card, the canvas keys walk the graph from a Tab into
+ * it and keep the focus on the card they move to, and the viewport stays where the author put it.
  */
 
 const CI = '.github/workflows/ci.yml';
@@ -99,14 +102,35 @@ function textMarks(text: string): Record<string, string> {
   return marks;
 }
 
-/** The canvas's marks, then the text view's through the toggle, and back to the graph. */
-async function expectMarksMatchText(page: Page): Promise<Record<string, string>> {
+/**
+ * The starter's plan for a scenario as `simulci plan` prints it, computed in Node (e2e/node-plan.ts) by the engine's
+ * root entry, not by core's browser entry in the page's worker.
+ */
+function nodePlan(scenario: ScenarioInput): string {
+  const script = join(import.meta.dirname, 'node-plan.ts');
+  return execFileSync(
+    process.execPath,
+    ['--conditions=source', '--import', 'tsx', script, JSON.stringify(scenario)],
+    { cwd: import.meta.dirname, encoding: 'utf8' },
+  );
+}
+
+/** A plan's lines that hold something: the text view draws each line as a block, and innerText keeps no empty one. */
+const filled = (text: string): string[] => text.split('\n').filter((line) => line.trim() !== '');
+
+/**
+ * The canvas's marks, then the text view's through the toggle, and back to the graph: both are the marks of the plan
+ * Node computes for the scenario the form should have built, and the text view is that plan's text.
+ */
+async function expectMarksMatchNode(page: Page, scenario: ScenarioInput): Promise<Record<string, string>> {
+  const expected = nodePlan(scenario);
   const shown = await canvasMarks(page);
   await viewButton(page, 'Text').click();
   const text = await page.getByLabel('The plan').innerText();
   await viewButton(page, 'Graph').click();
   await expect(jobNode(page, 'deploy')).toBeVisible();
-  expect(shown).toEqual(textMarks(text));
+  expect(shown).toEqual(textMarks(expected));
+  expect(filled(text)).toEqual(filled(expected));
   return shown;
 }
 
@@ -118,18 +142,23 @@ async function expectSelected(page: Page, job: string): Promise<void> {
   await expect(treeItem(page, job)).toHaveAttribute('aria-selected', 'true');
 }
 
-test('every job card shows the mark the text view gives that job, for the default scenario and a changed file', async ({
+test('each job card shows the mark the engine in Node gives the job, for the default scenario and a changed file', async ({
   page,
 }) => {
   await openStarter(page);
-  const first = await expectMarksMatchText(page);
+  // The starter's default: a push to the branch CI's push filter names.
+  const first = await expectMarksMatchNode(page, { event: 'push', branch: 'main' });
   expect(Object.keys(first)).toHaveLength(4);
   expect(new Set(Object.values(first))).toEqual(new Set(['◐', '○']));
 
   // A changed source file passes CI's paths-ignore: the workflow runs, and test with it.
   await page.getByLabel(/^Changed files/).fill('src/index.ts');
   await expect(workflowNode(page)).toHaveAttribute('aria-label', /^runs CI/);
-  const second = await expectMarksMatchText(page);
+  const second = await expectMarksMatchNode(page, {
+    event: 'push',
+    branch: 'main',
+    changed: ['src/index.ts'],
+  });
   expect(second[`${CI}#test`]).toBe('●');
 });
 
@@ -150,6 +179,12 @@ test('a job picked on the canvas or in the outline becomes sel in the URL and th
   await treeItem(page, 'deploy').click();
   await expectSelected(page, 'deploy');
   await expect(jobNode(page, 'test')).not.toHaveClass(SELECTED);
+
+  // Another sample is new files: their default workflow, and nothing selected in it.
+  await page.getByLabel('Sample').selectOption('monorepo');
+  await expect(jobNode(page, 'gate')).toBeVisible();
+  await expect.poll(() => sel(page)).toBeNull();
+  await expect(workflowNode(page)).toHaveClass(SELECTED);
 });
 
 test('the keys walk the graph from a Tab into it: Enter goes in, ↓ to the next job, Esc back out', async ({

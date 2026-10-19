@@ -1,5 +1,6 @@
 export { stringOf } from './plan/values';
 import {
+  type ContextResolver,
   definitelyFalsy,
   definitelyTruthy,
   type EvaluateOptions,
@@ -7,9 +8,10 @@ import {
   evaluate,
   evaluateTemplate,
   findTemplateSegments,
+  type ParsedExpression,
   parseExpression,
 } from '@ciatlas/core';
-import { type ContextState, contextResolver, lookupContext } from './contexts';
+import { type ContextState, contextResolver, lookupContext, toEvalValue } from './contexts';
 import type { IfReason, Json, Value } from './plan/types';
 import { known, stringOf, unknown } from './plan/values';
 import { UNKNOWN_MARKER } from './script-outputs';
@@ -29,19 +31,50 @@ export interface Condition {
 export function evaluateCondition(text: string, state: ContextState, status: StatusAnswers): Condition {
   const parsed = parseExpression(text);
   const reads: IfReason['reads'] = parsed.refs.map((ref) => ({
-    ref: `${ref.context}${ref.path.length ? `.${ref.path.join('.')}` : ''}`,
+    ref: refName(ref),
     value: ref.dynamic ? unknown([`${ref.context}.${ref.path.join('.')}`]) : lookupContext(state, ref),
   }));
-  if (!parsed.ast) return { value: unknown([`expression:${text}`], [true, false]), reads };
+  return { value: conditionValue(parsed, contextResolver(state), status, reads), reads };
+}
+
+/**
+ * A condition evaluated again from the reads its reason recorded instead of the contexts, under the status answers
+ * given: what the same `if:` says had the needs ended otherwise. A reference the reads do not name, such as one under
+ * a `*` or a computed index, is unknown here.
+ */
+export function evaluateFromReads(
+  text: string,
+  reads: IfReason['reads'],
+  status: StatusAnswers,
+): Value<boolean> {
+  const values = new Map(reads.map((r) => [r.ref, r.value]));
+  const resolve: ContextResolver = (ref) => {
+    const value = values.get(refName(ref));
+    return value && toEvalValue(value);
+  };
+  return conditionValue(parseExpression(text), resolve, status, reads);
+}
+
+/** A reference as a read names it: `needs.build.result`, `github`. */
+const refName = (ref: { context: string; path: string[] }): string =>
+  `${ref.context}${ref.path.length ? `.${ref.path.join('.')}` : ''}`;
+
+/** Known true, known false, or unknown because of the reads and status answers it could not decide over. */
+function conditionValue(
+  parsed: ParsedExpression,
+  resolve: ContextResolver,
+  status: StatusAnswers,
+  reads: IfReason['reads'],
+): Value<boolean> {
+  if (!parsed.ast) return unknown([`expression:${parsed.source}`], [true, false]);
   const options: EvaluateOptions = { runtime: (name) => statusAnswer(status, name) };
-  const resolve = contextResolver(state);
-  if (definitelyTruthy(parsed.ast, resolve, options)) return { value: known(true), reads };
-  if (definitelyFalsy(parsed.ast, resolve, options)) return { value: known(false), reads };
+  if (definitelyTruthy(parsed.ast, resolve, options)) return known(true);
+  if (definitelyFalsy(parsed.ast, resolve, options)) return known(false);
   const unknowns = [
     ...reads.flatMap((r) => (r.value.known ? [] : r.value.unknowns)),
     ...Object.values(status).flatMap((s) => (s.known ? [] : s.unknowns)),
   ];
-  return { value: unknown(unknowns.length ? unknowns : [`expression:${text}`], [true, false]), reads };
+  return unknown(unknowns.length ? unknowns : [`expression:${parsed.source}`], [true, false]);
 }
 
 /** The status functions as core's evaluator asks for them; an unknown answer leaves the call unknown. */

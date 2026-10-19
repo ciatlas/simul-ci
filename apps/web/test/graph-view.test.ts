@@ -4,14 +4,14 @@ import { doubleClickZoom, mountView } from '../src/graph/view';
 const LIMITS = { min: 0.2, max: 2 };
 
 describe('where the viewport starts', () => {
-  it('fits the first picture of a project, and of every project loaded after it', () => {
+  it('fits the first picture of the files loaded, and of all files loaded after them', () => {
     expect(mountView(undefined, 1)).toEqual({ fit: true });
-    expect(mountView({ project: 1, viewport: { x: 10, y: 20, zoom: 0.8 } }, 2)).toEqual({ fit: true });
+    expect(mountView({ files: 1, viewport: { x: 10, y: 20, zoom: 0.8 } }, 2)).toEqual({ fit: true });
   });
 
-  it('opens a picture of the same project where the author left it', () => {
+  it('opens a picture of the same files where the author left it', () => {
     const viewport = { x: -120, y: 40, zoom: 1.5 };
-    expect(mountView({ project: 3, viewport }, 3)).toEqual({ fit: false, viewport });
+    expect(mountView({ files: 3, viewport }, 3)).toEqual({ fit: false, viewport });
   });
 });
 

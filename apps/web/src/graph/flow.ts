@@ -279,18 +279,27 @@ type Navigate = (
 
 /**
  * What a key press on the canvas asks for, when it is the canvas's and a picture is on it. It acts from the
- * selection, or from the focused card when that card does not hold the selection (the URL moved it meanwhile).
+ * selection, or from the focused card when that card does not hold the selection (the URL moved it meanwhile), but
+ * not while the keys are still moving the focus to the card they selected (`moving`): the focus follows a frame
+ * later, and a key pressed before then goes on from the selection.
  */
 export function keyAction(
   e: KeyPress,
   navigate: Navigate,
   selected: NodeId | undefined,
   graph: { model: GraphModel; layout: GraphLayout } | undefined,
+  moving?: NodeId,
 ): NavAction | undefined {
   if (!graph || !canvasKey(e)) return undefined;
   const focused = nodeIdOf(e.target);
-  const at = focused === undefined || holder(graph.model, selected) === focused ? selected : focused;
-  return navigate({ key: e.key, altKey: e.altKey }, at, graph.model, graph.layout);
+  const fromFocus =
+    focused !== undefined && moving === undefined && holder(graph.model, selected) !== focused;
+  return navigate(
+    { key: e.key, altKey: e.altKey },
+    fromFocus ? focused : selected,
+    graph.model,
+    graph.layout,
+  );
 }
 
 /** The card that holds a selection: the node itself, or the job card a leg or a step is in. */

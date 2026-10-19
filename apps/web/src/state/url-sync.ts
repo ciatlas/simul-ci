@@ -99,12 +99,12 @@ export function pageDefault(s: Pick<SessionState, 'project'>): DefaultScenario {
   return outline ? defaultScenario(outline) : { scenario: initialSessionState().scenario, assumed: [] };
 }
 
-/** Puts back the page's own scenario and the focus that goes with it, as a load does. */
+/** Puts back the page's own scenario and the focus that goes with it, nothing selected in it, as a load does. */
 export function restoreDefault(store: SessionStore): void {
   const s = store.getState();
   const d = pageDefault(s);
   s.setScenario(d.scenario, { assumed: d.assumed, from: 'default' });
-  s.setFocus(d.focus);
+  s.select(d.focus, undefined);
 }
 
 type Session = SessionState & SessionActions;

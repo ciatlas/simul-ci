@@ -1,5 +1,4 @@
 import type {
-  IfReason,
   JobPlan,
   Json,
   LegPlan,
@@ -180,17 +179,16 @@ const brief = (v: Value<Json>): string => (v.known ? formatValue(v) : '?');
 function edgesOf(derived: Derived, wf: WorkflowPlan): EdgeModel[] {
   const byId = new Map(wf.jobs.map((job) => [job.id, job]));
   return wf.jobs.flatMap((target) => {
-    const decided = decidedByNeeds(derived, target);
+    const deciding = derived.decidingNeeds[target.id] ?? [];
     return target.needs.flatMap((need) => {
       const source = byId.get(need);
-      return source ? [edgeOf(source, target, decided)] : [];
+      return source ? [edgeOf(source, target, deciding.includes(need))] : [];
     });
   });
 }
 
-/** The edge from a needed job: deciding when the target's `if:` turned on its needs and this one did not succeed. */
-function edgeOf(source: JobPlan, target: JobPlan, ifOnNeeds: boolean): EdgeModel {
-  const deciding = ifOnNeeds && !knownSuccess(source.result);
+/** The edge from a needed job, labelled with the result that decided the target when it did (worker/deciding.ts). */
+function edgeOf(source: JobPlan, target: JobPlan, deciding: boolean): EdgeModel {
   const edge: EdgeModel = {
     id: `${source.id}->${target.id}`,
     source: source.id,
@@ -201,25 +199,6 @@ function edgeOf(source: JobPlan, target: JobPlan, ifOnNeeds: boolean): EdgeModel
   if (deciding) edge.label = `result: ${source.result.known ? source.result.value : '?'}`;
   return edge;
 }
-
-/**
- * The job's `if:` turned on its needs: it reads `success()` (the implicit one or one written out), the status is not
- * a known success, and a success could have changed the answer. A known status that is not success makes `success()`
- * false; an unknown one decides only while the answer is unknown too, since `success() && false` is false whatever
- * the needs do. An answer that is true needed nothing from them.
- */
-function decidedByNeeds(derived: Derived, job: JobPlan): boolean {
-  const reason = job.runs.chain[derived.decidingIndex[job.id] ?? -1];
-  if (reason?.kind !== 'if' || !readsSuccess(reason) || knownSuccess(reason.status)) return false;
-  if (reason.value.known) return !reason.value.value && reason.status.known;
-  return true;
-}
-
-/** `success()` in the condition as GitHub evaluates it, the text of its string literals aside. */
-const readsSuccess = (reason: IfReason): boolean =>
-  /\bsuccess\(\s*\)/.test(reason.evaluated.replace(/'(?:[^']|'')*'/g, "''"));
-
-const knownSuccess = (v: Value<Result>): boolean => v.known && v.value === 'success';
 
 /** The object without its undefined keys: an optional field the plan does not have is absent, not `undefined`. */
 function compact<T extends object>(o: T): T {

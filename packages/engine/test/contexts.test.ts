@@ -1,6 +1,7 @@
 import {
   type ContextState,
   evaluateCondition,
+  evaluateFromReads,
   jobStatusFunctions,
   known,
   lookupContext,
@@ -164,6 +165,39 @@ describe('evaluateCondition', () => {
   it('is unknown for an expression it cannot parse', () => {
     expect(evaluateCondition('success() && (github.ref ==', state(), okNeeds).value).toEqual(
       unknown(['expression:success() && (github.ref =='], [true, false]),
+    );
+  });
+});
+
+describe('evaluateFromReads', () => {
+  const okNeeds = jobStatusFunctions([known('success')]);
+  const skipped = jobStatusFunctions([known('skipped')]);
+
+  it('answers a condition again from the reads it recorded, under other status answers or other reads', () => {
+    const text = "success() && github.event_name == 'pull_request'";
+    const { value, reads } = evaluateCondition(text, state(), skipped);
+    expect(value).toEqual(known(false));
+    expect(evaluateFromReads(text, reads, skipped)).toEqual(known(false));
+    expect(evaluateFromReads(text, reads, okNeeds)).toEqual(known(true));
+    expect(evaluateFromReads(text, [{ ref: 'github.event_name', value: known('push') }], okNeeds)).toEqual(
+      known(false),
+    );
+    expect(evaluateFromReads(text, [{ ref: 'github.event_name', value: unknown(['e']) }], okNeeds)).toEqual(
+      unknown(['e'], [true, false]),
+    );
+  });
+
+  it('calls the status functions however they are written', () => {
+    expect(evaluateFromReads('Success()', [], okNeeds)).toEqual(known(true));
+    expect(evaluateFromReads('success ()', [], skipped)).toEqual(known(false));
+  });
+
+  it('is unknown for a reference the reads do not name and for an expression it cannot parse', () => {
+    expect(evaluateFromReads("success() && github.actor == 'me'", [], okNeeds)).toEqual(
+      unknown(["expression:success() && github.actor == 'me'"], [true, false]),
+    );
+    expect(evaluateFromReads('success() &&', [], okNeeds)).toEqual(
+      unknown(['expression:success() &&'], [true, false]),
     );
   });
 });

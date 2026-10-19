@@ -318,18 +318,19 @@ describe("the page's own scenario", () => {
     expect(pageDefault(store.getState())).toEqual(defaultScenario(outline));
   });
 
-  it('comes back with its marks and its focus', () => {
+  it('comes back with its marks and its focus, and nothing selected in it', () => {
     const store = createSessionStore();
     store.getState().projectReady(1, outline, 1);
     store.getState().setScenario({ event: 'boom' }, { from: 'url' });
-    store.getState().setFocus(undefined);
+    store.getState().select(undefined, 'build');
     restoreDefault(store);
     const s = store.getState();
-    expect([s.scenario, s.scenarioFrom, s.assumed, s.focus]).toEqual([
+    expect([s.scenario, s.scenarioFrom, s.assumed, s.focus, s.sel]).toEqual([
       { event: 'push', branch: 'main' },
       'default',
       ['event', 'branch'],
       CI,
+      undefined,
     ]);
   });
 });

@@ -32,7 +32,7 @@ import { createSessionStore, initialSessionState, type PlanState } from '../src/
  */
 const fake = vi.hoisted(() => ({
   paths: {} as Record<string, string>,
-  nav: { answer: undefined as object | undefined, asked: [] as string[] },
+  nav: { answer: undefined as object | undefined, asked: [] as string[], from: [] as (string | undefined)[] },
   node: (id: string) =>
     id.includes('[') ? { id, kind: 'leg', parent: id.slice(0, id.indexOf('[')) } : { id },
 }));
@@ -44,8 +44,9 @@ vi.mock('../src/plan/index', () => ({
 }));
 vi.mock('../src/graph/navigate', async (original) => ({
   ...(await original<typeof import('../src/graph/navigate')>()),
-  createNavigator: () => (key: { key: string }) => {
+  createNavigator: () => (key: { key: string }, at: string | undefined) => {
     fake.nav.asked.push(key.key);
+    fake.nav.from.push(at);
     return fake.nav.answer;
   },
 }));
@@ -163,6 +164,7 @@ afterEach(() => {
   cleanup();
   fake.nav.answer = undefined;
   fake.nav.asked.length = 0;
+  fake.nav.from.length = 0;
 });
 
 describe('a job card', () => {
@@ -490,6 +492,27 @@ describe('the canvas', () => {
     expect(fake.nav.asked).toEqual([' ', 'ArrowRight']);
   });
 
+  it('goes on from the card a key selected when the next key comes before the focus has followed', async () => {
+    const store = mountCanvas({ [BUILD]: 'build', [TEST]: 'test' });
+    const build = card('runs build');
+    fireEvent.focus(build);
+    expect(store.getState().sel).toBe('build');
+    fake.nav.answer = { select: TEST };
+    fireEvent.keyDown(build, { key: 'ArrowRight' });
+    expect(store.getState().sel).toBe('test');
+    fake.nav.answer = undefined;
+    // The focus is still on build: the card the keys moved to has it only from the next frame.
+    fireEvent.keyDown(build, { key: 'ArrowDown' });
+    expect(fake.nav.from).toEqual([BUILD, TEST]);
+    await frames();
+    expect(document.activeElement).toBe(card('runs test, needs build'));
+    fireEvent.keyDown(card('runs test, needs build'), { key: 'ArrowDown' });
+    act(() => store.getState().select(CI, 'build'));
+    // Once the focus has followed, a card that lost the selection to the URL is where the keys act from.
+    fireEvent.keyDown(card('runs test, needs build'), { key: 'ArrowDown' });
+    expect(fake.nav.from).toEqual([BUILD, TEST, TEST, TEST]);
+  });
+
   it('registers the viewport commands while it is mounted, and takes them back after', () => {
     const register = vi.spyOn(viewport, 'register');
     const { unmount } = render(withApp(storeOf({}, { graph: graphOf() }), <Canvas />));
@@ -517,7 +540,7 @@ describe('the canvas', () => {
     expect(transform()).not.toBe(ORIGIN);
   });
 
-  it('opens a picture mounted again where it was left, and fits a newly loaded project', async () => {
+  it('opens a picture mounted again where it was left, and fits newly loaded files', async () => {
     vi.stubGlobal('matchMedia', () => ({ matches: true }));
     try {
       const store = storeOf({}, { graph: graphOf() });
@@ -529,6 +552,10 @@ describe('the canvas', () => {
       expect(moved).not.toBe(fitted);
       first.unmount();
       render(withApp(store, <Canvas />));
+      await frames();
+      expect(transform()).toBe(moved);
+      // A restarted engine numbers the same files' project afresh: the picture stays where it was.
+      act(() => store.getState().graphReady({ ...graphOf(), for: { files: 1, project: 2 } }));
       await frames();
       expect(transform()).toBe(moved);
       act(() => store.getState().graphReady({ ...graphOf(), for: { files: 2, project: 2 } }));

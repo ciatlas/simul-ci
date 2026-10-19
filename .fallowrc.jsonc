@@ -7,6 +7,8 @@
     "scripts/*.ts",
     // Loaded by apps/web/index.html before the app's own module.
     "apps/web/public/*.js",
+    // Run in Node by the browser pass (apps/web/e2e/simulate.spec.ts), for the plan it checks the page against.
+    "apps/web/e2e/node-plan.ts",
   ],
   // Vite serves apps/web/public at the site root, where index.html asks for it.
   "ignoreUnresolvedImports": ["/theme.js"],

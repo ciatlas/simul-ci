@@ -465,6 +465,19 @@ describe('the canvas glue', () => {
     expect(at).toEqual([j('test'), `${j('test')}/steps.run`, j('deploy')]);
   });
 
+  it('acts from the selection while the keys are still moving the focus to the card they selected', () => {
+    const { model, layout } = picture();
+    const at: unknown[] = [];
+    const navigate = (_: unknown, from: unknown) => {
+      at.push(from);
+      return undefined;
+    };
+    const key = { key: 'ArrowDown', altKey: false, ctrlKey: false, metaKey: false, target: cardElement(CI) };
+    keyAction(key, navigate, j('test'), { model, layout }, j('test'));
+    keyAction(key, navigate, j('test'), { model, layout });
+    expect(at).toEqual([j('test'), CI]);
+  });
+
   it('reads the node a React Flow node element is, and none from anything inside it', () => {
     expect(nodeIdOf(cardElement(j('test')))).toBe(j('test'));
     expect(nodeIdOf({ classList: { contains: () => false }, getAttribute: () => j('test') })).toBeUndefined();

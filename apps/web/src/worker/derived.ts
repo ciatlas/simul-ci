@@ -14,6 +14,7 @@ import {
   unitPaths,
   type WorkflowPlan,
 } from '@simulci/engine';
+import { decidingNeeds } from './deciding';
 import type { Derived, Outline, OutlineEvent } from './protocol';
 
 /** The lookups the UI needs over a plan, computed here with the engine's own functions. */
@@ -24,6 +25,7 @@ export function deriveTables(plan: RunPlan, outline: Outline): Derived {
     clauses: {},
     decidingIndex: {},
     decidingLoc: {},
+    decidingNeeds: {},
     unknownPaths: {},
   };
   const paths = new Map<NodeId, string>();
@@ -62,6 +64,8 @@ function walkWorkflow(wf: WorkflowPlan, outline: Outline, d: Derived, parentLoc:
 function walkJob(job: JobPlan, wf: WorkflowPlan, outline: Outline, d: Derived): void {
   const loc = decisionLoc(job.runs, d.decidingLoc[wf.id], job.loc);
   record(d, job.id, 'job', job.runs, loc);
+  const needs = decidingNeeds(job, wf);
+  if (needs.length) d.decidingNeeds[job.id] = needs;
   for (const leg of job.legs) walkLeg(leg, job, wf, outline, d);
 }
 

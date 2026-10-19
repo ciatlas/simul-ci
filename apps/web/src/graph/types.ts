@@ -97,8 +97,9 @@ export interface EdgeModel {
   /** The verdict of the needed job: a skipped source fades the edge, a might-run one dashes it. */
   from: Tri;
   /**
-   * The need decided the target's verdict through its `if:`: the condition reads `success()`, implicit or written,
-   * over a status a success of this need could change, and its result is not a known success (model.ts).
+   * The need decided the target's verdict through its `if:` (worker/deciding.ts): the verdict would differ had the
+   * needs succeeded, and this need is one that kept them from it, known not to succeed or, while none is known,
+   * only the run knows.
    */
   deciding: boolean;
   /** For a deciding edge: `result: failure`, `result: ?`. */

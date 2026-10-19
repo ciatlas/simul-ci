@@ -53,9 +53,10 @@ import './canvas.css';
  * The run graph: the committed picture from the store as React Flow nodes, the selection from the URL's `sel`
  * resolved against the plan and written back through `select`. Nothing is draggable or connectable; the canvas
  * keys are ours (graph/navigate.ts) and React Flow's own are switched off where they would clash (Space pans,
- * Shift and Meta select). The first picture of a project is fitted once; after that the viewport moves only when
- * the author asks, and a picture mounted again opens where it was left. Every node stays mounted (the node count is
- * bounded by workflows and jobs, never legs or steps), so the card with the focus never leaves the page under it.
+ * Shift and Meta select). The first picture of the files loaded is fitted once; after that the viewport moves only
+ * when the author asks, and a picture mounted again opens where it was left. Every node stays mounted (the node
+ * count is bounded by workflows and jobs, never legs or steps), so the card with the focus never leaves the page
+ * under it.
  */
 
 const NODE_TYPES = { workflow: WorkflowNode, job: JobNode };
@@ -120,8 +121,8 @@ function Flow() {
   graphRef.current = graph;
   const rf = useReactFlow<FlowNode, NeedsFlowEdge>();
   useViewportCommands(rf, graphRef);
-  // A new project is a new picture: it mounts afresh and is fitted.
-  return graph ? <Picture key={graph.for.project} graph={graph} graphRef={graphRef} /> : <Waiting />;
+  // New files are a new picture: it mounts afresh and is fitted. The project a restart numbers anew is not one.
+  return graph ? <Picture key={graph.for.files} graph={graph} graphRef={graphRef} /> : <Waiting />;
 }
 
 /** The committed picture with the selection and the hovered node on it. */
@@ -136,7 +137,7 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
   const placed = useRef<NodeId>(undefined);
   const act = useMemo(() => cardActions(store), [store]);
   const flow = useFlow(graph, selected, hovered);
-  const start = useStartView(store, graph.for.project);
+  const start = useStartView(store, graph.for.files);
   const onKeyDown = useCanvasKeys(store, { wrapper, placed }, graphRef, selected);
   const onFocus = useCardFocus(store, graphRef, placed);
   const onDoubleClick = useDoubleClickZoom();
@@ -192,22 +193,22 @@ const duration = (): number =>
  * by an effect until it has run, so StrictMode's second mount, whose reset drops a fit React Flow had queued, asks
  * again. Moves are kept once the start is done, so a picture unmounted before its fit is fitted next time.
  */
-function useStartView(store: SessionStore, project: number): { view: MountView; onMove: OnMove } {
+function useStartView(store: SessionStore, files: number): { view: MountView; onMove: OnMove } {
   const rf = useReactFlow<FlowNode, NeedsFlowEdge>();
-  const [view] = useState(() => mountView(memory.get(store), project));
+  const [view] = useState(() => mountView(memory.get(store), files));
   const started = useRef(!view.fit);
   useEffect(() => {
     if (started.current) return;
     void rf.fitView(FIT).then(() => {
       started.current = true;
-      memory.set(store, { project, viewport: rf.getViewport() });
+      memory.set(store, { files, viewport: rf.getViewport() });
     });
-  }, [rf, store, project]);
+  }, [rf, store, files]);
   const onMove = useCallback<OnMove>(
     (_, at) => {
-      if (started.current) memory.set(store, { project, viewport: at });
+      if (started.current) memory.set(store, { files, viewport: at });
     },
-    [store, project],
+    [store, files],
   );
   return { view, onMove };
 }
@@ -248,35 +249,45 @@ interface FocusRefs {
   placed: RefObject<NodeId | undefined>;
 }
 
-/** The canvas keys on the wrapper: `navigate()` answers, with the last needs edge remembered for Alt to cycle. */
+/**
+ * The canvas keys on the wrapper: `navigate()` answers, with the last needs edge remembered for Alt to cycle, and the
+ * card the keys are moving the focus to until it has it.
+ */
 function useCanvasKeys(
   store: SessionStore,
   refs: FocusRefs,
   graph: RefObject<GraphState | undefined>,
   selected: NodeId | undefined,
 ): (e: KeyboardEvent<HTMLDivElement>) => void {
-  const effects = useNavEffects(store, refs, graph);
+  const moving = useRef<NodeId>(undefined);
+  const effects = useNavEffects(store, refs, graph, moving);
   const [navigate] = useState(createNavigator);
   return (e) => {
-    const action = keyAction(e, navigate, selected, graph.current);
+    const action = keyAction(e, navigate, selected, graph.current, moving.current);
     if (!action) return;
     e.preventDefault();
     runNav(action, effects);
   };
 }
 
-/** What the canvas keys do: a keyboard selection also brings its card into view and gives it the focus. */
+/**
+ * What the canvas keys do: a keyboard selection also brings its card into view and gives it the focus in the next
+ * frame. Until then the card is `moving`, so a key pressed meanwhile goes on from the selection.
+ */
 function useNavEffects(
   store: SessionStore,
   { wrapper, placed }: FocusRefs,
   graph: RefObject<GraphState | undefined>,
+  moving: RefObject<NodeId | undefined>,
 ): NavEffects {
   return useMemo(() => {
     const act = cardActions(store);
     const focusCard = (id: NodeId): void => {
       const card = graph.current && cardOf(graph.current.model, id);
       if (card === undefined) return;
+      moving.current = card;
       requestAnimationFrame(() => {
+        if (moving.current === card) moving.current = undefined;
         const el = wrapper.current?.querySelector<HTMLElement>(
           `.react-flow__node[data-id="${CSS.escape(card)}"]`,
         );
@@ -301,7 +312,7 @@ function useNavEffects(
         if (active instanceof HTMLElement && wrapper.current?.contains(active)) active.blur();
       },
     };
-  }, [store, wrapper, placed, graph]);
+  }, [store, wrapper, placed, moving, graph]);
 }
 
 /** Focus on a card from anywhere but the canvas keys selects it, and from the keyboard brings it into view. */

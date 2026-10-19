@@ -18,16 +18,16 @@ const dist = process.argv[2] ?? 'apps/web/dist';
 const assets = join(dist, 'assets');
 
 /**
- * Gzip budgets in kB, 15 % above the figures measured when the budget was set (with the run graph), rounded up;
- * raise them on purpose.
+ * Gzip budgets in kB, 15 % above the figures measured when the budget was set (the run graph over the scenario
+ * form), rounded up; raise them on purpose.
  */
 const BUDGETS = [
-  // The engine, @ciatlas/core, yaml, zod and @actions/*: 149.1 kB measured.
+  // The engine, @ciatlas/core, yaml, zod and @actions/*: 149.4 kB measured.
   { name: 'the engine worker', test: (f) => f.startsWith('engine.worker-'), kB: 172 },
   // elkjs: 428.5 kB measured.
   { name: 'the layout worker', test: (f) => f.startsWith('layout.worker-'), kB: 493 },
-  // React, the router, React Flow and its d3 modules: 177.4 kB measured.
-  { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 205 },
+  // React, the router, React Flow and its d3 modules, Base UI and the scenario form: 192.5 kB measured.
+  { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 222 },
 ];
 
 const problems = [];

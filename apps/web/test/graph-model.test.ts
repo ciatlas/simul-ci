@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ScenarioInput } from '@simulci/engine';
+import type { AssumeEntry, ScenarioInput } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 import { graphModel } from '../src/graph/model';
 import { shapeHash } from '../src/graph/shape';
@@ -24,6 +24,7 @@ function modelOf(
   files: Record<string, string>,
   scenario: ScenarioInput,
   ui: Partial<GraphUi> = {},
+  assume: AssumeEntry[] = [],
 ): GraphModel {
   const loaded = handle(initialState(), { id: 1, type: 'load', files, repository: 'o/r' });
   const r = handle(loaded.state, {
@@ -31,7 +32,7 @@ function modelOf(
     type: 'simulate',
     project: 1,
     scenario,
-    assume: [],
+    assume,
     detail: 'steps',
   });
   if (r.response.type !== 'plan') throw new Error(JSON.stringify(r.response));
@@ -43,6 +44,17 @@ const release = '.github/workflows/release.yml';
 const push: ScenarioInput = { event: 'push', branch: 'main' };
 const pushSrc: ScenarioInput = { ...push, changed: ['src/a.ts'] };
 const shapes = (m: GraphModel) => Object.fromEntries(Object.values(m.scopes).map((s) => [s.id, s.shape]));
+
+/** A workflow on push of one-step jobs, each with the extra lines given (`needs:`, `if:`). */
+function workflow(jobs: Record<string, string[]>): string {
+  const lines = ['on: push', 'jobs:'];
+  for (const [id, extra] of Object.entries(jobs)) {
+    lines.push(`  ${id}:`);
+    for (const line of extra) lines.push(`    ${line}`);
+    lines.push('    runs-on: ubuntu-latest', '    steps:', `      - run: ${id}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
 
 describe('the graph model', () => {
   it('stacks the depth-0 workflows in plan order, untriggered ones collapsed in place or left out', () => {
@@ -299,9 +311,97 @@ describe('the graph model', () => {
     expect(preview).toMatchObject({ from: 'maybe', deciding: false });
     expect(preview.label).toBeUndefined();
     // A pull request: deploy's `if:` is false for the event, and assuming its needs succeed would not change it.
-    const pr = modelOf(starter, { event: 'pull_request', base: 'main', changed: ['src/a.ts'] });
+    const scenario: ScenarioInput = { event: 'pull_request', base: 'main', changed: ['src/a.ts'] };
+    const pr = modelOf(starter, scenario);
     expect(pr.jobs[`${ci}#deploy`]).toMatchObject({ verdict: 'no' });
     expect(pr.scopes[ci]!.edges.filter((e) => e.deciding)).toEqual([]);
+    // Nor once a test leg of an opened pull request is known to fail: deploy stays false for the event whatever
+    // test and build did, while build, and preview after it, would have run had their needs succeeded.
+    const failed = modelOf(starter, { ...scenario, action: 'opened' }, {}, [
+      { step: 'test[node=22].#4', outcome: 'failure' },
+    ]);
+    expect(failed.jobs[`${ci}#deploy`]).toMatchObject({ verdict: 'no' });
+    expect(failed.scopes[ci]!.edges.filter((e) => e.deciding).map((e) => [e.id, e.label])).toEqual([
+      [`${ci}#test->${ci}#build`, 'result: failure'],
+      [`${ci}#build->${ci}#preview`, 'result: skipped'],
+    ]);
+  });
+
+  it('draws no deciding edge from a skipped need to a job whose `if:` is false for the event anyway', () => {
+    const m = modelOf(
+      {
+        [ci]: workflow({
+          a: ['if: false'],
+          b: ['needs: a', "if: github.event_name == 'pull_request'"],
+          c: ['needs: a', "if: github.event_name == 'push'"],
+        }),
+      },
+      push,
+    );
+    expect(m.jobs[`${ci}#b`]).toMatchObject({ verdict: 'no' });
+    expect(m.scopes[ci]!.edges.map((e) => [e.target, e.deciding, e.label])).toEqual([
+      [`${ci}#b`, false, undefined],
+      [`${ci}#c`, true, 'result: skipped'],
+    ]);
+  });
+
+  it('reads the status functions as GitHub does, in any case and with a space before the parentheses', () => {
+    const m = modelOf(
+      {
+        [ci]: workflow({
+          a: ['if: false'],
+          b: ['needs: a', 'if: Success()'],
+          c: ['needs: a', "if: success () && github.event_name == 'push'"],
+        }),
+      },
+      push,
+    );
+    expect(m.jobs[`${ci}#b`]).toMatchObject({ verdict: 'no' });
+    expect(m.jobs[`${ci}#c`]).toMatchObject({ verdict: 'no' });
+    expect(m.scopes[ci]!.edges.map((e) => [e.target, e.deciding, e.label])).toEqual([
+      [`${ci}#b`, true, 'result: skipped'],
+      [`${ci}#c`, true, 'result: skipped'],
+    ]);
+  });
+
+  it('draws a need only the run knows as deciding only while no other need is known not to succeed', () => {
+    const files = {
+      [ci]: workflow({
+        a: [],
+        u: ["if: github.actor == 'me'"],
+        b: ['needs: [a, u]'],
+      }),
+    };
+    const open = modelOf(files, push);
+    expect(open.jobs[`${ci}#b`]).toMatchObject({ verdict: 'maybe' });
+    expect(open.scopes[ci]!.edges.map((e) => [e.source, e.deciding, e.label])).toEqual([
+      [`${ci}#a`, false, undefined],
+      [`${ci}#u`, true, 'result: ?'],
+    ]);
+    // a's failure keeps success() false whatever u does: u's result can no longer change b's answer.
+    const failed = modelOf(files, push, {}, [{ job: 'a', outcome: 'failure' }]);
+    expect(failed.jobs[`${ci}#b`]).toMatchObject({ verdict: 'no' });
+    expect(failed.scopes[ci]!.edges.map((e) => [e.source, e.deciding, e.label])).toEqual([
+      [`${ci}#a`, true, 'result: failure'],
+      [`${ci}#u`, false, undefined],
+    ]);
+  });
+
+  it('reads a need’s result where the condition names it, as the status functions read it', () => {
+    const m = modelOf(
+      {
+        [ci]: workflow({
+          a: ['if: false'],
+          b: ['needs: a', "if: always() && needs.a.result == 'success'"],
+          c: ['needs: a', 'if: always() && github.ref_name'],
+        }),
+      },
+      push,
+    );
+    expect(m.scopes[ci]!.edges.map((e) => [e.target, e.deciding, e.label])).toEqual([
+      [`${ci}#b`, true, 'result: skipped'],
+      [`${ci}#c`, false, undefined],
+    ]);
   });
 
   it('labels a deciding need `result: ?` while the answer waits on a result only the run knows', () => {
