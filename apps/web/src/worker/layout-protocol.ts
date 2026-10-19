@@ -59,7 +59,67 @@ export const ELK_OPTIONS: Record<string, string> = {
   'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
 };
 
-/** Lays each scope out in order; any failure answers the whole request with an error, so no partial picture lands. */
+const WARM_CARD: Size = { width: 200, height: 58 };
+const card = (id: NodeId): LayoutNode => ({ id, ...WARM_CARD });
+
+const warmUp = (scope: LayoutScope, known: Record<NodeId, Size> = {}): LayoutRequest => ({
+  id: 0,
+  type: 'layout',
+  scopes: [scope],
+  known,
+});
+
+/**
+ * Requests the worker lays out before any from the page and throws away (layout.worker.ts says why): a chain, a
+ * fan-out and a card around a callee the page has the size of, the shapes a workflow is made of. One scope each, so
+ * a request from the page that comes during the warm-up waits for one small layout at most.
+ */
+export const WARM_UP: readonly LayoutRequest[] = [
+  warmUp({
+    id: 'chain',
+    nodes: ['a', 'b', 'c'].map(card),
+    edges: [
+      { id: 'a-b', source: 'a', target: 'b' },
+      { id: 'b-c', source: 'b', target: 'c' },
+    ],
+  }),
+  warmUp({
+    id: 'fan',
+    nodes: ['a', 'b', 'c', 'd', 'e'].map(card),
+    edges: [
+      { id: 'a-b', source: 'a', target: 'b' },
+      { id: 'a-c', source: 'a', target: 'c' },
+      { id: 'a-d', source: 'a', target: 'd' },
+      { id: 'b-e', source: 'b', target: 'e' },
+      { id: 'c-e', source: 'c', target: 'e' },
+      { id: 'd-e', source: 'd', target: 'e' },
+    ],
+  }),
+  warmUp(
+    {
+      id: 'call',
+      nodes: [
+        card('a'),
+        { id: 'b', callee: 'chain', extra: { width: 24, height: 70 }, min: WARM_CARD },
+        card('c'),
+      ],
+      edges: [
+        { id: 'a-b', source: 'a', target: 'b' },
+        { id: 'b-c', source: 'b', target: 'c' },
+      ],
+    },
+    // The chain's size: three cards, two gaps between layers, the scope padding.
+    { chain: { width: 728, height: 114 } },
+  ),
+];
+
+/**
+ * Lays the scopes out a nesting level at a time: every scope whose callees have sizes together, then the scopes that
+ * call them. ELK's bundled build answers each call after two zero-delay timers, and Chromium holds a timer nested more
+ * than five deep to 4 ms, so scopes awaited one by one wait on the clock, not on ELK; the timers of one level run at
+ * once. Each scope is still its own ELK run, so its positions do not depend on what else the request holds. Any
+ * failure answers the whole request with an error, so no partial picture lands.
+ */
 export async function answerLayout(
   elk: Pick<ELK, 'layout'>,
   request: LayoutRequest,
@@ -67,16 +127,35 @@ export async function answerLayout(
   const start = performance.now();
   const sizes = new Map(Object.entries(request.known));
   const scopes: Record<NodeId, ScopeLayout> = {};
+  const layOut = async (scope: LayoutScope): Promise<void> => {
+    const laid = await layOutScope(elk, scope, sizes);
+    scopes[scope.id] = laid;
+    sizes.set(scope.id, { width: laid.width, height: laid.height });
+  };
   try {
-    for (const scope of request.scopes) {
-      const laid = await layOutScope(elk, scope, sizes);
-      scopes[scope.id] = laid;
-      sizes.set(scope.id, { width: laid.width, height: laid.height });
-    }
+    for (const level of nestingLevels(request.scopes)) await Promise.all(level.map(layOut));
   } catch (e) {
     return { id: request.id, type: 'error', message: e instanceof Error ? e.message : String(e) };
   }
   return { id: request.id, type: 'layout', scopes, ms: performance.now() - start };
+}
+
+/**
+ * The scopes by nesting level, in request order within each: a scope one level above the highest callee laid out
+ * earlier in the request, at the bottom when every callee is known (or missing, which `nodeSize` reports).
+ */
+function nestingLevels(scopes: readonly LayoutScope[]): LayoutScope[][] {
+  const levelOf = new Map<NodeId, number>();
+  const levels: LayoutScope[][] = [];
+  for (const scope of scopes) {
+    const level = Math.max(
+      0,
+      ...scope.nodes.map((n) => ('callee' in n ? (levelOf.get(n.callee) ?? -1) + 1 : 0)),
+    );
+    levelOf.set(scope.id, level);
+    (levels[level] ??= []).push(scope);
+  }
+  return levels;
 }
 
 async function layOutScope(

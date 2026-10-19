@@ -3,12 +3,20 @@ import { describe, expect, it } from 'vitest';
 import { assembleLayout, createLayoutCache, type LayoutCache } from '../src/graph/layout';
 import { tableMetrics } from '../src/graph/metrics';
 import { cardSize } from '../src/graph/size';
-import { CARD, type GraphLayout, type GraphModel, type JobModel, type ScopeModel } from '../src/graph/types';
+import {
+  CARD,
+  type GraphLayout,
+  type GraphModel,
+  type JobModel,
+  type ScopeLayout,
+  type ScopeModel,
+} from '../src/graph/types';
 import {
   answerLayout,
   ELK_OPTIONS,
   isLayoutRequest,
   type LayoutRequest,
+  WARM_UP,
 } from '../src/worker/layout-protocol';
 
 const elk = new ELK();
@@ -126,6 +134,32 @@ describe('ELK in the layout worker', () => {
     expect(second.layout).toEqual(first.layout);
   });
 
+  it('lays every warm-up out, its call card around the chain, and moves no card laid out after it', async () => {
+    const m = new Model().scope(
+      'ci.yml',
+      ['a', 'b', 'c', 'd'],
+      [
+        ['a', 'b'],
+        ['a', 'c'],
+        ['b', 'd'],
+        ['c', 'd'],
+      ],
+    ).model;
+    const before = await lay(createLayoutCache(), m);
+    const warm: Record<string, ScopeLayout> = {};
+    for (const request of WARM_UP) {
+      const r = await answerLayout(elk, request);
+      if (r.type !== 'layout') throw new Error(r.message);
+      Object.assign(warm, r.scopes);
+    }
+    expect(Object.keys(warm)).toEqual(['chain', 'fan', 'call']);
+    // The chain as laid out is the size the call card is given for it.
+    expect(warm.chain).toMatchObject(WARM_UP[2]!.known.chain!);
+    expect(warm.call!.width).toBeGreaterThan(warm.chain!.width);
+    const after = await lay(createLayoutCache(), structuredClone(m));
+    expect(after.layout).toEqual(before.layout);
+  });
+
   it("lays a callee out first and sizes its caller's card around it, in one request", async () => {
     const m = new Model()
       .scope('callee', ['build', 'publish'], [['build', 'publish']], { depth: 1, caller: 'ci.yml#release' })
@@ -140,6 +174,43 @@ describe('ELK in the layout worker', () => {
     const at = layout.scopes['ci.yml']!.positions;
     expect(at['ci.yml#notify']!.x).toBeGreaterThanOrEqual(at['ci.yml#release']!.x + card.width + 48);
     expect(layout.scopes['ci.yml']!.height).toBeGreaterThanOrEqual(card.height + CARD.scopePadding.top);
+  });
+
+  it('lays out together the scopes whose callees have sizes, then their callers, as one at a time would', async () => {
+    const m = new Model()
+      .scope('one', ['build', 'sign'], [['build', 'sign']], { depth: 1, caller: 'a.yml#call' })
+      .scope('two', ['x'], [], { depth: 1, caller: 'b.yml#call' })
+      .scope('a.yml', ['call', 'after'], [['call', 'after']])
+      .calls('a.yml#call', 'one')
+      .scope('b.yml', ['lint', 'call'], [['lint', 'call']])
+      .calls('b.yml#call', 'two').model;
+    const request = createLayoutCache().plan(m, tableMetrics).request!;
+    expect(request.scopes.map((s) => s.id)).toEqual(['one', 'a.yml', 'two', 'b.yml']);
+    let running: string[] = [];
+    const starts: string[][] = [];
+    const watched: Pick<InstanceType<typeof ELK>, 'layout'> = {
+      layout: async (graph) => {
+        running.push(graph.id);
+        starts.push([...running]);
+        const laid = await elk.layout(graph);
+        running = running.filter((id) => id !== graph.id);
+        return laid;
+      },
+    };
+    const together = await answerLayout(watched, { id: 1, type: 'layout', ...request });
+    expect(starts).toEqual([['one'], ['one', 'two'], ['a.yml'], ['a.yml', 'b.yml']]);
+    if (together.type !== 'layout') throw new Error(together.message);
+
+    const known = { ...request.known };
+    const alone: Record<string, unknown> = {};
+    for (const scope of request.scopes) {
+      const r = await answerLayout(elk, { id: 1, type: 'layout', scopes: [scope], known });
+      if (r.type !== 'layout') throw new Error(r.message);
+      const laid = r.scopes[scope.id]!;
+      alone[scope.id] = laid;
+      known[scope.id] = { width: laid.width, height: laid.height };
+    }
+    expect(together.scopes).toEqual(alone);
   });
 
   it('stacks the roots by plan order, an untriggered one collapsed in its slot and never laid out', async () => {
