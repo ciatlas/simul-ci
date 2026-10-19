@@ -83,8 +83,24 @@ describe('preferences', () => {
 
   it('round-trip what was written', () => {
     const s = memory();
-    const prefs = { v: 1 as const, theme: 'dark' as const, collapsed: { left: true, yaml: false } };
+    const prefs = {
+      v: 1 as const,
+      theme: 'dark' as const,
+      collapsed: { left: true, right: true, yaml: false },
+      panel: 'unknowns' as const,
+    };
     writePrefs(prefs, s);
     expect(readPrefs(s)).toEqual(prefs);
+  });
+
+  it('read preferences written before the right panel existed with its defaults', () => {
+    const s = memory();
+    s.map.set(PREFS_KEY, JSON.stringify({ v: 1, theme: 'dark', collapsed: { left: true, yaml: false } }));
+    expect(readPrefs(s)).toEqual({
+      v: 1,
+      theme: 'dark',
+      collapsed: { left: true, right: false, yaml: false },
+      panel: 'reasons',
+    });
   });
 });

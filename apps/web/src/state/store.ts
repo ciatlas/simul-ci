@@ -2,7 +2,7 @@ import type { AssumeEntry, RunPlan, ScenarioInput } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { GraphState, GraphUi } from '../graph/types';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
-import { DEFAULT_PREFS, type Prefs } from './prefs';
+import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
 
 /**
  * The one store of the page: plain data, nothing derived, nothing the engine owns. Panels read it through selectors;
@@ -46,6 +46,27 @@ export interface Notice {
   text: string;
 }
 
+/**
+ * A request to put the focus in a scenario field: a pin wrote the field, or a reason's Set … button asked for it.
+ * The form resolves `path` the way it routes the worker's issues (`deriveForm`'s `fields`: `vars`, `changed`,
+ * `action`, `tag`, `workflow_run.branch`, `inputs.deploy`, `actor.login`; a `key.sub` it has no field for falls back
+ * to `key`), focuses the control and selects the example so the author types over it. `seq` tells one request from
+ * the next; the form acknowledges it with `fieldFocused(seq)`.
+ */
+export interface FieldFocus {
+  path: string;
+  /** The entry of a field written one entry per line whose value is selected: the variable's name for `vars`. */
+  entry?: string;
+  seq: number;
+}
+
+/** A request to show a line in the YAML pane: it opens the pane on the file's tab and scrolls the line into view. */
+export interface Reveal {
+  file: string;
+  line: number;
+  seq: number;
+}
+
 export interface SessionState {
   source: Source;
   files: { version: number; byPath: Record<string, string> };
@@ -82,7 +103,17 @@ export interface SessionState {
   sel?: string;
   /** What the canvas shows: committed with its positions, so the previous picture stays until they exist. */
   graph?: GraphState;
-  ui: Omit<GraphUi, 'hideUntriggered'> & { view: 'graph' | 'text'; hideUntriggered: boolean; prefs: Prefs };
+  /** The field a pin or a reason asked the form to focus, until the form takes it. */
+  fieldFocus?: FieldFocus;
+  /** The line the YAML pane was last asked to show. */
+  reveal?: Reveal;
+  ui: Omit<GraphUi, 'hideUntriggered'> & {
+    view: 'graph' | 'text';
+    hideUntriggered: boolean;
+    prefs: Prefs;
+    /** The YAML pane's tab the author picked; absent, the pane follows the selection's file. */
+    yamlFile?: string;
+  };
   notices: Notice[];
 }
 
@@ -94,6 +125,15 @@ export interface SessionActions {
     options?: { assumed?: string[]; from?: SessionState['scenarioFrom'] },
   ) => void;
   patchScenario: (patch: Partial<ScenarioInput>) => void;
+  /**
+   * Writes the scenario a pin built (`scenario/apply-pin.ts`): the keys it wrote join the assumed marks until the
+   * author edits them, and the field that shows the pin asks for the focus.
+   */
+  pinScenario: (scenario: ScenarioInput, keys: string[], focus: Omit<FieldFocus, 'seq'>) => void;
+  /** Asks the form to focus a field. */
+  focusField: (focus: Omit<FieldFocus, 'seq'>) => void;
+  /** The form took the request `seq`. */
+  fieldFocused: (seq: number) => void;
   setAssume: (assume: AssumeEntry[]) => void;
   setDetail: (detail: 'legs' | 'steps') => void;
   setFocus: (focus: string | undefined) => void;
@@ -106,6 +146,12 @@ export interface SessionActions {
   setView: (view: 'graph' | 'text') => void;
   setHideUntriggered: (hide: boolean) => void;
   setPrefs: (patch: Partial<Prefs>) => void;
+  setPanel: (panel: PanelTab) => void;
+  /** Opens or closes a pane; the choice is a preference. */
+  togglePane: (pane: keyof Prefs['collapsed']) => void;
+  /** Opens the YAML pane on a file's tab and shows the line. */
+  revealLine: (loc: { file: string; line: number }) => void;
+  setYamlFile: (file: string | undefined) => void;
   projectLoading: () => void;
   projectReady: (version: number, outline: Outline, files: number) => void;
   projectFailed: (error: SessionError) => void;
@@ -142,6 +188,7 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
 }
 
 let noticeId = 0;
+let requestSeq = 0;
 
 export function createSessionStore(initial: SessionState = initialSessionState()): SessionStore {
   return createStore<SessionState & SessionActions>((set, get) => ({
@@ -184,11 +231,23 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         stale: s.plan !== undefined,
         error: authorsErrorCleared(s.error, 'scenario'),
       })),
+    pinScenario: (scenario, keys, focus) =>
+      set((s) => ({
+        scenario,
+        scenarioFrom: 'author',
+        assumed: Array.from(new Set([...s.assumed, ...keys])),
+        stale: s.plan !== undefined,
+        error: authorsErrorCleared(s.error, 'scenario'),
+        fieldFocus: { ...focus, seq: ++requestSeq },
+      })),
+    focusField: (focus) => set({ fieldFocus: { ...focus, seq: ++requestSeq } }),
+    fieldFocused: (seq) => set((s) => (s.fieldFocus?.seq === seq ? { fieldFocus: undefined } : {})),
     setAssume: (assume) =>
       set((s) => ({ assume, stale: s.plan !== undefined, error: authorsErrorCleared(s.error, 'assume') })),
     setDetail: (detail) => set((s) => ({ detail, stale: s.plan !== undefined })),
     setFocus: (focus) => set({ focus }),
-    select: (focus, sel) => set({ focus, sel }),
+    // A new selection takes the YAML pane back to its file.
+    select: (focus, sel) => set((s) => ({ focus, sel, ui: withYamlFile(s.ui, undefined) })),
     toggleExpanded: (job) => set((s) => ({ ui: { ...s.ui, expanded: toggled(s.ui.expanded, job) } })),
     setRepresentative: (job, leg) =>
       set((s) => ({ ui: { ...s.ui, representative: { ...s.ui.representative, [job]: leg } } })),
@@ -197,6 +256,21 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     setView: (view) => set((s) => ({ ui: { ...s.ui, view } })),
     setHideUntriggered: (hideUntriggered) => set((s) => ({ ui: { ...s.ui, hideUntriggered } })),
     setPrefs: (patch) => set((s) => ({ ui: { ...s.ui, prefs: { ...s.ui.prefs, ...patch } } })),
+    setPanel: (panel) => get().setPrefs({ panel }),
+    togglePane: (pane) => {
+      const { collapsed } = get().ui.prefs;
+      get().setPrefs({ collapsed: { ...collapsed, [pane]: !collapsed[pane] } });
+    },
+    revealLine: ({ file, line }) =>
+      set((s) => ({
+        reveal: { file, line, seq: ++requestSeq },
+        ui: {
+          ...s.ui,
+          yamlFile: file,
+          prefs: { ...s.ui.prefs, collapsed: { ...s.ui.prefs.collapsed, yaml: false } },
+        },
+      })),
+    setYamlFile: (yamlFile) => set((s) => ({ ui: withYamlFile(s.ui, yamlFile) })),
     projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
     projectReady: (version, outline, files) =>
       set((s) => ({
@@ -239,6 +313,13 @@ function withPatch(scenario: ScenarioInput, patch: Partial<ScenarioInput>): Scen
     else next[key] = value;
   }
   return next as unknown as ScenarioInput;
+}
+
+function withYamlFile(ui: SessionState['ui'], yamlFile: string | undefined): SessionState['ui'] {
+  const next = { ...ui };
+  if (yamlFile === undefined) delete next.yamlFile;
+  else next.yamlFile = yamlFile;
+  return next;
 }
 
 const toggled = (list: readonly string[], item: string): string[] =>

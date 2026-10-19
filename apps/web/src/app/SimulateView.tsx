@@ -1,6 +1,7 @@
-import { type DragEvent, type ReactNode, useState } from 'react';
+import { type CSSProperties, type DragEvent, lazy, type ReactNode, Suspense, useState } from 'react';
 import { Canvas } from '../graph/Canvas';
 import { OutlineTree } from '../panels/OutlineTree';
+import { Panels } from '../panels/Panels';
 import { restoreDefault } from '../state/url-sync';
 import { TextView } from '../text/TextView';
 import { EmptyState } from './EmptyState';
@@ -13,8 +14,12 @@ import { StatusBar } from './StatusBar';
 import { Toaster } from './Toaster';
 import { TopBar } from './TopBar';
 
+/** CodeMirror is a chunk of its own, fetched the first time the pane opens. */
+const YamlPane = lazy(() => import('../yaml/YamlPane').then((m) => ({ default: m.YamlPane })));
+
 /**
- * The screen: top bar, banner, the scenario and the outline beside the plan, the status line. Drop a folder anywhere.
+ * The screen: top bar, banner, the scenario and the outline, the plan with the YAML pane under it, the right panel,
+ * the status line. Drop a folder anywhere.
  * A render error in the scenario, the outline or the plan stays inside them, so the top bar and the source menu keep
  * working.
  */
@@ -46,13 +51,7 @@ export function SimulateView() {
       <ErrorBanner />
       {hasFiles ? (
         <PlanBoundary>
-          <main className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[320px_1fr]">
-            <aside className="flex min-h-0 flex-col gap-6 overflow-y-auto border-border border-b bg-chrome p-4 md:border-r md:border-b-0">
-              <ScenarioForm />
-              <OutlineTree />
-            </aside>
-            <PlanView />
-          </main>
+          <Panes />
         </PlanBoundary>
       ) : (
         <EmptyState />
@@ -70,16 +69,64 @@ export function SimulateView() {
   );
 }
 
+/**
+ * The scenario and the outline on the left, the plan in the middle with the YAML pane docked under it, the panel on
+ * the right. `[`, `]` and `\` close and open them (app/shortcuts.ts); the choice is a preference. Below 1024 px the
+ * right panel goes under the plan.
+ */
+function Panes() {
+  const collapsed = useSession((s) => s.ui.prefs.collapsed);
+  const columns = {
+    '--left': collapsed.left ? '0px' : '320px',
+    '--right': collapsed.right ? '0px' : '360px',
+  } as CSSProperties;
+  return (
+    <main
+      style={columns}
+      className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[var(--left)_minmax(0,1fr)] md:overflow-hidden lg:grid-cols-[var(--left)_minmax(0,1fr)_var(--right)]"
+    >
+      <aside
+        hidden={collapsed.left}
+        aria-label="Scenario and outline"
+        className="flex min-h-0 flex-col gap-6 overflow-y-auto border-border border-b bg-chrome p-4 md:border-r md:border-b-0"
+      >
+        <ScenarioForm />
+        <OutlineTree />
+      </aside>
+      <div className="flex min-h-0 flex-col md:col-start-2">
+        <PlanView />
+        {!collapsed.yaml && (
+          <section
+            aria-label="Workflow source"
+            className="flex h-[40%] min-h-48 shrink-0 flex-col border-border border-t"
+          >
+            <Suspense fallback={<p className="p-3 text-muted text-xs">loading the editor…</p>}>
+              <YamlPane />
+            </Suspense>
+          </section>
+        )}
+      </div>
+      <aside
+        hidden={collapsed.right}
+        aria-label="Plan details"
+        className="flex min-h-0 flex-col border-border border-t bg-surface md:col-start-2 lg:col-start-3 lg:row-start-1 lg:border-t-0 lg:border-l"
+      >
+        <Panels />
+      </aside>
+    </main>
+  );
+}
+
 /** The run graph, or the plan as text: the author's pick, and the text below 1024 px, where the graph has no room. */
 function PlanView() {
   const view = useSession((s) => s.ui.view);
   const narrow = useNarrow();
   return shownView(view, narrow) === 'graph' ? (
-    <section className="min-h-0 overflow-hidden" aria-label="The run graph">
+    <section className="min-h-0 flex-1 overflow-hidden" aria-label="The run graph">
       <Canvas />
     </section>
   ) : (
-    <section className="min-h-0 overflow-auto">
+    <section className="min-h-0 flex-1 overflow-auto">
       <TextView />
     </section>
   );
