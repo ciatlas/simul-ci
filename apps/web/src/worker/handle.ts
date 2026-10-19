@@ -175,5 +175,14 @@ function testCase(project: NonNullable<WorkerState['project']>, request: CaseReq
     detail: request.detail,
     ...(request.name === undefined ? {} : { name: request.name }),
   };
-  return { id: request.id, type: 'case', text: fileFromPlan(opts), case: caseFromPlan(opts) };
+  const response: EngineResponse = {
+    id: request.id,
+    type: 'case',
+    text: fileFromPlan(opts),
+    case: caseFromPlan(opts),
+  };
+  const errors = result.diagnostics
+    .filter((d) => d.severity === 'error')
+    .map((d) => ({ code: d.code, message: d.message }));
+  return errors.length ? { ...response, errors } : response;
 }

@@ -10,7 +10,13 @@ import {
   type SimulateResult,
   type WorkerLike,
 } from '../src/worker/client';
-import { type Outline, PROTOCOL, type ReadyResponse, SUPPORTED_RUN_PLAN } from '../src/worker/protocol';
+import {
+  type CaseRequest,
+  type Outline,
+  PROTOCOL,
+  type ReadyResponse,
+  SUPPORTED_RUN_PLAN,
+} from '../src/worker/protocol';
 
 /** A client whose answers the test hands out in order. */
 function fakeClient() {
@@ -19,6 +25,7 @@ function fakeClient() {
     body: { project: number; scenario: { event: string } };
     resolve: (r: SimulateResult) => void;
   }[] = [];
+  const cases: { body: Omit<CaseRequest, 'id' | 'type'>; resolve: (r: CaseResult) => void }[] = [];
   let readyResolve!: (r: ReadyResponse) => void;
   let readyReject!: (e: Error) => void;
   const restartListeners: ((n: number, project: number | undefined) => void)[] = [];
@@ -30,7 +37,7 @@ function fakeClient() {
     }),
     load: () => new Promise<LoadResult>((resolve) => loads.push(resolve)),
     simulate: (body) => new Promise<SimulateResult>((resolve) => simulates.push({ body, resolve })),
-    case: () => Promise.resolve({ type: 'superseded' } as CaseResult),
+    case: (body) => new Promise<CaseResult>((resolve) => cases.push({ body, resolve })),
     onRestart: (l) => restartListeners.push(l),
     onFailure: (l) => failureListeners.push(l),
     restarts: () => 0,
@@ -41,7 +48,7 @@ function fakeClient() {
     readyReject(new Error(message));
     for (const l of failureListeners) l(message);
   };
-  return { client, loads, simulates, readyResolve, fail, restartListeners };
+  return { client, loads, simulates, cases, readyResolve, fail, restartListeners };
 }
 
 /** A worker for the real client that answers only when the test says. */
@@ -74,6 +81,8 @@ class FakeWorker implements WorkerLike {
     for (const l of this.listeners.error!) l({ data: undefined });
   }
 }
+
+const CI = '.github/workflows/ci.yml';
 
 const outline: Outline = {
   files: [{ path: '.github/workflows/ci.yml', kind: 'workflow', errors: [] }],
@@ -244,6 +253,82 @@ describe('the session', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().engine.busy).toBe(false);
     expect(store.getState().error).toBeUndefined();
+  });
+
+  /** A session with `ci.yml` loaded as project 1 and a plan that holds it as a workflow an event starts. */
+  const planned = async () => {
+    const store = createSessionStore();
+    const f = fakeClient();
+    const session = createSession({ store, client: f.client, debounceMs: 100 });
+    store.getState().setFiles({ [CI]: 'on: push' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[0]!({ id: 1, type: 'loaded', project: 1, outline, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    f.simulates[0]!.resolve({
+      ...(plan(1) as object),
+      plan: { workflows: [{ path: CI, depth: 0 }] },
+    } as never);
+    await vi.advanceTimersByTimeAsync(0);
+    return { store, f, session };
+  };
+
+  it('asks for a case under the scenario and the assumptions the store holds now, and answers what it got', async () => {
+    const { store, f, session } = await planned();
+    const before = store.getState().plan;
+    const assume = [{ step: 'build.detect', outputs: { changed: 'true' } }];
+    store.getState().patchScenario({ branch: 'release/1' });
+    store.getState().setAssume(assume);
+    const answer = session.testCase('steps');
+    expect(f.cases.map((c) => c.body)).toEqual([
+      {
+        project: 1,
+        workflow: CI,
+        scenario: { event: 'push', branch: 'release/1' },
+        assume,
+        detail: 'steps',
+        format: 'test',
+      },
+    ]);
+    // The case is the dialog's: while it is out, the engine reads idle and the plan stays as the simulate left it.
+    expect(store.getState().engine.busy).toBe(false);
+    expect(store.getState().plan).toBe(before);
+    f.cases[0]!.resolve({
+      id: 9,
+      type: 'case',
+      text: 'workflow: ci.yml\n',
+      case: { name: 'push release/1', when: {}, then: {}, allowMaybe: true, comments: ['ci.yml: maybe'] },
+    });
+    expect(await answer).toEqual({ type: 'case', text: 'workflow: ci.yml\n', maybes: 1, errors: [] });
+    // And so they stay once it is answered.
+    expect(store.getState().plan).toBe(before);
+    expect(store.getState().engine.busy).toBe(false);
+  });
+
+  it('asks for the plan as text or Mermaid with the jobs detail, and passes a failure on', async () => {
+    const { f, session } = await planned();
+    const text = session.testCase('text');
+    const mermaid = session.testCase('mermaid');
+    expect(f.cases.map((c) => [c.body.detail, c.body.format])).toEqual([
+      ['jobs', 'text'],
+      ['jobs', 'mermaid'],
+    ]);
+    f.cases[0]!.resolve({ id: 9, type: 'case', text: 'plan' });
+    f.cases[1]!.resolve({ id: 10, type: 'error', kind: 'engine', message: 'boom' });
+    expect(await text).toEqual({ type: 'case', text: 'plan', maybes: 0, errors: [] });
+    expect(await mermaid).toEqual({ type: 'failed', message: 'boom' });
+  });
+
+  it('answers failed without asking the worker before there is a plan', async () => {
+    const store = createSessionStore();
+    const f = fakeClient();
+    const session = createSession({ store, client: f.client });
+    expect(await session.testCase('jobs')).toEqual({ type: 'failed', message: 'no plan yet' });
+    store.getState().setFiles({ [CI]: 'on: push' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[0]!({ id: 1, type: 'loaded', project: 1, outline, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await session.testCase('steps')).toEqual({ type: 'failed', message: 'no plan yet' });
+    expect(f.cases).toEqual([]);
   });
 });
 

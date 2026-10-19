@@ -4,15 +4,17 @@ import { cardOf } from '../graph/navigate';
 import { planIndex, resolveSelection } from '../plan/index';
 import type { PanelTab, Prefs } from '../state/prefs';
 import type { SessionActions, SessionState, SessionStore } from '../state/store';
+import { caseAvailability } from '../testcase/case';
 
 /**
  * The page's keys outside the canvas (synthesis § 11): `t` switches between the graph and the text, `f` fits, `.`
  * centres the selection, `0` shows 100 %; `r` jumps to the Reasons tab and `1`–`4` open a tab of the right panel;
- * `[`, `]` and `\` close and open the scenario column, the right panel and the YAML pane. None fires while the author
- * types (an input, a textarea, a select, an editable region such as the YAML pane), inside an open dialog, or once
- * something on the way handled the key (the canvas, a tree item: they prevent its default). None fires while the
- * author has turned them off (`prefs.keys`, the top bar's Shortcuts button; WCAG 2.1.4); the canvas's own keys need
- * the focus in the canvas and stay. Below 1024 px the text view is the only one, so `t` has nothing to switch.
+ * `[`, `]` and `\` close and open the scenario column, the right panel and the YAML pane; `c` opens Copy as test
+ * case while there is a plan and a focused workflow. None fires while the author types (an input, a textarea, a
+ * select, an editable region such as the YAML pane), inside an open dialog, or once something on the way handled
+ * the key (the canvas, a tree item: they prevent its default). None fires while the author has turned them off
+ * (`prefs.keys`, the top bar's Shortcuts button; WCAG 2.1.4); the canvas's own keys need the focus in the canvas
+ * and stay. Below 1024 px the text view is the only one, so `t` has nothing to switch.
  */
 
 export type PageCommand =
@@ -21,6 +23,7 @@ export type PageCommand =
   | 'centre'
   | 'actualSize'
   | 'reasons'
+  | 'case'
   | `panel:${PanelTab}`
   | `pane:${Pane}`;
 
@@ -43,6 +46,7 @@ const COMMANDS = new Map<string, PageCommand>([
   ['.', 'centre'],
   ['0', 'actualSize'],
   ['r', 'reasons'],
+  ['c', 'case'],
   ['1', 'panel:reasons'],
   ['2', 'panel:unknowns'],
   ['3', 'panel:node'],
@@ -107,6 +111,11 @@ function run(command: PageCommand, s: SessionState & SessionActions, win: Window
   }
   if (command.startsWith('pane:')) {
     togglePaneKeepingFocus(s, command.slice('pane:'.length) as Pane, win.document);
+    return true;
+  }
+  if (command === 'case') {
+    if (!caseAvailability(s).ok) return false;
+    s.openCase();
     return true;
   }
   if (command === 'reasons') {

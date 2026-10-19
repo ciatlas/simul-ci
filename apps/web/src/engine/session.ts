@@ -1,6 +1,7 @@
 import { debounce, type Timers } from '../lib/debounce';
 import { defaultScenario } from '../scenario/defaults';
 import type { SessionState, SessionStore } from '../state/store';
+import { type CaseFormat, type CaseOutcome, requestCase } from '../testcase/case';
 import type { EngineClient, SimulateResult } from '../worker/client';
 
 /**
@@ -20,6 +21,11 @@ export interface SessionOptions {
 export interface Session {
   /** Simulates now, skipping the quiet period. */
   simulateNow(): void;
+  /**
+   * The focused workflow's case, or the plan in another format, from the scenario and the assumptions the store
+   * holds now: the worker simulates them again. Busy and the plan are not touched; the dialog shows the answer.
+   */
+  testCase(format: CaseFormat): Promise<CaseOutcome>;
   dispose(): void;
 }
 
@@ -153,6 +159,7 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
       simulate.cancel();
       void run();
     },
+    testCase: (format) => requestCase(client, store.getState(), format),
     dispose: () => {
       unsubscribe();
       simulate.cancel();

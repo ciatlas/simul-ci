@@ -1,6 +1,7 @@
+import type { AssumeEntry } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 import { handle, initialState, type WorkerState } from '../src/worker/handle';
-import { isEngineRequest, type SimulateRequest } from '../src/worker/protocol';
+import { type CaseRequest, isEngineRequest, type SimulateRequest } from '../src/worker/protocol';
 
 const files = {
   '.github/workflows/ci.yml': `
@@ -173,6 +174,32 @@ describe('the worker handler', () => {
     if (c.type !== 'case') return;
     expect(c.text).toMatch(/^workflow: ci\.yml\n/);
     expect(c.case?.then).toMatchObject({ run: ['build'], skip: ['deploy'], conclusion: 'failure' });
+  });
+
+  it('sends with a test case the errors `simulci test` would report it invalid for, and none with a clean one', () => {
+    const { state, project } = loaded();
+    const ask = (assume: AssumeEntry[], format: CaseRequest['format'] = 'test') =>
+      handle(state, {
+        id: 5,
+        type: 'case',
+        project,
+        workflow: 'ci.yml',
+        scenario: { event: 'push', branch: 'main', changed: ['src/a.ts'] },
+        assume,
+        detail: 'jobs',
+        format,
+      }).response;
+    const fails: AssumeEntry = { step: 'build.t', outcome: 'failure' };
+    const nowhere: AssumeEntry = { step: 'build.nope', outcome: 'failure' };
+    const invalid = ask([fails, nowhere]);
+    expect(invalid).toMatchObject({ type: 'case', text: expect.stringMatching(/^workflow: ci\.yml\n/) });
+    if (invalid.type !== 'case') return;
+    expect(invalid.errors).toEqual([{ code: 'SC102', message: 'assume[1] matches nothing in this plan' }]);
+    const clean = ask([fails]);
+    expect(clean).toMatchObject({ type: 'case' });
+    expect(Object.hasOwn(clean, 'errors')).toBe(false);
+    // The plan formats are no test case: nothing for `simulci test` to refuse.
+    expect(Object.hasOwn(ask([fails, nowhere], 'text'), 'errors')).toBe(false);
   });
 
   it('names the member issue of a union and refuses a case for a workflow the project lacks', () => {

@@ -38,9 +38,11 @@ const TEXT = [
 
 /**
  * Text the right panel and the top bar draw on the surface: a gate's ✓ ✗ ?, a problem's severity glyph, its code and
- * link, the scenario's `· stale`. Amber text takes `might-text`; `might` stays for marks and outlines.
+ * link, the scenario's `· stale`. Amber text takes `might-text`; `might` stays for marks and outlines. A dialog's
+ * main button writes `on-accent` on the accent.
  */
 const PANEL_TEXT = [
+  ['on-accent', 'accent'],
   ['text', 'surface'],
   ['muted', 'surface'],
   ['run', 'surface'],
@@ -80,7 +82,7 @@ describe('the contrast of the form', () => {
   });
 
   it('reads every token both themes define', () => {
-    expect(Object.keys(light)).toHaveLength(20);
+    expect(Object.keys(light)).toHaveLength(21);
     expect(Object.keys(themes.dark)).toEqual(Object.keys(light));
     expect(themes.dark.chrome).not.toBe(light.chrome);
     expect(contrast(light['might']!, light['chrome']!)).toBeLessThan(4.5);
