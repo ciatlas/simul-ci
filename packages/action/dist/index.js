@@ -35605,28 +35605,24 @@ function literalValue(text) {
 function evaluateCondition(text, state, status) {
 	const parsed = parseExpression(text);
 	const reads = parsed.refs.map((ref) => ({
-		ref: `${ref.context}${ref.path.length ? `.${ref.path.join(".")}` : ""}`,
+		ref: refName(ref),
 		value: ref.dynamic ? unknown$1([`${ref.context}.${ref.path.join(".")}`]) : lookupContext(state, ref)
 	}));
-	if (!parsed.ast) return {
-		value: unknown$1([`expression:${text}`], [true, false]),
-		reads
-	};
-	const options = { runtime: (name) => statusAnswer(status, name) };
-	const resolve = contextResolver(state);
-	if (definitelyTruthy(parsed.ast, resolve, options)) return {
-		value: known$1(true),
-		reads
-	};
-	if (definitelyFalsy(parsed.ast, resolve, options)) return {
-		value: known$1(false),
-		reads
-	};
-	const unknowns = [...reads.flatMap((r) => r.value.known ? [] : r.value.unknowns), ...Object.values(status).flatMap((s) => s.known ? [] : s.unknowns)];
 	return {
-		value: unknown$1(unknowns.length ? unknowns : [`expression:${text}`], [true, false]),
+		value: conditionValue(parsed, contextResolver(state), status, reads),
 		reads
 	};
+}
+/** A reference as a read names it: `needs.build.result`, `github`. */
+const refName = (ref) => `${ref.context}${ref.path.length ? `.${ref.path.join(".")}` : ""}`;
+/** Known true, known false, or unknown because of the reads and status answers it could not decide over. */
+function conditionValue(parsed, resolve, status, reads) {
+	if (!parsed.ast) return unknown$1([`expression:${parsed.source}`], [true, false]);
+	const options = { runtime: (name) => statusAnswer(status, name) };
+	if (definitelyTruthy(parsed.ast, resolve, options)) return known$1(true);
+	if (definitelyFalsy(parsed.ast, resolve, options)) return known$1(false);
+	const unknowns = [...reads.flatMap((r) => r.value.known ? [] : r.value.unknowns), ...Object.values(status).flatMap((s) => s.known ? [] : s.unknowns)];
+	return unknown$1(unknowns.length ? unknowns : [`expression:${parsed.source}`], [true, false]);
 }
 /** The status functions as core's evaluator asks for them; an unknown answer leaves the call unknown. */
 function statusAnswer(status, name) {
