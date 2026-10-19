@@ -2,8 +2,8 @@ import type { AssumeEntry, ScenarioInput } from '@simulci/engine';
 
 /**
  * What the URL carries: the scenario's own keys, `a` (the assume entries), `wf` (the focused workflow), `sel` (the
- * selected unit path), `d` (`legs`), `view` (`text`) and `hide` (`1`). Files never. The picker checks shapes only;
- * the worker validates and answers `invalid` on the field.
+ * selected unit path), `d` (`legs`), `view` (`text`) and `hide` (`1`). Files never. The picker checks shapes only,
+ * deep enough that the form can show whatever it keeps; the worker validates and answers `invalid` on the field.
  */
 
 /** The keys of `ScenarioInputSchema`, in its order; a test holds this list to the schema. */
@@ -34,7 +34,11 @@ export const SCENARIO_KEYS = [
 
 type ScenarioKey = (typeof SCENARIO_KEYS)[number];
 
-type Shape = 'string' | 'number' | 'boolean' | 'array' | 'object';
+/**
+ * `record`: an object of plain values, as every record key of the scenario is; `changes`: paths, or records with a
+ * `path`, as `changed` holds them. The form turns these values into text, which a nested object can refuse to become.
+ */
+type Shape = 'string' | 'number' | 'boolean' | 'array' | 'record' | 'changes';
 
 const SHAPES: Record<ScenarioKey, Shape> = {
   event: 'string',
@@ -50,14 +54,14 @@ const SHAPES: Record<ScenarioKey, Shape> = {
   defaultBranch: 'string',
   repository: 'string',
   message: 'string',
-  actor: 'object',
-  changed: 'array',
-  inputs: 'object',
-  vars: 'object',
+  actor: 'record',
+  changed: 'changes',
+  inputs: 'record',
+  vars: 'record',
   secrets: 'array',
   environments: 'array',
   cron: 'string',
-  workflow_run: 'object',
+  workflow_run: 'record',
   platform: 'string',
 };
 
@@ -74,9 +78,19 @@ export interface UrlState {
 /** Beyond this many characters of JSON the assume entries stay in the store and leave the URL. */
 export const ASSUME_URL_LIMIT = 8 * 1024;
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isPlain = (value: unknown): boolean => value === null || typeof value !== 'object';
+
+const isRecord = (value: unknown): boolean => isObject(value) && Object.values(value).every(isPlain);
+
+const isChange = (value: unknown): boolean => typeof value === 'string' || isRecord(value);
+
 function hasShape(value: unknown, shape: Shape): boolean {
   if (shape === 'array') return Array.isArray(value);
-  if (shape === 'object') return typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (shape === 'record') return isRecord(value);
+  if (shape === 'changes') return Array.isArray(value) && value.every(isChange);
   return typeof value === shape;
 }
 
@@ -89,7 +103,7 @@ function scenarioOf(raw: Record<string, unknown>): ScenarioInput | undefined {
   return scenario as unknown as ScenarioInput;
 }
 
-const isEntry = (e: unknown): e is AssumeEntry => typeof e === 'object' && e !== null && !Array.isArray(e);
+const isEntry = (e: unknown): e is AssumeEntry => isObject(e);
 
 /** Reads the search params; anything unexpected is left out rather than refused. */
 export function readSearch(raw: Record<string, unknown>): UrlState {
@@ -104,6 +118,10 @@ export function readSearch(raw: Record<string, unknown>): UrlState {
   if (raw.hide === 1 || raw.hide === '1' || raw.hide === true) state.hide = true;
   return state;
 }
+
+/** The route's `validateSearch`: what the picker keeps, written the way the bridge writes it. */
+export const validateSearch = (raw: Record<string, unknown>): Record<string, unknown> =>
+  writeSearch(readSearch(raw));
 
 /** The search params for a state; the inverse of `readSearch` for what it keeps. */
 export function writeSearch(state: UrlState): Record<string, unknown> {

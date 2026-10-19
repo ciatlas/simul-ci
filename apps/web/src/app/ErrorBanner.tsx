@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { reportText } from '../state/report';
+import { reportable, reportText } from '../state/report';
+import { isBlocking } from '../state/store';
 import { useSession } from './providers';
 
 const HEADLINE = {
   boot: 'The page is out of date or the engine failed to load.',
+  stopped: 'The engine stopped and could not be restarted.',
   engine: 'The simulator failed on this scenario.',
   source: 'The files could not be used.',
   scenario: 'The scenario was refused.',
@@ -29,7 +31,7 @@ export function ErrorBanner() {
     );
   };
 
-  const blocking = error.kind === 'boot';
+  const blocking = isBlocking(error);
   return (
     <div
       role="alert"
@@ -58,7 +60,7 @@ export function ErrorBanner() {
             Reload
           </button>
         )}
-        {error.kind === 'engine' && (
+        {reportable(error) && (
           <button
             type="button"
             className="rounded border border-border bg-surface px-2 py-0.5 text-xs"

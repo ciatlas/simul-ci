@@ -23,3 +23,8 @@ export function reportText(s: {
     .filter((line) => line !== '')
     .join('\n');
 }
+
+/** The errors a report is offered for: the engine threw, or it stopped and could not be restarted. */
+export function reportable(error: SessionError): boolean {
+  return error.kind === 'engine' || error.kind === 'stopped';
+}

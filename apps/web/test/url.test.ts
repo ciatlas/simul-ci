@@ -40,6 +40,37 @@ describe('the URL picker', () => {
     expect(readSearch({ event: 'push', hide: '1' })).toEqual({ scenario: { event: 'push' }, hide: true });
   });
 
+  it('drops a key holding a value the form could not show as text', () => {
+    expect(readSearch(defaultParseSearch('?event=push&changed=[null]'))).toEqual({
+      scenario: { event: 'push' },
+    });
+    const junk = [
+      { changed: ['src/a.ts', null] },
+      { changed: [{ path: { toString: 1 } }] },
+      { changed: [['src/a.ts']] },
+      { inputs: { dry: true, name: { toString: 1 } } },
+      { workflow_run: { name: ['CI'] } },
+      { actor: { login: { name: 'x' } } },
+      { vars: { X: [1] } },
+    ];
+    for (const keys of junk)
+      expect(readSearch({ event: 'push', ...keys })).toEqual({ scenario: { event: 'push' } });
+  });
+
+  it('keeps every value that reads as text, for the worker to judge', () => {
+    const scenario = {
+      event: 'workflow_dispatch',
+      changed: ['src/a.ts', { path: 'docs/b.md', status: 'added' }, { path: 1 }],
+      inputs: { dry: true, count: 2, name: 'x', none: null },
+      workflow_run: { name: 'CI', conclusion: 'failure' },
+      secrets: [1, {}],
+    };
+    expect(readSearch(scenario)).toEqual({ scenario });
+    expect(
+      readSearch(defaultParseSearch(defaultStringifySearch(writeSearch({ scenario: scenario as never })))),
+    ).toEqual({ scenario });
+  });
+
   it('keeps assume entries out of the URL once they are too long for one', () => {
     const assume = Array.from({ length: 200 }, (_, i) => ({
       step: `job.step${i}`,

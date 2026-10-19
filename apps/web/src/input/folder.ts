@@ -1,5 +1,5 @@
-import { filterFiles, mayHoldProjectFiles } from './filter';
-import { LIMITS } from './limits';
+import { filterFiles, isProjectFile, mayHoldProjectFiles } from './filter';
+import { LIMITS, readWithin, type Walked } from './limits';
 
 /**
  * A folder through the File System Access API (Chromium): the handle is kept, so Reload re-walks the checkout and a
@@ -8,10 +8,9 @@ import { LIMITS } from './limits';
 
 export const canPickFolder = (): boolean => typeof window !== 'undefined' && 'showDirectoryPicker' in window;
 
-export interface PickedFolder {
+export interface PickedFolder extends Walked {
   name: string;
   handle: FileSystemDirectoryHandle;
-  files: Record<string, string>;
 }
 
 type Picker = (options: { id: string; mode: 'read' }) => Promise<FileSystemDirectoryHandle>;
@@ -26,7 +25,7 @@ export async function pickFolder(): Promise<PickedFolder | undefined> {
     if (e instanceof DOMException && e.name === 'AbortError') return undefined;
     throw e;
   }
-  return { name: handle.name, handle, files: await readFolder(handle) };
+  return { name: handle.name, handle, ...(await readFolder(handle)) };
 }
 
 interface PermissionHandle {
@@ -56,28 +55,25 @@ export async function requestFolder(handle: FileSystemDirectoryHandle): Promise<
   }
 }
 
-/** The project files under a handle, by repository-relative path. */
-export async function readFolder(root: FileSystemDirectoryHandle): Promise<Record<string, string>> {
-  const files: Record<string, string> = {};
-  await walk(root, '', 0, files);
-  return filterFiles(files);
+/** The project files under a handle, by repository-relative path, and the ones too big to read. */
+export async function readFolder(root: FileSystemDirectoryHandle): Promise<Walked> {
+  const walked: Walked = { files: {}, skipped: [] };
+  await walk(root, '', 0, walked);
+  return { files: filterFiles(walked.files), skipped: walked.skipped };
 }
 
 async function walk(
   dir: FileSystemDirectoryHandle,
   prefix: string,
   depth: number,
-  files: Record<string, string>,
+  walked: Walked,
 ): Promise<void> {
   if (depth > LIMITS.depth) return;
   for await (const [name, handle] of entriesOf(dir)) {
     const path = prefix ? `${prefix}/${name}` : name;
     if (handle.kind === 'directory') {
-      if (mayHoldProjectFiles(path)) await walk(handle, path, depth + 1, files);
-    } else if (mayHoldProjectFiles(prefix) && /\.ya?ml$/i.test(name)) {
-      const file = await handle.getFile();
-      if (file.size <= LIMITS.fileBytes) files[path] = await file.text();
-    }
+      if (mayHoldProjectFiles(path)) await walk(handle, path, depth + 1, walked);
+    } else if (isProjectFile(path)) await readWithin(await handle.getFile(), path, walked);
   }
 }
 

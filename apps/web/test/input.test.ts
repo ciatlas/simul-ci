@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { filesFromDrop } from '../src/input/drop';
 import { readFolder } from '../src/input/folder';
+import { leftOut } from '../src/input/limits';
 import { checkPaste, DEFAULT_PASTE_PATH, nextPastePath } from '../src/input/paste';
 import { filesFromList } from '../src/input/picker';
 import { SAMPLES } from '../src/input/samples';
@@ -52,6 +53,62 @@ function entryOf(name: string, tree: Tree): FileSystemDirectoryEntry {
   } as unknown as FileSystemDirectoryEntry;
 }
 
+interface FakeItem {
+  kind: 'file' | 'string';
+  /** Present where the browser has `getAsFileSystemHandle` (Chromium). */
+  handle?: unknown;
+  entry?: unknown;
+  file?: unknown;
+}
+
+/**
+ * A drop as the browser hands it over: the items read only while the drop event lasts (from the next microtask on,
+ * the list is empty, `kind` is '' and the getters give null), and a handle arrives in a later task.
+ */
+function transferOf(items: FakeItem[]): DataTransfer {
+  let live = true;
+  queueMicrotask(() => {
+    live = false;
+  });
+  const list = items.map((i) => ({
+    get kind() {
+      return live ? i.kind : '';
+    },
+    getAsFile: () => (live ? (i.file ?? null) : null),
+    webkitGetAsEntry: () => (live ? (i.entry ?? null) : null),
+    ...('handle' in i && {
+      getAsFileSystemHandle: () => {
+        const h = live ? i.handle : null;
+        return new Promise((resolve) => setTimeout(() => resolve(h), 0));
+      },
+    }),
+  }));
+  return {
+    get items() {
+      return live ? list : [];
+    },
+  } as unknown as DataTransfer;
+}
+
+/** A dropped folder: Chromium gives a handle, every browser an entry and a File standing for the directory. */
+const folderItem = (name: string, tree: Tree, withHandle = true): FakeItem => ({
+  kind: 'file',
+  ...(withHandle && { handle: handleOf(name, tree) }),
+  entry: entryOf(name, tree),
+  file: { name, ...fileOf('') },
+});
+
+/** A dropped file: Chromium gives a file handle, every browser a file entry and the File. */
+const fileItem = (name: string, text: string, withHandle = true): FakeItem => ({
+  kind: 'file',
+  ...(withHandle && { handle: { kind: 'file', name } }),
+  entry: { isDirectory: false, isFile: true, name },
+  file: { name, ...fileOf(text) },
+});
+
+/** Bigger than a file may be. */
+const BIG = 'x'.repeat(2.5 * 1024 * 1024);
+
 const repo: Tree = {
   '.github': {
     workflows: { 'ci.yml': 'on: push', 'notes.md': 'x', nested: { 'deep.yml': 'on: push' } },
@@ -71,7 +128,39 @@ const EXPECTED = {
 
 describe('the ways in', () => {
   it('walks a folder handle through the directories that can hold project files only', async () => {
-    expect(await readFolder(handleOf('repo', repo))).toEqual(EXPECTED);
+    expect(await readFolder(handleOf('repo', repo))).toEqual({ files: EXPECTED, skipped: [] });
+  });
+
+  it('leaves out a project file over the per-file limit and says which, on every walk', async () => {
+    const tree: Tree = {
+      '.github': { workflows: { 'ci.yml': 'on: push', 'big.yml': BIG }, 'dependabot.yml': BIG },
+    };
+    const skipped = [{ path: '.github/workflows/big.yml', bytes: BIG.length }];
+    const files = { '.github/workflows/ci.yml': 'on: push' };
+    expect(await readFolder(handleOf('repo', tree))).toEqual({ files, skipped });
+    expect(await filesFromDrop(transferOf([folderItem('repo', tree)]))).toMatchObject({ files, skipped });
+    expect(await filesFromDrop(transferOf([folderItem('repo', tree, false)]))).toMatchObject({
+      files,
+      skipped,
+    });
+    expect(
+      await filesFromDrop(transferOf([fileItem('ci.yml', 'on: push'), fileItem('big.yml', BIG)])),
+    ).toMatchObject({ files, skipped });
+    const list = [
+      { name: 'ci.yml', webkitRelativePath: 'repo/.github/workflows/ci.yml', ...fileOf('on: push') },
+      { name: 'big.yml', webkitRelativePath: 'repo/.github/workflows/big.yml', ...fileOf(BIG) },
+      { name: 'dependabot.yml', webkitRelativePath: 'repo/.github/dependabot.yml', ...fileOf(BIG) },
+    ] as unknown as File[];
+    expect(await filesFromList(list)).toEqual({ name: 'repo', files, skipped });
+  });
+
+  it('words the files a walk left out as the per-file limit does', () => {
+    const skipped = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ path: `.github/workflows/${i}.yml`, bytes: 3 * 1024 * 1024 }));
+    expect(leftOut(skipped(1))).toBe('left out .github/workflows/0.yml (3 MB); a file may be at most 2 MB');
+    expect(leftOut(skipped(5))).toBe(
+      'left out .github/workflows/0.yml (3 MB), .github/workflows/1.yml (3 MB), .github/workflows/2.yml (3 MB) and 2 more; a file may be at most 2 MB',
+    );
   });
 
   it('reads a chosen folder from the relative paths, dropping the folder name', async () => {
@@ -89,42 +178,92 @@ describe('the ways in', () => {
     expect(await filesFromList(list)).toEqual({
       name: 'repo',
       files: { '.github/workflows/ci.yml': 'on: push', 'action.yml': 'runs: {}' },
+      skipped: [{ path: '.github/workflows/big.yml', bytes: 3 * 1024 * 1024 }],
     });
     const loose = [
       { name: 'deploy.yml', webkitRelativePath: '', ...fileOf('on: push') },
     ] as unknown as File[];
-    expect(await filesFromList(loose)).toEqual({ files: { '.github/workflows/deploy.yml': 'on: push' } });
+    expect(await filesFromList(loose)).toEqual({
+      files: { '.github/workflows/deploy.yml': 'on: push' },
+      skipped: [],
+    });
   });
 
   it('takes a dropped folder through a handle, through entries, and dropped files by name', async () => {
-    const withHandle = {
-      items: [{ kind: 'file', getAsFileSystemHandle: () => Promise.resolve(handleOf('repo', repo)) }],
-    } as unknown as DataTransfer;
-    const a = await filesFromDrop(withHandle);
+    const a = await filesFromDrop(transferOf([folderItem('repo', repo)]));
     expect(a.name).toBe('repo');
+    expect(a.where).toBe('the folder repo');
     expect(a.handle).toBeDefined();
     expect(a.files).toEqual(EXPECTED);
-    const withEntries = {
-      items: [{ kind: 'file', webkitGetAsEntry: () => entryOf('repo', repo) }],
-    } as unknown as DataTransfer;
-    const b = await filesFromDrop(withEntries);
-    expect(b).toEqual({ name: 'repo', files: EXPECTED });
-    const files = {
-      items: [
-        {
-          kind: 'file',
-          webkitGetAsEntry: () => null,
-          getAsFile: () => ({ name: 'ci.yml', ...fileOf('on: push') }),
-        },
-        { kind: 'string', getAsFile: () => null },
-        {
-          kind: 'file',
-          webkitGetAsEntry: () => null,
-          getAsFile: () => ({ name: 'notes.txt', ...fileOf('x') }),
-        },
-      ],
-    } as unknown as DataTransfer;
-    expect(await filesFromDrop(files)).toEqual({ files: { '.github/workflows/ci.yml': 'on: push' } });
+    const b = await filesFromDrop(transferOf([folderItem('repo', repo, false)]));
+    expect(b).toEqual({ name: 'repo', where: 'the folder repo', files: EXPECTED, skipped: [] });
+    const files = transferOf([
+      fileItem('ci.yml', 'on: push', false),
+      { kind: 'string' },
+      fileItem('notes.txt', 'x', false),
+    ]);
+    expect(await filesFromDrop(files)).toEqual({
+      where: 'the drop',
+      files: { '.github/workflows/ci.yml': 'on: push' },
+      skipped: [],
+    });
+  });
+
+  it('reads every item of a drop while the drop event lasts, whatever the browser', async () => {
+    // Chromium: a file's handle arrives after the event, when the item no longer gives its File.
+    expect((await filesFromDrop(transferOf([fileItem('ci.yml', 'on: push')]))).files).toEqual({
+      '.github/workflows/ci.yml': 'on: push',
+    });
+    const three = ['a.yml', 'b.yml', 'c.yml'].map((n) => fileItem(n, `on: push # ${n}`));
+    expect(Object.keys((await filesFromDrop(transferOf(three))).files)).toEqual([
+      '.github/workflows/a.yml',
+      '.github/workflows/b.yml',
+      '.github/workflows/c.yml',
+    ]);
+    // Firefox and Safari: no handles; the second item is read after the first folder's walk.
+    const mixed = await filesFromDrop(
+      transferOf([folderItem('repo', repo, false), fileItem('hotfix.yml', 'on: push', false)]),
+    );
+    expect(mixed.files).toEqual({ ...EXPECTED, '.github/workflows/hotfix.yml': 'on: push' });
+  });
+
+  it('keeps a handle only when the drop is exactly one folder, and names a drop of several', async () => {
+    const one = await filesFromDrop(transferOf([folderItem('repo', repo), fileItem('README.md', 'x')]));
+    expect(one).toMatchObject({ name: 'repo', where: 'the folder repo', files: EXPECTED });
+    expect(one.handle?.name).toBe('repo');
+    const withFile = await filesFromDrop(
+      transferOf([folderItem('repo', repo), fileItem('hotfix.yml', 'on: push')]),
+    );
+    expect(withFile).toEqual({
+      name: 'repo + hotfix.yml',
+      where: 'the drop',
+      files: { ...EXPECTED, '.github/workflows/hotfix.yml': 'on: push' },
+      skipped: [],
+    });
+    const other: Tree = { '.github': { workflows: { 'release.yml': 'on: release' } } };
+    const two = await filesFromDrop(transferOf([folderItem('repoA', repo), folderItem('repoB', other)]));
+    expect(two).toEqual({
+      name: 'repoA + repoB',
+      where: 'the drop',
+      files: { ...EXPECTED, '.github/workflows/release.yml': 'on: release' },
+      skipped: [],
+    });
+    const three = await filesFromDrop(
+      transferOf([folderItem('repoA', repo), folderItem('repoB', other), fileItem('x.yml', 'on: push')]),
+    );
+    expect(three.name).toBe('repoA + 2 more');
+    expect(three.handle).toBeUndefined();
+  });
+
+  it('keeps the handle of a folder dropped beside a workflow file too big to read', async () => {
+    const big = await filesFromDrop(transferOf([folderItem('repo', repo), fileItem('big.yml', BIG)]));
+    expect(big).toMatchObject({
+      name: 'repo',
+      where: 'the drop',
+      files: EXPECTED,
+      skipped: [{ path: '.github/workflows/big.yml', bytes: BIG.length }],
+    });
+    expect(big.handle?.name).toBe('repo');
   });
 
   it('checks a paste: the path, the content, a test file', () => {
@@ -225,26 +364,17 @@ describe('the sources of a session', () => {
 
   it('refuses what holds no workflow files or too much, and takes a drop', async () => {
     const { store, sources } = setup();
-    await sources.drop({ items: [{ kind: 'string', getAsFile: () => null }] } as unknown as DataTransfer);
+    await sources.drop(transferOf([{ kind: 'string' }]));
     expect(store.getState().error).toMatchObject({
       kind: 'source',
       message: expect.stringContaining('nothing in the drop'),
     });
-    await sources.drop({
-      items: [
-        {
-          kind: 'file',
-          getAsFileSystemHandle: () => Promise.resolve(handleOf('repo', { src: { 'a.ts': 'x' } })),
-        },
-      ],
-    } as unknown as DataTransfer);
+    await sources.drop(transferOf([folderItem('repo', { src: { 'a.ts': 'x' } })]));
     expect(store.getState().error).toMatchObject({
       kind: 'source',
       message: expect.stringContaining('no workflow files in the folder repo'),
     });
-    await sources.drop({
-      items: [{ kind: 'file', getAsFileSystemHandle: () => Promise.resolve(handleOf('repo', repo)) }],
-    } as unknown as DataTransfer);
+    await sources.drop(transferOf([folderItem('repo', repo)]));
     expect(store.getState().error).toBeUndefined();
     expect(store.getState().source).toMatchObject({ kind: 'folder', name: 'repo' });
     expect(store.getState().files.byPath).toEqual(EXPECTED);

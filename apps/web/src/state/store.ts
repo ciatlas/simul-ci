@@ -21,8 +21,11 @@ export interface Issue {
 }
 
 export interface SessionError {
-  /** `boot`: the engine never started; `engine`: it threw; `source`: files could not be read; the rest are the author's. */
-  kind: 'boot' | 'engine' | 'source' | 'scenario' | 'assume' | 'workflow';
+  /**
+   * `boot`: the engine never started; `stopped`: it stopped and could not be restarted; `engine`: it threw;
+   * `source`: files could not be read; the rest are the author's.
+   */
+  kind: 'boot' | 'stopped' | 'engine' | 'source' | 'scenario' | 'assume' | 'workflow';
   message: string;
   stack?: string;
   issues?: Issue[];
@@ -146,7 +149,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         plan: undefined,
         stale: false,
         focus: undefined,
-        error: undefined,
+        error: replaceError(get().error, undefined),
       }),
     setScenario: (scenario, options) =>
       set((s) => ({
@@ -173,8 +176,12 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     setPrefs: (patch) => set((s) => ({ ui: { ...s.ui, prefs: { ...s.ui.prefs, ...patch } } })),
     projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
     projectReady: (version, outline, files) =>
-      set({ project: { status: 'ready', version, outline, files }, error: undefined }),
-    projectFailed: (error) => set({ project: { status: 'error' }, error }),
+      set((s) => ({
+        project: { status: 'ready', version, outline, files },
+        error: replaceError(s.error, undefined),
+      })),
+    projectFailed: (error) =>
+      set((s) => ({ project: { status: 'error' }, error: replaceError(s.error, error) })),
     engineReady: ({ version, models }) =>
       set((s) => ({ engine: { ...s.engine, status: 'ready', version, models } })),
     engineFailed: (error) => set((s) => ({ engine: { ...s.engine, status: 'failed', busy: false }, error })),
@@ -188,10 +195,10 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       set((s) => ({
         plan,
         stale: false,
-        error: s.error && s.error.kind !== 'boot' ? undefined : s.error,
+        error: replaceError(s.error, undefined),
       })),
-    rejected: (error) => set({ error }),
-    clearError: () => set({ error: undefined }),
+    rejected: (error) => set((s) => ({ error: replaceError(s.error, error) })),
+    clearError: () => set((s) => ({ error: replaceError(s.error, undefined) })),
     notify: (text) => {
       const id = ++noticeId;
       set((s) => ({ notices: [...s.notices, { id, text }] }));
@@ -209,6 +216,19 @@ function withPatch(scenario: ScenarioInput, patch: Partial<ScenarioInput>): Scen
     else next[key] = value;
   }
   return next as unknown as ScenarioInput;
+}
+
+/** The errors only a reload clears: the engine never started, or it stopped and could not be restarted. */
+export function isBlocking(error: SessionError | undefined): boolean {
+  return error?.kind === 'boot' || error?.kind === 'stopped';
+}
+
+/** A blocking error stays until the page reloads; any other gives way to `next`. */
+function replaceError(
+  error: SessionError | undefined,
+  next: SessionError | undefined,
+): SessionError | undefined {
+  return isBlocking(error) ? error : next;
 }
 
 /** An edit of the thing the worker rejected clears that rejection; other errors stay. */

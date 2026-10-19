@@ -1,4 +1,7 @@
-/** What a source may hold before the page refuses it: the engine is fast, the browser's memory is the limit. */
+/**
+ * What a source may hold before the page refuses it: the engine is fast, the browser's memory is the limit. A walk
+ * does not read a file over the per-file limit: it keeps the rest and names what it left out.
+ */
 export const LIMITS = {
   fileBytes: 2 * 1024 * 1024,
   totalBytes: 20 * 1024 * 1024,
@@ -23,4 +26,35 @@ export function overLimit(files: Record<string, string>): string | undefined {
   if (total > LIMITS.totalBytes)
     return `${mb(total)} in all; the page takes at most ${mb(LIMITS.totalBytes)}`;
   return undefined;
+}
+
+/** A project file a walk did not read for its size. */
+export interface Skipped {
+  path: string;
+  bytes: number;
+}
+
+/** What a walk gathered: the project files it read, by path, and the ones it left out. */
+export interface Walked {
+  files: Record<string, string>;
+  skipped: Skipped[];
+}
+
+/** Reads a project file into the walk, or leaves it out when it is over the per-file limit; true when it read it. */
+export async function readWithin(file: Blob, path: string, walked: Walked): Promise<boolean> {
+  if (file.size > LIMITS.fileBytes) {
+    walked.skipped.push({ path, bytes: file.size });
+    return false;
+  }
+  walked.files[path] = await file.text();
+  return true;
+}
+
+const NAMED = 3;
+
+/** The files a walk left out, in the words of the per-file limit. */
+export function leftOut(skipped: Skipped[]): string {
+  const named = skipped.slice(0, NAMED).map((s) => `${s.path} (${mb(s.bytes)})`);
+  const more = skipped.length > NAMED ? ` and ${skipped.length - NAMED} more` : '';
+  return `left out ${named.join(', ')}${more}; a file may be at most ${mb(LIMITS.fileBytes)}`;
 }

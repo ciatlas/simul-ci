@@ -18,7 +18,12 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'scripts/test/**/*.test.ts'],
+    include: [
+      'packages/*/test/**/*.test.ts',
+      'apps/*/test/**/*.test.ts',
+      'apps/*/test/**/*.test.tsx',
+      'scripts/test/**/*.test.ts',
+    ],
     // @actions/workflow-parser imports JSON without import attributes; let Vite transform it like a bundler does.
     server: { deps: { inline: [/@actions\/workflow-parser/, /@actions\/expressions/, /@ciatlas\/core/] } },
     coverage: {

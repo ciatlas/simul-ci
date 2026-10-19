@@ -197,7 +197,8 @@ jobs:
       - run: pnpm --filter @simulci/web typecheck
       - run: pnpm --filter @simulci/web build
       - name: The bundle keeps its contract
-        # The engine only in the worker chunk, core's browser entry, no Node built-in, gzip budgets.
+        # The engine only in the worker chunk, core's browser entry, no Node built-in or packages/node, no inlined
+        # font, gzip budgets.
         run: node scripts/check-web-bundle.mjs apps/web/dist
 
   ci-passed:

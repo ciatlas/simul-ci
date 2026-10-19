@@ -1,14 +1,19 @@
-import { type DragEvent, useState } from 'react';
+import { type DragEvent, type ReactNode, useState } from 'react';
+import { restoreDefault } from '../state/url-sync';
 import { TextView } from '../text/TextView';
 import { EmptyState } from './EmptyState';
 import { ErrorBanner } from './ErrorBanner';
+import { ErrorBoundary } from './ErrorBoundary';
 import { useApp, useSession } from './providers';
 import { ScenarioForm } from './ScenarioForm';
 import { StatusBar } from './StatusBar';
 import { Toaster } from './Toaster';
 import { TopBar } from './TopBar';
 
-/** The screen: top bar, banner, the scenario beside the plan, the status line. Drop a folder anywhere. */
+/**
+ * The screen: top bar, banner, the scenario beside the plan, the status line. Drop a folder anywhere. A render error
+ * in the scenario or the plan stays inside them, so the top bar and the source menu keep working.
+ */
 export function SimulateView() {
   const { sources } = useApp();
   const hasFiles = useSession((s) => Object.keys(s.files.byPath).length > 0);
@@ -36,14 +41,16 @@ export function SimulateView() {
       <TopBar />
       <ErrorBanner />
       {hasFiles ? (
-        <main className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[320px_1fr]">
-          <aside className="min-h-0 overflow-y-auto border-border border-b bg-chrome p-4 md:border-r md:border-b-0">
-            <ScenarioForm />
-          </aside>
-          <section className="min-h-0 overflow-auto">
-            <TextView />
-          </section>
-        </main>
+        <PlanBoundary>
+          <main className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[320px_1fr]">
+            <aside className="min-h-0 overflow-y-auto border-border border-b bg-chrome p-4 md:border-r md:border-b-0">
+              <ScenarioForm />
+            </aside>
+            <section className="min-h-0 overflow-auto">
+              <TextView />
+            </section>
+          </main>
+        </PlanBoundary>
       ) : (
         <EmptyState />
       )}
@@ -57,5 +64,17 @@ export function SimulateView() {
         </div>
       )}
     </div>
+  );
+}
+
+/** The boundary tries again on a new scenario or new files, and its button puts back the page's own scenario. */
+function PlanBoundary({ children }: { children: ReactNode }) {
+  const { store } = useApp();
+  const scenario = useSession((s) => s.scenario);
+  const files = useSession((s) => s.files.version);
+  return (
+    <ErrorBoundary resetKeys={[scenario, files]} onReset={() => restoreDefault(store)}>
+      {children}
+    </ErrorBoundary>
   );
 }

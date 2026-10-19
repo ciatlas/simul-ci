@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 /**
- * The browser bundle's contract, checked from the source maps of `apps/web/dist`:
+ * The browser bundle's contract, checked from the source maps and stylesheets of `apps/web/dist`:
  * - the engine (and with it @ciatlas/core, zod, yaml, @actions/*, picomatch) lives only in the worker chunk;
  * - the worker chunk is built from core's browser entry (no node-fs, no git);
- * - no chunk imports a Node built-in;
+ * - no chunk imports a Node built-in or holds the Node host (packages/node);
+ * - no stylesheet inlines a font, which the CSP's font-src 'self' would refuse;
  * - every chunk stays under its gzip budget.
- * Usage: node scripts/check-web-bundle.mjs [apps/web/dist]
+ * The rules are scripts/web-bundle-rules.mjs. Usage: node scripts/check-web-bundle.mjs [apps/web/dist]
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { chunkProblems, stylesheetProblems } from './web-bundle-rules.mjs';
 
 const dist = process.argv[2] ?? 'apps/web/dist';
 const assets = join(dist, 'assets');
@@ -20,49 +22,22 @@ const BUDGETS = [
   { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 130 },
 ];
 
-/** What may only appear in the worker chunk. */
-const WORKER_ONLY = [
-  /@ciatlas\/core\//,
-  /\/@actions\//,
-  /\/zod\//,
-  /\/yaml\//,
-  /picomatch/,
-  /\/elkjs\//,
-  /cronstrue/,
-];
-/** Engine sources the page may use: the core-free entries. */
-const PAGE_ENGINE_OK = /packages\/engine\/src\/(plan|render)\//;
-const ENGINE = /packages\/engine\/src\//;
-
 const problems = [];
-const files = readdirSync(assets).filter((f) => f.endsWith('.js'));
+const assetFiles = readdirSync(assets);
+const files = assetFiles.filter((f) => f.endsWith('.js'));
 if (files.length === 0) problems.push(`no JavaScript chunk under ${assets}`);
 
 const rows = [];
 for (const file of files) {
   const code = readFileSync(join(assets, file), 'utf8');
   const gz = gzipSync(code).length / 1024;
-  const isWorker = file.startsWith('engine.worker-');
-  if (/from ?['"]node:|require\(['"]node:/.test(code)) problems.push(`${file} imports a Node built-in`);
   let sources = [];
   try {
     sources = JSON.parse(readFileSync(join(assets, `${file}.map`), 'utf8')).sources ?? [];
   } catch {
     problems.push(`${file} has no source map to check`);
   }
-  if (isWorker) {
-    if (!sources.some((s) => s.includes('project-browser')))
-      problems.push(`${file} was not built from core's browser entry`);
-    for (const s of sources)
-      if (/node-fs\.ts|\/git\.ts/.test(s) && s.includes('@ciatlas/core')) problems.push(`${file} holds ${s}`);
-  } else {
-    for (const s of sources) {
-      if (WORKER_ONLY.some((re) => re.test(s)))
-        problems.push(`${file} holds ${s}, which only the worker may`);
-      if (ENGINE.test(s) && !PAGE_ENGINE_OK.test(s))
-        problems.push(`${file} holds ${s}: the page may use only plan/ and render/`);
-    }
-  }
+  problems.push(...chunkProblems(file, sources));
   const byPackage = new Map();
   for (const s of sources) {
     const m = /node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?((?:@[^/]+\/)?[^/]+)/.exec(s);
@@ -78,6 +53,9 @@ for (const file of files) {
   if (budget && gz > budget.kB)
     problems.push(`${file} is ${gz.toFixed(1)} kB gzipped; the budget for ${budget.name} is ${budget.kB} kB`);
 }
+
+for (const file of assetFiles.filter((f) => f.endsWith('.css')))
+  problems.push(...stylesheetProblems(file, readFileSync(join(assets, file), 'utf8')));
 
 const table = ['| chunk | kB | gzip kB | sources |', '|---|---:|---:|---|'];
 for (const r of rows) {

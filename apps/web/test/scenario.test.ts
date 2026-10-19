@@ -76,6 +76,34 @@ describe('the first scenario', () => {
     expect(isLiteral('release-1')).toBe(true);
   });
 
+  it('starts from a callable workflow when every workflow is callable', () => {
+    const callable = (path: string, events: Outline['workflows'][number]['events']) => ({
+      path,
+      callable: true,
+      events,
+      jobs: [],
+      onLine: 1,
+    });
+    expect(
+      defaultScenario({
+        files: [],
+        workflows: [
+          callable('.github/workflows/a.yml', []),
+          callable('.github/workflows/b.yml', [{ event: 'workflow_dispatch' }]),
+        ],
+        events: {},
+      }),
+    ).toEqual({
+      scenario: { event: 'workflow_dispatch' },
+      assumed: ['event'],
+      focus: '.github/workflows/b.yml',
+    });
+    const { workflows } = outline([{ event: 'pull_request' }]);
+    const first = callable('.github/workflows/lib.yml', [{ event: 'push' }]);
+    const mixed = { files: [], workflows: [first, ...workflows.slice(1)], events: {} };
+    expect(defaultScenario(mixed).focus).toBe('.github/workflows/ci.yml');
+  });
+
   it("offers the focused workflow's events first, then the others, then a dispatch", () => {
     const o = outline([{ event: 'pull_request' }, { event: 'push', branches: ['main'] }]);
     expect(eventChoices(o, '.github/workflows/ci.yml')).toEqual([

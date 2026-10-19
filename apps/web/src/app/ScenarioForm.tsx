@@ -1,16 +1,28 @@
 import type { ScenarioInput } from '@simulci/engine';
-import { type ReactNode, useMemo } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { eventChoices } from '../scenario/defaults';
 import {
   activityTypes,
+  asBoolean,
+  CONCLUSIONS,
+  type Conclusion,
   changedText,
   crons,
   dispatchInputs,
+  inputValue,
   jsonText,
   parseChanged,
-  PATH_FILTER_EVENTS,
   pathPatterns,
   PR_EVENTS,
+  pushRef,
+  type RefKind,
+  readsChangedFiles,
+  refPatch,
+  releaseTag,
+  runConclusion,
+  runNamed,
+  sameChanged,
+  strayAction,
   withEvent,
   workflowNames,
 } from '../scenario/form';
@@ -52,13 +64,20 @@ export function ScenarioForm() {
     patch: (key, value) => patchScenario({ [key]: value === '' ? undefined : value }),
   };
   const event = scenario.event;
-  const Fields = FIELDS_BY_EVENT[event] ?? (PR_EVENTS.has(event) ? PullRequestFields : undefined);
+  const Fields = FIELDS_BY_EVENT.get(event) ?? (PR_EVENTS.has(event) ? PullRequestFields : undefined);
   return (
     <form className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()} aria-label="Scenario">
-      <EventField f={f} focus={focus} onChange={(e) => setScenario(withEvent(scenario, e))} />
+      <EventField
+        f={f}
+        focus={focus}
+        onChange={(e) => {
+          const next = withEvent(scenario, e);
+          if (next !== scenario) setScenario(next);
+        }}
+      />
       <ActivityTypeField f={f} />
       {Fields && <Fields f={f} patchScenario={patchScenario} />}
-      {PATH_FILTER_EVENTS.has(event) && scenario.tag === undefined && <ChangedFilesField f={f} />}
+      {readsChangedFiles(scenario) && <ChangedFilesField f={f} />}
     </form>
   );
 }
@@ -66,13 +85,13 @@ export function ScenarioForm() {
 type FieldsProps = { f: Fields; patchScenario: (patch: Partial<ScenarioInput>) => void };
 
 /** The fields an event owns; pull-request events share theirs. */
-const FIELDS_BY_EVENT: Record<string, (props: FieldsProps) => ReactNode> = {
-  push: PushRefField,
-  release: ({ f }) => <TextField f={f} k="tag" label="Tag" placeholder="v1.2.3" />,
-  schedule: CronField,
-  workflow_run: WorkflowRunFields,
-  workflow_dispatch: DispatchFields,
-};
+const FIELDS_BY_EVENT = new Map<string, (props: FieldsProps) => ReactNode>([
+  ['push', PushRefField],
+  ['release', ReleaseTagField],
+  ['schedule', CronField],
+  ['workflow_run', WorkflowRunFields],
+  ['workflow_dispatch', DispatchFields],
+]);
 
 function EventField({
   f,
@@ -84,14 +103,24 @@ function EventField({
   onChange: (e: string) => void;
 }) {
   const choices = useMemo(() => eventChoices(f.outline, focus), [f.outline, focus]);
-  const known = choices.some((c) => c.event === f.scenario.event);
+  const from = useSession((s) => s.scenarioFrom);
+  // Picking other… keeps the free-text field open while its text passes through the listed names; a scenario
+  // set from outside (the URL, the defaults) closes it.
+  const [other, setOther] = useState(false);
+  const [seen, setSeen] = useState(f.scenario);
+  if (seen !== f.scenario) {
+    setSeen(f.scenario);
+    if (from !== 'author') setOther(false);
+  }
+  const free = other || !choices.some((c) => c.event === f.scenario.event);
   return (
     <label className={label}>
       Event
       <select
         className={field + f.mark('event')}
-        value={known ? f.scenario.event : '…'}
+        value={free ? '…' : f.scenario.event}
         onChange={(e) => {
+          setOther(e.target.value === '…');
           if (e.target.value !== '…') onChange(e.target.value);
         }}
         aria-invalid={f.issueFor('event') ? true : undefined}
@@ -106,7 +135,7 @@ function EventField({
         ))}
         <option value="…">other…</option>
       </select>
-      {!known && (
+      {free && (
         <input
           className={field}
           value={f.scenario.event}
@@ -123,6 +152,7 @@ function EventField({
 function ActivityTypeField({ f }: { f: Fields }) {
   const types = useMemo(() => activityTypes(f.outline, f.scenario.event), [f.outline, f.scenario.event]);
   if (!types) return null;
+  const stray = strayAction(types, f.scenario.action);
   const empty = types.required
     ? f.scenario.action === undefined
       ? 'choose…'
@@ -138,6 +168,11 @@ function ActivityTypeField({ f }: { f: Fields }) {
         aria-invalid={f.issueFor('action') ? true : undefined}
       >
         {empty !== undefined && <option value="">{empty}</option>}
+        {stray !== undefined && (
+          <option value={stray}>
+            {stray} · not a type of {f.scenario.event}
+          </option>
+        )}
         {types.allowed.map((t) => (
           <option key={t} value={t}>
             {t}
@@ -161,7 +196,18 @@ function PushRefField({
   f: Fields;
   patchScenario: (patch: Partial<ScenarioInput>) => void;
 }) {
-  const kind = f.scenario.tag !== undefined ? 'tag' : 'branch';
+  const from = useSession((s) => s.scenarioFrom);
+  const named = pushRef(f.scenario);
+  // Branch or Tag is the author's choice while the field is empty; a ref the scenario names, or a scenario set
+  // from outside (the URL, the defaults), decides it.
+  const seed = named.kind ?? (from === 'author' ? undefined : 'branch');
+  const [chosen, setChosen] = useState<RefKind>(seed ?? 'branch');
+  if (seed !== undefined && seed !== chosen) setChosen(seed);
+  const kind = seed ?? chosen;
+  const choose = (next: RefKind, name: string): void => {
+    setChosen(next);
+    patchScenario(refPatch(next, name));
+  };
   return (
     <div className="flex flex-col gap-1">
       <div className="flex gap-3 text-muted text-xs">
@@ -170,7 +216,7 @@ function PushRefField({
             type="radio"
             name="ref-kind"
             checked={kind === 'branch'}
-            onChange={() => patchScenario({ tag: undefined, branch: f.scenario.defaultBranch ?? 'main' })}
+            onChange={() => choose('branch', f.scenario.defaultBranch ?? 'main')}
           />
           Branch
         </label>
@@ -179,15 +225,15 @@ function PushRefField({
             type="radio"
             name="ref-kind"
             checked={kind === 'tag'}
-            onChange={() => patchScenario({ branch: undefined, ref: undefined, tag: 'v1.0.0' })}
+            onChange={() => choose('tag', 'v1.0.0')}
           />
           Tag
         </label>
       </div>
       <input
         className={field + f.mark(kind)}
-        value={f.scenario[kind] ?? ''}
-        onChange={(e) => f.patch(kind, e.target.value)}
+        value={named.name}
+        onChange={(e) => patchScenario(refPatch(kind, e.target.value))}
         placeholder={kind === 'tag' ? 'v1.2.3' : 'main'}
         aria-label={kind === 'tag' ? 'Tag' : 'Branch'}
         aria-invalid={f.issueFor(kind) ? true : undefined}
@@ -195,6 +241,24 @@ function PushRefField({
       />
       <Issue text={f.issueFor(kind)} />
     </div>
+  );
+}
+
+/** A release runs on its tag: the field reads a tag given as `ref` too, and writes it as `tag` alone. */
+function ReleaseTagField({ f, patchScenario }: FieldsProps) {
+  return (
+    <label className={label}>
+      Tag
+      <input
+        className={field + f.mark('tag')}
+        value={releaseTag(f.scenario)}
+        onChange={(e) => patchScenario(refPatch('tag', e.target.value))}
+        placeholder="v1.2.3"
+        aria-invalid={f.issueFor('tag') ? true : undefined}
+        spellCheck={false}
+      />
+      <Issue text={f.issueFor('tag')} />
+    </label>
   );
 }
 
@@ -233,6 +297,8 @@ function CronField({ f }: { f: Fields }) {
 
 function WorkflowRunFields({ f }: { f: Fields }) {
   const run = f.scenario.workflow_run;
+  // The schema needs the triggering workflow's name: a conclusion picked before it waits here.
+  const [chosen, setChosen] = useState<Conclusion>();
   return (
     <>
       <SelectField
@@ -241,16 +307,23 @@ function WorkflowRunFields({ f }: { f: Fields }) {
         label="Triggering workflow"
         options={workflowNames(f.outline)}
         value={run?.name ?? ''}
-        onChange={(v) => f.patch('workflow_run', v ? { ...run, name: v } : '')}
+        onChange={(v) => {
+          setChosen(v ? undefined : run?.conclusion);
+          f.patch('workflow_run', v ? runNamed(run, v, chosen) : '');
+        }}
       />
       <label className={label}>
         Its conclusion
         <select
           className={field}
-          value={run?.conclusion ?? 'success'}
-          onChange={(e) => run && f.patch('workflow_run', { ...run, conclusion: e.target.value })}
+          value={runConclusion(run, chosen)}
+          onChange={(e) => {
+            const conclusion = e.target.value as Conclusion;
+            if (run) f.patch('workflow_run', { ...run, conclusion });
+            else setChosen(conclusion);
+          }}
         >
-          {['success', 'failure', 'cancelled', 'skipped'].map((c) => (
+          {CONCLUSIONS.map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
@@ -263,13 +336,24 @@ function WorkflowRunFields({ f }: { f: Fields }) {
 
 function ChangedFilesField({ f }: { f: Fields }) {
   const patterns = pathPatterns(f.outline, f.scenario.event);
+  const changed = f.scenario.changed;
+  // The text is the author's; a change from outside (the URL, a pin) replaces it unless it already spells it.
+  const [text, setText] = useState(() => changedText(changed));
+  const [shown, setShown] = useState(changed);
+  if (changed !== shown) {
+    setShown(changed);
+    if (!sameChanged(text, changed)) setText(changedText(changed));
+  }
   return (
     <label className={label}>
       Changed files <span className="text-muted">(one path per line; empty = unknown)</span>
       <textarea
         className={`${field} min-h-24 font-mono`}
-        value={changedText(f.scenario.changed)}
-        onChange={(e) => f.patch('changed', parseChanged(e.target.value) ?? '')}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (!sameChanged(e.target.value, changed)) f.patch('changed', parseChanged(e.target.value) ?? '');
+        }}
         placeholder={'src/index.ts\ndocs/readme.md (added)'}
         spellCheck={false}
         aria-invalid={f.issueFor('changed') ? true : undefined}
@@ -300,7 +384,7 @@ function DispatchFields({ f }: { f: Fields }) {
         <DispatchInput
           key={input.name}
           input={input}
-          value={f.scenario.inputs?.[input.name]}
+          value={inputValue(f.scenario.inputs, input.name)}
           onChange={(v) => set(input.name, v)}
         />
       ))}
@@ -351,12 +435,12 @@ interface InputProps {
 
 /** A switch; the default is not sent, the engine applies it. */
 function BooleanInput({ title, input, value, onChange }: InputProps) {
-  const fallback = input.default === true;
+  const fallback = asBoolean(input.default);
   return (
     <label className="flex items-center gap-2 text-xs">
       <input
         type="checkbox"
-        checked={value === undefined ? fallback : value === true}
+        checked={value === undefined ? fallback : asBoolean(value)}
         onChange={(e) => onChange(e.target.checked === fallback ? undefined : e.target.checked)}
       />
       {title}
@@ -394,7 +478,7 @@ function TextField({
   placeholder,
 }: {
   f: Fields;
-  k: 'base' | 'head' | 'tag';
+  k: 'base' | 'head';
   label: string;
   placeholder: string;
 }) {

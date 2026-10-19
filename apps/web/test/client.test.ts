@@ -7,17 +7,23 @@ class FakeWorker implements WorkerLike {
   sent: { id: number; type: string }[] = [];
   terminated = false;
   private listeners: ((event: { data: unknown }) => void)[] = [];
+  private errorListeners: ((event: { data: unknown }) => void)[] = [];
   postMessage(message: unknown): void {
     this.sent.push(message as { id: number; type: string });
   }
   addEventListener(type: string, listener: (event: { data: unknown }) => void): void {
     if (type === 'message') this.listeners.push(listener);
+    if (type === 'error') this.errorListeners.push(listener);
   }
   terminate(): void {
     this.terminated = true;
   }
   reply(data: unknown): void {
     for (const l of this.listeners) l({ data });
+  }
+  /** The script failed to load or threw at the top level. */
+  crash(): void {
+    for (const l of this.errorListeners) l({ data: undefined });
   }
   ready(over: Partial<ReadyResponse> = {}): void {
     this.reply({
@@ -90,6 +96,8 @@ describe('the engine client', () => {
     const client = createEngineClient({ spawn });
     const restarts: [number, number | undefined][] = [];
     client.onRestart((n, project) => restarts.push([n, project]));
+    const failures: string[] = [];
+    client.onFailure((message) => failures.push(message));
     workers[0]!.ready();
     await client.ready;
     void client.load({ files: { a: '' } });
@@ -131,6 +139,7 @@ describe('the engine client', () => {
     });
     expect(client.restarts()).toBe(3);
     expect(workers).toHaveLength(4);
+    expect(failures).toEqual(['the engine stopped responding']);
   });
 
   it('replays a stalled load with its own promise and holds waiting requests until the new project is known', async () => {
@@ -155,6 +164,77 @@ describe('the engine client', () => {
     ]);
     workers[1]!.reply({ ...plan(workers[1]!.sent[1]!.id), project: 1 });
     expect((await sim).type).toBe('plan');
+  });
+
+  it('replays the newest load after a restart and answers the one it replaced as superseded', async () => {
+    const client = createEngineClient({ spawn });
+    workers[0]!.ready();
+    await client.ready;
+    const answers: Record<string, unknown> = {};
+    void client.load({ files: { a: '' } }).then((r) => (answers.a = r));
+    void client.load({ files: { b: '' } }).then((r) => (answers.b = r));
+    expect(workers[0]!.sent).toEqual([{ id: 1, type: 'load', files: { a: '' } }]);
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(answers).toEqual({ a: { type: 'superseded' } });
+    workers[1]!.ready();
+    await client.ready;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(workers[1]!.sent).toEqual([{ id: 2, type: 'load', files: { b: '' } }]);
+    workers[1]!.reply({ id: 2, type: 'loaded', project: 1, outline: {}, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers.b).toMatchObject({ type: 'loaded', project: 1 });
+  });
+
+  it('holds a request made during the replayed load and sends it under the new project id', async () => {
+    const client = createEngineClient({ spawn });
+    workers[0]!.ready();
+    await client.ready;
+    void client.load({ files: { a: '' } });
+    workers[0]!.reply({ id: 1, type: 'loaded', project: 4, outline: {}, ms: 1 });
+    const stalled = client.simulate({ project: 4, scenario: { event: 'push' }, assume: [], detail: 'steps' });
+    await vi.advanceTimersByTimeAsync(3001);
+    workers[1]!.ready();
+    await client.ready;
+    await vi.advanceTimersByTimeAsync(0);
+    const newer = client.simulate({
+      project: 4,
+      scenario: { event: 'push', branch: 'x' },
+      assume: [],
+      detail: 'steps',
+    });
+    expect(workers[1]!.sent.map((m) => m.type)).toEqual(['load']);
+    expect(await stalled).toEqual({ type: 'superseded' });
+    workers[1]!.reply({ id: workers[1]!.sent[0]!.id, type: 'loaded', project: 1, outline: {}, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(workers[1]!.sent.map((m) => [m.type, (m as { project?: number }).project])).toEqual([
+      ['load', undefined],
+      ['simulate', 1],
+    ]);
+    workers[1]!.reply({ ...plan(workers[1]!.sent[1]!.id), project: 1 });
+    expect((await newer).type).toBe('plan');
+  });
+
+  it('tells its failure listeners once when the engine is gone for good, and nothing on terminate', async () => {
+    const failures: string[] = [];
+    const boot = createEngineClient({ spawn, readyTimeoutMs: 100 });
+    boot.onFailure((message) => failures.push(`boot: ${message}`));
+    workers[0]!.crash();
+    await vi.advanceTimersByTimeAsync(101);
+    expect(failures).toEqual(['boot: the engine failed to load']);
+    const later = createEngineClient({ spawn });
+    later.onFailure((message) => failures.push(`later: ${message}`));
+    workers[1]!.ready();
+    await later.ready;
+    void later.load({ files: { a: '' } });
+    await vi.advanceTimersByTimeAsync(3001);
+    workers[2]!.crash();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(failures).toEqual(['boot: the engine failed to load', 'later: the engine failed to load']);
+    const ended = createEngineClient({ spawn, readyTimeoutMs: 100 });
+    ended.onFailure((message) => failures.push(`ended: ${message}`));
+    ended.terminate();
+    await vi.advanceTimersByTimeAsync(101);
+    expect(failures).toHaveLength(2);
   });
 
   it('settles the held requests when the replacement worker never starts, and is final after terminate', async () => {

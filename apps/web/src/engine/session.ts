@@ -6,6 +6,7 @@ import type { EngineClient, SimulateResult } from '../worker/client';
 /**
  * The store's one bridge to the engine: new files are loaded and simulated at once; a changed scenario, assume
  * entries or detail re-simulates after a short quiet; answers for an older request, project or files are dropped.
+ * The engine reads busy while any request of the session is unanswered, and failed once the client gives up on it.
  */
 
 export interface SessionOptions {
@@ -25,37 +26,54 @@ export interface Session {
 export function createSession({ store, client, timers, debounceMs = 100 }: SessionOptions): Session {
   const actions = store.getState();
   let request = 0;
+  /** Requests of the session the client has not answered yet. */
+  let unanswered = 0;
+
+  const busy = (delta: 1 | -1): void => {
+    unanswered += delta;
+    if (store.getState().engine.busy !== unanswered > 0) actions.engineBusy(unanswered > 0);
+  };
 
   client.ready.then(
     (r) => actions.engineReady({ version: r.engine.version, models: r.models }),
-    (e: Error) => actions.engineFailed({ kind: 'boot', message: e.message }),
+    () => undefined, // the failure listener reports it
+  );
+  client.onFailure((message) =>
+    actions.engineFailed({
+      kind: store.getState().engine.status === 'booting' ? 'boot' : 'stopped',
+      message,
+    }),
   );
   client.onRestart((restarts, project) => {
     actions.engineRestarted(restarts, project);
     actions.notify(restarts > 1 ? `the engine restarted again (${restarts})` : 'the engine restarted');
   });
 
+  /** The load counts as unanswered until the simulate it leads to is answered, so busy does not blink between. */
   const load = async (version: number, byPath: Record<string, string>): Promise<void> => {
     actions.projectLoading();
-    actions.engineBusy(true);
-    const r = await client.load({ files: byPath });
-    if (store.getState().files.version !== version) return;
-    if (r.type === 'loaded') {
-      actions.projectReady(r.project, r.outline, version);
-      if (store.getState().scenarioFrom === 'default') {
-        const d = defaultScenario(r.outline);
-        actions.setScenario(d.scenario, { assumed: d.assumed, from: 'default' });
-        actions.setFocus(d.focus);
-        simulate.cancel();
+    busy(1);
+    try {
+      const r = await client.load({ files: byPath });
+      if (store.getState().files.version !== version) return;
+      if (r.type === 'loaded') {
+        actions.projectReady(r.project, r.outline, version);
+        if (store.getState().scenarioFrom === 'default') {
+          const d = defaultScenario(r.outline);
+          actions.setScenario(d.scenario, { assumed: d.assumed, from: 'default' });
+          actions.setFocus(d.focus);
+          simulate.cancel();
+        }
+        await run();
+      } else if (r.type === 'error') {
+        actions.projectFailed({
+          kind: r.kind === 'engine' ? 'engine' : 'source',
+          message: r.message,
+          ...(r.stack ? { stack: r.stack } : {}),
+        });
       }
-      await run();
-    } else if (r.type === 'error') {
-      actions.engineBusy(false);
-      actions.projectFailed({
-        kind: r.kind === 'engine' ? 'engine' : 'source',
-        message: r.message,
-        ...(r.stack ? { stack: r.stack } : {}),
-      });
+    } finally {
+      busy(-1);
     }
   };
 
@@ -65,10 +83,10 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
     const id = ++request;
     const files = s.files.version;
     const project = s.project.version;
-    actions.engineBusy(true);
+    busy(1);
     const r = await client.simulate({ project, scenario: s.scenario, assume: s.assume, detail: s.detail });
+    busy(-1);
     if (id !== request) return;
-    actions.engineBusy(false);
     await settle(r, files, project);
   };
 

@@ -1,50 +1,58 @@
 import { isProjectFile, mayHoldProjectFiles } from './filter';
-import { LIMITS } from './limits';
+import { LIMITS, readWithin, type Walked } from './limits';
 
 /**
  * A drop of a folder or of workflow files. A dropped folder is walked through its handle where the browser gives one
  * (Chromium, so Reload works) and through the older entry API elsewhere; dropped `.yml` files become workflows by
- * their names.
+ * their names. The items read only while the drop event lasts, so each one is taken before the first await.
  */
 
-export interface Dropped {
+export interface Dropped extends Walked {
+  /** The folder's name; for a drop of several items with a folder among them, a name for them all. */
   name?: string;
+  /** How a message calls the drop: `the folder <name>` for one folder, else `the drop`. */
+  where: string;
+  /** Only for a drop of exactly one folder, so a reload re-reads everything it brought. */
   handle?: FileSystemDirectoryHandle;
-  files: Record<string, string>;
 }
 
 type ItemWithHandle = DataTransferItem & { getAsFileSystemHandle?: () => Promise<FileSystemHandle | null> };
 
-export async function filesFromDrop(transfer: DataTransfer): Promise<Dropped> {
-  const files: Record<string, string> = {};
-  let name: string | undefined;
-  let handle: FileSystemDirectoryHandle | undefined;
-  for (const item of Array.from(transfer.items)) {
-    if (item.kind !== 'file') continue;
-    const h = await handleOf(item);
-    if (h?.kind === 'directory') {
-      const dir = h as FileSystemDirectoryHandle;
-      name ??= dir.name;
-      handle ??= dir;
-      await walkHandle(dir, '', 0, files);
-      continue;
-    }
-    const entry = item.webkitGetAsEntry?.();
-    if (entry?.isDirectory) {
-      name ??= entry.name;
-      await walkEntry(entry as FileSystemDirectoryEntry, '', 0, files);
-      continue;
-    }
-    const file = item.getAsFile();
-    if (file && /\.ya?ml$/i.test(file.name) && file.size <= LIMITS.fileBytes)
-      files[`.github/workflows/${file.name}`] = await file.text();
-  }
-  const out: Dropped = { files };
-  if (name !== undefined) out.name = name;
-  if (handle) out.handle = handle;
-  return out;
+/** What an item holds, in every form the browser offers it. */
+interface Taken {
+  handle: Promise<FileSystemHandle | null>;
+  entry: FileSystemEntry | null;
+  file: File | null;
 }
 
+/** What an item brought: a folder (with its handle where there is one) or a loose workflow file. */
+interface Part {
+  name: string;
+  folder: boolean;
+  /** False for a loose file left out for its size: it names nothing and costs no folder its handle. */
+  kept: boolean;
+  handle?: FileSystemDirectoryHandle;
+}
+
+export async function filesFromDrop(transfer: DataTransfer): Promise<Dropped> {
+  const taken = Array.from(transfer.items)
+    .filter((item) => item.kind === 'file')
+    .map(take);
+  const walked: Walked = { files: {}, skipped: [] };
+  const parts: Part[] = [];
+  for (const t of taken) {
+    const part = await readItem(t, walked);
+    if (part) parts.push(part);
+  }
+  return { ...sourceOf(parts), ...walked };
+}
+
+/** Everything an item offers, asked for at once: after the drop event the items read as empty. */
+function take(item: ItemWithHandle): Taken {
+  return { handle: handleOf(item), entry: item.webkitGetAsEntry?.() ?? null, file: item.getAsFile() };
+}
+
+/** Starts `getAsFileSystemHandle` now; its answer comes later. */
 async function handleOf(item: ItemWithHandle): Promise<FileSystemHandle | null> {
   if (!item.getAsFileSystemHandle) return null;
   try {
@@ -54,11 +62,51 @@ async function handleOf(item: ItemWithHandle): Promise<FileSystemHandle | null> 
   }
 }
 
+async function readItem(t: Taken, walked: Walked): Promise<Part | undefined> {
+  const h = await t.handle;
+  if (h?.kind === 'directory') {
+    const dir = h as FileSystemDirectoryHandle;
+    await walkHandle(dir, '', 0, walked);
+    return { name: dir.name, folder: true, kept: true, handle: dir };
+  }
+  if (t.entry?.isDirectory) {
+    await walkEntry(t.entry as FileSystemDirectoryEntry, '', 0, walked);
+    return { name: t.entry.name, folder: true, kept: true };
+  }
+  if (!t.file || !/\.ya?ml$/i.test(t.file.name)) return undefined;
+  const kept = await readWithin(t.file, `.github/workflows/${t.file.name}`, walked);
+  return { name: t.file.name, folder: false, kept };
+}
+
+type Called = Pick<Dropped, 'name' | 'where' | 'handle'>;
+
+/**
+ * What the drop is called and whether it keeps a handle. Loose files alone have no name: they join the pasted buffers.
+ * Messages say `the folder <name>` only for that folder dropped alone; a workflow file left out beside it makes it
+ * `the drop`, so the notice does not place that file in the folder.
+ */
+function sourceOf(parts: Part[]): Called {
+  const kept = parts.filter((p) => p.kept);
+  const [first, second] = kept;
+  if (!first || !kept.some((p) => p.folder)) return { where: 'the drop' };
+  if (!second) {
+    const one: Called = {
+      name: first.name,
+      where: parts.length === 1 ? `the folder ${first.name}` : 'the drop',
+    };
+    if (first.handle) one.handle = first.handle;
+    return one;
+  }
+  const name =
+    kept.length === 2 ? `${first.name} + ${second.name}` : `${first.name} + ${kept.length - 1} more`;
+  return { name, where: 'the drop' };
+}
+
 async function walkHandle(
   dir: FileSystemDirectoryHandle,
   prefix: string,
   depth: number,
-  files: Record<string, string>,
+  walked: Walked,
 ): Promise<void> {
   if (depth > LIMITS.depth) return;
   const entries = (
@@ -67,11 +115,8 @@ async function walkHandle(
   for await (const [entryName, h] of entries) {
     const path = prefix ? `${prefix}/${entryName}` : entryName;
     if (h.kind === 'directory') {
-      if (mayHoldProjectFiles(path)) await walkHandle(h, path, depth + 1, files);
-    } else if (isProjectFile(path)) {
-      const file = await h.getFile();
-      if (file.size <= LIMITS.fileBytes) files[path] = await file.text();
-    }
+      if (mayHoldProjectFiles(path)) await walkHandle(h, path, depth + 1, walked);
+    } else if (isProjectFile(path)) await readWithin(await h.getFile(), path, walked);
   }
 }
 
@@ -99,17 +144,15 @@ async function walkEntry(
   dir: FileSystemDirectoryEntry,
   prefix: string,
   depth: number,
-  files: Record<string, string>,
+  walked: Walked,
 ): Promise<void> {
   if (depth > LIMITS.depth) return;
   for (const entry of await allEntries(dir)) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isDirectory) {
       if (mayHoldProjectFiles(path))
-        await walkEntry(entry as FileSystemDirectoryEntry, path, depth + 1, files);
-    } else if (isProjectFile(path)) {
-      const file = await fileOf(entry as FileSystemFileEntry);
-      if (file.size <= LIMITS.fileBytes) files[path] = await file.text();
-    }
+        await walkEntry(entry as FileSystemDirectoryEntry, path, depth + 1, walked);
+    } else if (isProjectFile(path))
+      await readWithin(await fileOf(entry as FileSystemFileEntry), path, walked);
   }
 }

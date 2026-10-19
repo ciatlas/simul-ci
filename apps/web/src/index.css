@@ -5,6 +5,7 @@
 /*
  * The token sheet: a warm neutral ramp, one accent that never means a status, and the four run states shared by the
  * form, the panels and the graph. Light and dark are both first-class; the OS decides unless the author did.
+ * `data-theme` is set before the first paint by public/theme.js, then kept by app/theme.ts.
  */
 :root {
   --bg: #f7f4ee;

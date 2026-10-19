@@ -5,7 +5,11 @@
     // Run by the CI and release workflows.
     "scripts/*.mjs",
     "scripts/*.ts",
+    // Loaded by apps/web/index.html before the app's own module.
+    "apps/web/public/*.js",
   ],
+  // Vite serves apps/web/public at the site root, where index.html asks for it.
+  "ignoreUnresolvedImports": ["/theme.js"],
   // The engine is a library inside the workspace: what its index exports, and the members of what it exports, are
   // its API for the CLI, the Action, the web app and the server.
   "publicPackages": ["@simulci/engine", "@simulci/node"],

@@ -74,6 +74,7 @@ const STORED_SHAPES: Record<string, (v: Record<string, unknown>) => boolean> = {
 function isStoredSource(value: unknown): value is StoredSource {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  const check = typeof v.kind === 'string' ? STORED_SHAPES[v.kind] : undefined;
+  const check =
+    typeof v.kind === 'string' && Object.hasOwn(STORED_SHAPES, v.kind) ? STORED_SHAPES[v.kind] : undefined;
   return check !== undefined && check(v);
 }

@@ -25,8 +25,17 @@ export const isLiteral = (pattern: string): boolean => !/[*?[\]+!]/.test(pattern
 
 const firstLiteral = (patterns: string[] | undefined): string | undefined => patterns?.find(isLiteral);
 
+/**
+ * The workflow the first scenario is about: the first with events, a callable one only when no other listens. The
+ * outline leaves `workflow_call` out, so a callable workflow's events are the ones that run it on their own.
+ */
+function firstListening(outline: Outline): OutlineWorkflow | undefined {
+  const listening = outline.workflows.filter((w) => w.events.length > 0);
+  return listening.find((w) => !w.callable) ?? listening[0];
+}
+
 export function defaultScenario(outline: Outline, defaultBranch = 'main'): DefaultScenario {
-  const workflow = outline.workflows.find((w) => !w.callable && w.events.length > 0);
+  const workflow = firstListening(outline);
   if (!workflow) return { scenario: { event: 'push' }, assumed: ['event'] };
   const event = workflow.events[0]!;
   const scenario: ScenarioInput = { event: event.event };
