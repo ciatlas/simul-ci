@@ -77,13 +77,45 @@ describe('the scenario form', () => {
     await user.selectOptions(eventSelect(), '…');
     const name = screen.getByLabelText<HTMLInputElement>('Event name');
     await user.clear(name);
-    await user.type(name, 'push');
+    await user.type(name, 'push{Enter}');
     expect(screen.getByLabelText('Event name')).toBe(name);
-    await user.type(name, 'x');
+    await user.type(name, 'x{Enter}');
     expect(store.getState().scenario.event).toBe('pushx');
     expect(eventSelect().value).toBe('…');
     await user.selectOptions(eventSelect(), 'pull_request');
     expect(screen.queryByLabelText('Event name')).toBeNull();
+  });
+
+  it('writes an event name once the author is done with it, so the history gets one entry, not one per pause', async () => {
+    const { store, user } = mount({ event: 'push', branch: 'main' });
+    const written: string[] = [];
+    store.subscribe((s, prev) => {
+      if (s.scenario.event !== prev.scenario.event) written.push(s.scenario.event);
+    });
+    await user.selectOptions(eventSelect(), '…');
+    const name = screen.getByLabelText<HTMLInputElement>('Event name');
+    await user.clear(name);
+    await user.type(name, 'issues');
+    expect(name.value).toBe('issues');
+    expect(store.getState().scenario).toEqual({ event: 'push', branch: 'main' });
+    await user.keyboard('{Enter}');
+    expect(written).toEqual(['issues']);
+    await user.type(name, '_x');
+    await user.tab();
+    expect(written).toEqual(['issues', 'issues_x']);
+    expect(store.getState().scenario).toEqual({ event: 'issues_x', branch: 'main' });
+  });
+
+  it('drops a half-typed event name when a scenario comes from outside', async () => {
+    const { store, user } = mount({ event: 'issues' });
+    const name = screen.getByLabelText<HTMLInputElement>('Event name');
+    await user.type(name, '_x');
+    act(() => store.getState().setScenario({ event: 'deployment' }, { from: 'url' }));
+    expect(name.value).toBe('deployment');
+    await user.type(name, '_y');
+    act(() => store.getState().setScenario({ event: 'push', branch: 'main' }, { from: 'url' }));
+    expect(screen.queryByLabelText('Event name')).toBeNull();
+    expect(store.getState().scenario).toEqual({ event: 'push', branch: 'main' });
   });
 
   it('shows a listed event that comes from outside in the select, after other… was picked', async () => {
@@ -203,7 +235,7 @@ describe('the scenario form', () => {
 
   it('sends false for a boolean input whose quoted default is true', async () => {
     const { store, user } = mount({ event: 'workflow_dispatch' });
-    const dry = screen.getByRole<HTMLInputElement>('checkbox', { name: /dry/ });
+    const dry = screen.getByRole<HTMLInputElement>('switch', { name: /dry/ });
     expect(dry.checked).toBe(true);
     await user.click(dry);
     expect(store.getState().scenario.inputs).toEqual({ dry: false });
