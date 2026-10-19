@@ -17,8 +17,9 @@ import {
 /**
  * The engine worker as promises. Requests wait for `ready`; per kind at most one is in flight and one waits (a newer
  * waiting request replaces the older one, which is answered `superseded`); a reply that is not for the request in
- * flight is dropped; a request that takes longer than the watchdog allows restarts the worker, replays the last
- * `load` and the request, and after two restarts for the same files gives up with an error.
+ * flight is dropped; a request that takes longer than the watchdog allows restarts the worker, which loads the newest
+ * files again before the requests that were in flight are sent once more, and after two restarts for the same files
+ * the client gives up with an error.
  */
 
 export type Superseded = { type: 'superseded' };
@@ -33,6 +34,11 @@ export interface EngineClient {
   case(body: Omit<CaseRequest, 'id' | 'type'>): Promise<CaseResult>;
   /** Called after the worker was restarted by the watchdog and the files were loaded again under `project`. */
   onRestart(listener: (restarts: number, project: number | undefined) => void): void;
+  /**
+   * Called once when the engine is gone for good: it never started, the worker replacing a stalled one never
+   * started, or it stalled more often than the restarts allow. Every request from then on is answered with an error.
+   */
+  onFailure(listener: (message: string) => void): void;
   restarts(): number;
   terminate(): void;
 }
@@ -60,6 +66,8 @@ interface Pending {
   resolve: (response: EngineResponse | Superseded) => void;
   id?: number;
   timer?: unknown;
+  /** The load a restarted worker is sent first; its answer lets the other requests go. */
+  replay?: boolean;
 }
 
 const MIN_WATCHDOG_MS = 3000;
@@ -77,7 +85,7 @@ export function createEngineClient(options: ClientOptions): EngineClient {
   });
   let isReady = false;
   let failure: string | undefined;
-  /** Between a restart and the replayed load's answer: waiting requests hold, so none is answered `stale`. */
+  /** Between a restart and the replayed load's answer: requests wait, so none is answered `stale`. */
   let replaying = false;
   let nextId = 1;
   let lastMs = 0;
@@ -87,6 +95,7 @@ export function createEngineClient(options: ClientOptions): EngineClient {
   const inFlight = new Map<Kind, Pending>();
   const waiting = new Map<Kind, Pending>();
   const listeners: ((restarts: number, project: number | undefined) => void)[] = [];
+  const failureListeners: ((message: string) => void)[] = [];
 
   const post = (pending: Pending): void => {
     const id = nextId++;
@@ -112,8 +121,10 @@ export function createEngineClient(options: ClientOptions): EngineClient {
     if (kind === undefined) return; // not the request in flight: a stale or replayed answer
     const pending = inFlight.get(kind)!;
     inFlight.delete(kind);
+    const previous = lastProject;
     learn(response);
     settle(pending, response);
+    if (pending.replay) resume(previous, response);
     const next = waiting.get(kind);
     if (next) {
       waiting.delete(kind);
@@ -155,7 +166,9 @@ export function createEngineClient(options: ClientOptions): EngineClient {
 
   /** Settles everything queued with an engine error; later requests settle at once until a fresh client is made. */
   const failAll = (message: string): void => {
+    if (failure !== undefined) return;
     failure = message;
+    for (const l of failureListeners) l(message);
     const failed = (id: number): ErrorResponse => ({ id, type: 'error', kind: 'engine', message });
     for (const p of inFlight.values()) {
       if (p.timer !== undefined) clearTimer(p.timer);
@@ -174,66 +187,48 @@ export function createEngineClient(options: ClientOptions): EngineClient {
       worker.terminate();
       return;
     }
-    // The load to replay: the one in flight (its promise is kept), else the newest waiting, else the last one sent.
-    const load =
-      inFlight.get('load') ??
-      waiting.get('load') ??
-      (lastLoad ? { body: lastLoad, resolve: () => undefined } : undefined);
-    waiting.delete('load');
-    const replay = [...inFlight.values()].filter((p) => p.body.type !== 'load');
-    for (const p of inFlight.values()) if (p.timer !== undefined) clearTimer(p.timer);
-    inFlight.clear();
+    requeue();
     worker.terminate();
     replaying = true;
     spawn();
     ready.then(
-      () => replayAfterLoad(load, replay),
-      (e: Error) => {
-        // The replacement never started: failAll (from spawn) settled the queues; these were held aside.
-        const failed = (id: number): ErrorResponse => ({
-          id,
-          type: 'error',
-          kind: 'engine',
-          message: e.message,
-        });
-        if (load) settle(load, failed(load.id ?? 0));
-        for (const p of replay) settle(p, failed(p.id ?? 0));
-        replaying = false;
-      },
+      () => replayLoad(),
+      () => undefined, // failAll, called from spawn, settles the requests waiting for the replacement
     );
   };
 
-  /**
-   * The fresh worker numbers projects from 1 again: the load is replayed first, its new project id replaces the old
-   * one in the replayed and the waiting requests, and the restart listeners learn it so later requests carry it.
-   */
-  const replayAfterLoad = (load: Pending | undefined, replay: Pending[]): void => {
-    const previous = lastProject;
-    const resume = (project: number | undefined): void => {
-      const remap = (p: Pending): void => {
-        const body = p.body as { type: string; project?: number };
-        if (body.type !== 'load' && project !== undefined && body.project === previous)
-          body.project = project;
-      };
-      for (const p of replay) remap(p);
-      for (const p of waiting.values()) remap(p);
-      replaying = false;
-      for (const p of replay) submit(p);
-      flushWaiting();
-      for (const l of listeners) l(restarts, project);
-    };
-    if (!load) {
-      resume(undefined);
-      return;
+  /** Each request in flight waits for the replacement worker, unless a newer one of its kind already waits. */
+  const requeue = (): void => {
+    for (const [kind, p] of inFlight) {
+      if (p.timer !== undefined) clearTimer(p.timer);
+      if (waiting.has(kind)) p.resolve({ type: 'superseded' });
+      else waiting.set(kind, p);
     }
-    const resolve = load.resolve;
-    post({
-      body: load.body,
-      resolve: (response) => {
-        resolve(response);
-        resume(response.type === 'loaded' ? response.project : undefined);
-      },
-    });
+    inFlight.clear();
+  };
+
+  /** A fresh worker gets the newest load first, else the last one sent; the other requests wait for its answer. */
+  const replayLoad = (): void => {
+    const load = waiting.get('load') ?? (lastLoad ? { body: lastLoad, resolve: () => undefined } : undefined);
+    if (!load) return resume(lastProject);
+    waiting.delete('load');
+    load.replay = true;
+    post(load);
+  };
+
+  /**
+   * The fresh worker numbers projects from 1 again: the project id the replayed load answers replaces the old one
+   * in the waiting requests, and the restart listeners learn it so later requests carry it.
+   */
+  const resume = (previous: number | undefined, answer?: EngineResponse): void => {
+    const project = answer?.type === 'loaded' ? answer.project : undefined;
+    for (const p of waiting.values()) {
+      const body = p.body as { type: string; project?: number };
+      if (body.type !== 'load' && project !== undefined && body.project === previous) body.project = project;
+    }
+    replaying = false;
+    flushWaiting();
+    for (const l of listeners) l(restarts, project);
   };
 
   const submit = (pending: Pending): void => {
@@ -242,7 +237,7 @@ export function createEngineClient(options: ClientOptions): EngineClient {
       settle(pending, { id: 0, type: 'error', kind: 'engine', message: failure });
       return;
     }
-    if (!isReady || inFlight.has(kind)) {
+    if (!isReady || replaying || inFlight.has(kind)) {
       const older = waiting.get(kind);
       if (older) settle(older, { type: 'superseded' });
       waiting.set(kind, pending);
@@ -287,6 +282,9 @@ export function createEngineClient(options: ClientOptions): EngineClient {
     case: (body) => request<CaseResult>({ ...body, type: 'case' }),
     onRestart: (listener) => {
       listeners.push(listener);
+    },
+    onFailure: (listener) => {
+      failureListeners.push(listener);
     },
     restarts: () => restarts,
     terminate: () => {

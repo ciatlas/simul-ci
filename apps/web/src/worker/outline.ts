@@ -1,3 +1,4 @@
+/* oxlint-disable no-restricted-imports -- the worker is where the engine runs */
 import { ACTIVITY_TYPES, type LoadedProject, readSettings } from '@simulci/engine';
 import { isMap, isScalar, isSeq, LineCounter, parseDocument } from 'yaml';
 import type { Outline, OutlineEvent, OutlineFile, OutlineJob, OutlineWorkflow } from './protocol';

@@ -1,3 +1,4 @@
+/* oxlint-disable no-restricted-imports -- the worker is where the engine runs */
 import {
   type Decision,
   decidingClause,

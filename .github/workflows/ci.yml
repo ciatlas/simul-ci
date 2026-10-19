@@ -194,14 +194,12 @@ jobs:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @simulci/web typecheck
       - run: pnpm --filter @simulci/web build
-      - name: No Node built-in in the bundle
-        run: |
-          if grep -lE "from ?['\"]node:|require\(['\"]node:" apps/web/dist/assets/*.js; then
-            echo "::error::the browser bundle imports a Node built-in"
-            exit 1
-          fi
-          du -sh apps/web/dist/assets/*.js
+      - name: The bundle keeps its contract
+        # The engine only in the worker chunk, core's browser entry, no Node built-in or packages/node, no inlined
+        # font, gzip budgets.
+        run: node scripts/check-web-bundle.mjs apps/web/dist
 
   ci-passed:
     # The only required status check: add new jobs to `needs` instead of changing the branch rules.

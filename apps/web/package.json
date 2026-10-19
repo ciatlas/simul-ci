@@ -12,16 +12,25 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "@fontsource-variable/mona-sans": "5.3.0",
     "@simulci/engine": "workspace:*",
+    "@tanstack/react-router": "1.170.45",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "yaml": "^2.9.1"
+    "yaml": "^2.9.1",
+    "zustand": "5.0.15"
   },
   "devDependencies": {
+    "@simulci/node": "workspace:*",
     "@tailwindcss/vite": "4.3.3",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
+    "happy-dom": "20.14.5",
     "tailwindcss": "4.3.3",
     "vite": "8.3.4"
   }

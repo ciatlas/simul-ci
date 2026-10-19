@@ -8,12 +8,22 @@ export default defineConfig({
     alias: {
       // @ciatlas/core is a git dependency that ships its TypeScript source (github:ciatlas/core#vX.Y.Z), never built.
       '@ciatlas/core': fileURLToPath(new URL('./node_modules/@ciatlas/core/src/index.ts', import.meta.url)),
+      // Subpaths before the root: an alias matches by prefix, so the root would swallow `@simulci/engine/plan`.
+      '@simulci/engine/plan': fileURLToPath(new URL('./packages/engine/src/plan/index.ts', import.meta.url)),
+      '@simulci/engine/render': fileURLToPath(
+        new URL('./packages/engine/src/render/index.ts', import.meta.url),
+      ),
       '@simulci/engine': src('engine'),
       '@simulci/node': src('node'),
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'scripts/test/**/*.test.ts'],
+    include: [
+      'packages/*/test/**/*.test.ts',
+      'apps/*/test/**/*.test.ts',
+      'apps/*/test/**/*.test.tsx',
+      'scripts/test/**/*.test.ts',
+    ],
     // @actions/workflow-parser imports JSON without import attributes; let Vite transform it like a bundler does.
     server: { deps: { inline: [/@actions\/workflow-parser/, /@actions\/expressions/, /@ciatlas\/core/] } },
     coverage: {
