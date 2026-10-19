@@ -89,17 +89,19 @@ function run(command: PageCommand, s: SessionState & SessionActions, win: Window
   }
   if (command === 'reasons') {
     showPanel(s, 'reasons');
-    // The tab's panel exists once the store's change has rendered.
-    win.requestAnimationFrame(() =>
-      win.document.querySelector<HTMLElement>(panelSelector('reasons'))?.focus(),
-    );
+    focusPanel('reasons', win);
     return true;
   }
   return runView(command, s, win.innerWidth);
 }
 
-/** A right-panel tab's panel (`data-panel` in panels/Panels.tsx; Base UI owns the ids), so a key can focus it. */
-const panelSelector = (tab: PanelTab): string => `[data-panel="${tab}"]`;
+/**
+ * Puts the focus in a right-panel tab's panel (`data-panel` in panels/Panels.tsx; Base UI owns the ids) once the
+ * store's change has rendered it: after `r`, and after a button inside the panel opened another tab.
+ */
+export function focusPanel(tab: PanelTab, win: Window = window): void {
+  win.requestAnimationFrame(() => win.document.querySelector<HTMLElement>(`[data-panel="${tab}"]`)?.focus());
+}
 
 /** Opens the right panel on a tab. */
 function showPanel(s: SessionState & SessionActions, tab: PanelTab): boolean {
