@@ -325,6 +325,14 @@ describe('mergeScenario', () => {
       ),
     ).toEqual({ event: 'push', tag: 'v1', inputs: { a: 1, b: 2 }, vars: { X: '1' }, changed: ['b'] });
   });
+
+  it('merges the triggering run key by key, so a case may change its conclusion and keep its name', () => {
+    const given = { event: 'workflow_run', workflow_run: { name: 'CI', branch: 'main' } };
+    expect(mergeScenario(given, { workflow_run: { conclusion: 'failure' } })).toEqual({
+      event: 'workflow_run',
+      workflow_run: { name: 'CI', branch: 'main', conclusion: 'failure' },
+    });
+  });
 });
 
 describe('snapshots', () => {

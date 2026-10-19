@@ -21,7 +21,7 @@ export const RESULTS: readonly Result[] = ['success', 'failure', 'cancelled', 's
 
 /** `<path>` for a workflow, `<workflow>#<job>`, `<job>[<legKey>]`, `<leg>/<stepKey>`, `<step>><actionPath>`. */
 export type NodeId = string;
-/** `<node>.outputs.<name>`, `<node>.outcome`, `vars.X`, `inputs.x`, `hashFiles(<args>)`, `race:fail-fast:<leg>`, … */
+/** `<node>.outputs.<name>`, `<node>.outcome`, `<node>.env.<NAME>`, `inputs.x`, `hashFiles(<args>)`, `race:fail-fast:<leg>`, … */
 export type UnknownId = string;
 /** `assume[i]`, `cli[i]`, `config:<key>`, `model:<name>`. */
 export type MockRef = string;
@@ -249,6 +249,12 @@ export interface WorkflowPlan {
   depth: number;
 }
 
+/**
+ * What an unknown is, from its id: `step-output` `<node>.outputs.<name>` (a step's, or a leg's from a mock), `outcome`
+ * `<node>.outcome`, `env` `<step>.env.<NAME>` (a `$GITHUB_ENV` write), `race` `race:…`, `conflict` `conflict:…`
+ * (SC103), `var` the whole `vars` context (a variable the scenario does not set reads as `''`, as on GitHub, so
+ * `vars.X` is never unknown), and the scenario's (`input`, `secret`, `event`, `changed-files`, …).
+ */
 export type UnknownKind =
   | 'step-output'
   | 'outcome'
@@ -277,12 +283,17 @@ export interface Pin {
 export interface Unknown {
   id: UnknownId;
   kind: UnknownKind;
+  /** The step or leg (a job's one bare leg shares its id) whose output, outcome or env write it is; a race's leg. */
   producer?: NodeId;
   loc?: Loc;
   reads: Loc[];
   /** The nodes that run `maybe` because of it; the rank is its length. */
   affects: NodeId[];
-  /** Absent: never promised (a race). */
+  /**
+   * What would pin it: a scenario field, or an assume entry naming the producer (`step:` or `job:` by unit path, its
+   * leg as `matrix:`, `workflow:` when another workflow has a job of the same id) with the field prefilled (`''`, the
+   * outcome `failure`, a race's leg `cancelled`). Absent: nothing the author writes pins it.
+   */
   pin?: Pin;
   gap?: string;
 }
