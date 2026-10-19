@@ -329,7 +329,7 @@ function mockPath(ref: string | undefined, i: number): (string | number)[] {
 
 const SCENARIO_KEYS = Object.keys(ScenarioInputSchema.shape);
 const REF_GROUP = ['ref', 'branch', 'tag'];
-const MERGED = new Set(['inputs', 'vars', 'actor']);
+const MERGED = new Set(['inputs', 'vars', 'actor', 'workflow_run']);
 
 /** The case's scenario over the file's: records merge key by key, the ref group is replaced whole, the rest replaced. */
 export function mergeScenario(given: Given | undefined, when: When): ScenarioInput {

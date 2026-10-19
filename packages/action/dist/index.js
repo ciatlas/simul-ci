@@ -35769,7 +35769,7 @@ function pathsMatch(changed, filter) {
 }
 //#endregion
 //#region ../engine/src/paths.ts
-const ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+const ID$1 = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 var UnitPathError = class extends Error {
 	name = "UnitPathError";
 };
@@ -35793,7 +35793,7 @@ function parseJobSegment(part, text) {
 	const m = /^([^[.]+)(?:\[([^\]]*)\])?(?:\.(.+))?$/.exec(part);
 	if (!m) throw new UnitPathError(`cannot read '${part}' in '${text}'`);
 	const [, job, leg, step] = m;
-	if (!ID.test(job)) throw new UnitPathError(`'${job}' is not a job id in '${text}'`);
+	if (!ID$1.test(job)) throw new UnitPathError(`'${job}' is not a job id in '${text}'`);
 	const segment = { job };
 	if (leg !== void 0) segment.leg = parseLeg(leg, text);
 	if (step !== void 0) segment.step = parseStep(step, text);
@@ -35814,8 +35814,17 @@ function parseStep(step, text) {
 		if (!Number.isInteger(n) || n < 1) throw new UnitPathError(`'${step}' is not #<position> in '${text}'`);
 		return { index: n };
 	}
-	if (!ID.test(step)) throw new UnitPathError(`'${step}' is not a step id in '${text}'`);
+	if (!ID$1.test(step)) throw new UnitPathError(`'${step}' is not a step id in '${text}'`);
 	return { id: step };
+}
+function formatUnitPath(path) {
+	const body = path.segments.map((s) => {
+		const leg = s.leg ? `[${Object.entries(s.leg).map(([k, v]) => `${k}=${v}`).join(",")}]` : "";
+		const step = s.step ? s.step.id !== void 0 ? s.step.id : `#${s.step.index}` : "";
+		if (s.job === void 0) return step;
+		return `${s.job}${leg}${step ? `.${step}` : ""}`;
+	}).join("/");
+	return path.workflow === void 0 ? body : `${path.workflow}:${body}`;
 }
 /** Whether a path names the location: same depth, same jobs and steps, leg values a subset of the location's. */
 function pathMatches(path, location) {
@@ -44188,6 +44197,107 @@ function unitPathOfId(id, paths) {
 	return best === void 0 ? id : `${paths.get(best)}${id.slice(best.length)}`;
 }
 //#endregion
+//#region ../engine/src/plan/pins.ts
+const RACE = "race:fail-fast:";
+const ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+/** Sets `producer` and an assume `pin` on every unknown about a planned unit's field. */
+function assumePins(plan, units) {
+	for (const u of plan.unknowns) {
+		const ref = unitRef(u.id, units);
+		if (!ref) continue;
+		u.producer = ref.node;
+		const pin = pinOf(plan, ref.node, units.get(ref.node), ref.about);
+		if (pin) u.pin = pin;
+	}
+}
+/** The unit an unknown is about and what of it: the longest unit id followed by `.outputs.`, `.env.` or `.outcome`. */
+function unitRef(id, units) {
+	if (id.startsWith(RACE)) {
+		const node = id.slice(15);
+		return units.get(node)?.kind === "job" ? {
+			node,
+			about: { field: "cancelled" }
+		} : void 0;
+	}
+	if (id.startsWith("race:") || id.startsWith("conflict:")) return void 0;
+	for (let dot = id.lastIndexOf("."); dot > 0; dot = id.lastIndexOf(".", dot - 1)) {
+		const node = id.slice(0, dot);
+		if (!units.has(node)) continue;
+		const about = aboutOf(id.slice(dot + 1));
+		return about ? {
+			node,
+			about
+		} : void 0;
+	}
+}
+function aboutOf(rest) {
+	if (rest === "outcome") return { field: "outcome" };
+	for (const field of ["outputs", "env"]) if (rest.startsWith(`${field}.`) && rest.length > field.length + 1) return {
+		field,
+		name: rest.slice(field.length + 1)
+	};
+}
+function pinOf(plan, node, site, about) {
+	if (about.field === "env" && site.kind === "job") return void 0;
+	const named = namedBy(site.location);
+	if (!named) return void 0;
+	const entry = {};
+	if (sharesJobId(plan, node, site.location)) entry.workflow = site.location.workflow;
+	entry[site.kind] = named.path;
+	if (named.matrix) entry.matrix = named.matrix;
+	if (about.field === "cancelled" || about.field === "outcome") entry.outcome = about.field === "cancelled" ? "cancelled" : "failure";
+	else entry[about.field] = { [about.name]: "" };
+	return {
+		layer: "assume",
+		fragment: entry,
+		at: ["assume"]
+	};
+}
+/**
+* The unit path of a location, with the leg of its last segment taken out as `matrix:` values; undefined when a leg
+* further up cannot be written in the path, or an id is not one a path holds.
+*/
+function namedBy(location) {
+	const segments = segmentsOf(location);
+	if (!segments) return void 0;
+	const last = segments.at(-1);
+	const own = last.job === void 0 ? void 0 : last.leg;
+	if (own) delete last.leg;
+	if (!segments.every((s) => s.leg === void 0 || legInPath(s.leg))) return void 0;
+	const path = formatUnitPath({ segments });
+	return own && Object.keys(own).length ? {
+		path,
+		matrix: own
+	} : { path };
+}
+/** The chain as path segments: a job opens one, a step after a job's step opens one inside its composite action. */
+function segmentsOf(location) {
+	const segments = [];
+	for (const link of location.chain) if (link.kind === "step") addStep(segments, link);
+	else if (ID.test(link.id)) segments.push(link.leg ? {
+		job: link.id,
+		leg: { ...link.leg }
+	} : { job: link.id });
+	else return void 0;
+	return segments.length ? segments : void 0;
+}
+/** A step joins its job's segment, or opens one inside the composite action of the step before it. */
+function addStep(segments, link) {
+	const step = link.id !== void 0 && ID.test(link.id) ? { id: link.id } : { index: link.index };
+	const last = segments.at(-1);
+	if (last?.job !== void 0 && last.step === void 0) last.step = step;
+	else segments.push({ step });
+}
+/** Whether `[k=v,…]` reads back as these values: no `/`, `,` or `]`, no surrounding space, no `=` in a key. */
+const legInPath = (leg) => Object.entries(leg).every(([k, v]) => plainCell(k) && !k.includes("=") && plainCell(v));
+const plainCell = (s) => s.trim() === s && !/[/,\]]/.test(s);
+/** Whether another workflow of the plan has a job of the same id as the unit's first job. */
+function sharesJobId(plan, node, location) {
+	const first = location.chain[0];
+	if (first?.kind !== "job") return false;
+	return plan.workflows.some((w) => w.depth === 0 && !node.startsWith(`${w.id}#`) && w.jobs.some((j) => j.jobId === first.id));
+}
+//#endregion
 //#region ../engine/src/scenario.ts
 /**
 * A scenario: the facts about one run that the engine simulates. Authors write the input shape (in a test's `when:`,
@@ -45236,6 +45346,8 @@ var Planner = class {
 	diagnostics = [];
 	applied = [];
 	models = /* @__PURE__ */ new Map();
+	/** Every planned step and leg by id, with the location an assume entry is matched against. */
+	units = /* @__PURE__ */ new Map();
 	index;
 	constructor(loaded, scenario, detail, maxDepth, mocks, shipped) {
 		this.loaded = loaded;
@@ -45251,7 +45363,7 @@ var Planner = class {
 			depth: 0,
 			checkPrefix: ""
 		}));
-		return {
+		const plan = {
 			$schema: schemaUrl("runPlan"),
 			schemaVersion: 1,
 			engine: {
@@ -45269,6 +45381,8 @@ var Planner = class {
 			})).sort((a, b) => a.id.localeCompare(b.id)),
 			diagnostics: this.finishDiagnostics()
 		};
+		assumePins(plan, this.units);
+		return plan;
 	}
 	/** The mocks' own diagnostics, plus the entries that named nothing in this plan (SC102). */
 	finishDiagnostics() {
@@ -45416,74 +45530,65 @@ var Planner = class {
 			total: exp.combos.length || 1
 		};
 		plan.legs = this.legsOf(job, exp, segments, legCtx);
-		this.failFast(plan, job);
+		for (const leg of plan.legs) {
+			const location = {
+				workflow: ctx.wf.path,
+				chain: [...ctx.chain, legLinkOf(job, leg)]
+			};
+			this.units.set(leg.id, {
+				location,
+				kind: "job"
+			});
+			this.applyLegFacts(job, leg, jobNode, location);
+		}
+		this.failFast(plan);
 		plan.result = this.jobResultOf(runs, cond, continueOnError, plan.legs);
-		plan.outputs = this.jobOutputs(job, plan, jobNode);
-		this.applyJobFacts(job, plan, continueOnError, {
-			workflow: ctx.wf.path,
-			chain: [...ctx.chain, {
-				kind: "job",
-				id: job.id
-			}]
-		});
+		plan.outputs = this.jobOutputs(plan, jobNode);
 		return plan;
 	}
-	/** A mock on the job: its outcome applies at the job boundary (the steps stay planned), its outputs overlay. */
-	applyJobFacts(job, plan, continueOnError, location) {
-		const facts = this.mocks.factsFor(location, plan.id);
+	/**
+	* A mock on the job or one of its legs (`test[node=22]`, or `test` with `matrix:`): its outcome is the leg's result
+	* (the steps stay planned), its outputs overlay the leg's. The job's result and outputs are then read from its legs.
+	*/
+	applyLegFacts(job, leg, jobNode, location) {
+		const facts = this.mocks.factsFor(location, leg.id);
 		if (facts.outcome) {
-			const result = jobResult({
-				skipped: false,
-				continueOnError,
-				legResults: [facts.outcome.value]
-			});
-			plan.result = plan.runs.verdict === "maybe" ? unknown$1(plan.result.known ? [] : plan.result.unknowns, ["skipped", ...candidates(result) ?? []]) : result;
-			this.record(facts.outcome.by, plan.id, "outcome");
-			if (job.steps.length) this.diagnostics.push({
+			leg.result = facts.outcome.value;
+			this.record(facts.outcome.by, leg.id, "outcome");
+			if (job.steps.length) this.diagnoseOnce({
 				severity: "info",
 				code: "SC108",
 				message: `${facts.outcome.by} sets the outcome of job ${job.id}; its steps are planned as written`,
-				node: plan.id,
+				node: jobNode,
 				mock: facts.outcome.by
 			});
 		}
-		const declared = job.uses ? Object.keys(plan.outputs) : Object.keys(job.outputs);
-		this.overlayOutputs(plan.outputs, facts, plan.id, {
+		const declared = job.uses ? Object.keys(leg.outputs) : Object.keys(job.outputs);
+		this.overlayOutputs(leg.outputs, facts, leg.id, {
 			closed: true,
 			names: declared,
 			what: `job ${job.id}`
 		});
 	}
+	/** A diagnostic said once: every leg of a matrix that meets the same mock says the same thing. */
+	diagnoseOnce(d) {
+		if (!this.diagnostics.some((x) => x.code === d.code && x.mock === d.mock && x.message === d.message)) this.diagnostics.push(d);
+	}
 	/** Fail-fast: once a leg fails, the other legs are cancelled or finish first; `needs` reads the job as failed either way. */
-	failFast(plan, job) {
+	failFast(plan) {
 		if (!plan.matrix?.failFast.known || !plan.matrix.failFast.value) return;
 		if (!plan.legs.some((l) => l.result.known && l.result.value === "failure")) return;
 		for (const leg of plan.legs) {
 			if (!leg.result.known || leg.result.value !== "success") continue;
 			const id = `race:fail-fast:${leg.id}`;
-			const matrix = Object.fromEntries(Object.entries(leg.values).map(([k, v]) => [k, v.known ? stringOf(v.value) : "?"]));
-			this.register({
-				id,
-				kind: "race",
-				reads: [],
-				affects: [],
-				pin: {
-					layer: "assume",
-					fragment: {
-						job: job.id,
-						matrix,
-						outcome: "cancelled"
-					},
-					at: ["assume"]
-				}
-			}, void 0);
+			this.note([id]);
 			leg.result = unknown$1([id], ["success", "cancelled"]);
 		}
 	}
 	/** Mocked outputs over the unit's own; a name a closed interface does not declare is an error (SC101). */
 	overlayOutputs(outputs, facts, node, iface) {
 		for (const [name, fact] of Object.entries(facts.outputs)) {
-			if (iface.closed && !iface.names.includes(name)) this.diagnostics.push({
+			if (iface.closed && !iface.names.includes(name)) this.diagnoseOnce({
 				severity: "error",
 				code: "SC101",
 				message: `${fact.by} sets output '${name}', which ${iface.what} does not declare${iface.names.length ? ` (it declares ${iface.names.join(", ")})` : ""}`,
@@ -45521,11 +45626,23 @@ var Planner = class {
 			node: ctx.wfNode,
 			verdict: ctx.triggered.verdict
 		};
-		const runs = decide(ctx.triggered, cond.value, [parent, ifReason]);
+		const runs = this.nestingLimit(job, ctx, decide(ctx.triggered, cond.value, [parent, ifReason]));
 		if (runs.verdict === "maybe") this.noteValue(cond.value, jobNode);
 		return {
 			runs,
 			cond
+		};
+	}
+	/** A call past the nesting limit does not run, whatever its `if:` says: the job stops, not only its legs. */
+	nestingLimit(job, ctx, runs) {
+		if (runs.verdict === "no" || !job.uses || ctx.depth + 1 < this.maxDepth) return runs;
+		if (!this.index.calleeOf(job)) return runs;
+		return {
+			verdict: "no",
+			chain: [...runs.chain, {
+				kind: "limit",
+				limit: "nesting"
+			}]
 		};
 	}
 	matrixPlan(job, exp, ctx, jobNode) {
@@ -45576,25 +45693,29 @@ var Planner = class {
 		};
 		return [leg];
 	}
+	/**
+	* The result `needs` reads. A reader runs only where the workflow does, so a job `maybe` only because its workflow
+	* is reads as its legs did; an `if:` the plan cannot decide adds `skipped`.
+	*/
 	jobResultOf(runs, cond, continueOnError, legs) {
 		const result = jobResult({
 			skipped: false,
 			continueOnError,
 			legResults: legs.map((l) => l.result)
 		});
-		if (runs.verdict !== "maybe") return result;
-		return unknown$1(cond.value.known ? [] : cond.value.unknowns, ["skipped", ...candidates(result) ?? []]);
+		return runs.verdict === "maybe" ? orSkipped(result, cond.value, "first") : result;
 	}
 	/** A job's outputs as readers see them: the legs' values, where an empty value never wins and the last to finish does (lab 8). */
-	jobOutputs(job, plan, jobNode) {
+	jobOutputs(plan, jobNode) {
 		const out = {};
-		const names = job.uses ? [...new Set(plan.legs.flatMap((l) => Object.keys(l.outputs)))] : Object.keys(job.outputs);
+		const names = [...new Set(plan.legs.flatMap((l) => Object.keys(l.outputs)))];
 		for (const name of names) {
 			const values = plan.legs.map((l) => l.outputs[name] ?? known$1(""));
 			const ids = values.flatMap((v) => v.known ? [] : v.unknowns);
 			const nonEmpty = [...new Set(values.flatMap((v) => v.known && v.value !== "" ? [v.value] : []))];
+			const chosen = nonEmpty[0] ?? "";
 			if (ids.length) out[name] = unknown$1(ids);
-			else if (nonEmpty.length <= 1) out[name] = known$1(nonEmpty[0] ?? "");
+			else if (nonEmpty.length <= 1) out[name] = values.find((v) => v.known && v.value === chosen);
 			else {
 				const race = `race:matrix-outputs:${jobNode}.${name}`;
 				this.note([race]);
@@ -45628,22 +45749,17 @@ var Planner = class {
 		if (combo) leg.origin = combo.origin;
 		if (job.runsOn) leg.runsOn = this.runsOn(job, ctx.wf, state, legId);
 		if (job.environment) leg.environment = this.environment(job, ctx.wf, state, legId);
+		const location = {
+			workflow: ctx.wf.path,
+			chain: [...ctx.chain, legLinkOf(job, leg)]
+		};
 		if (job.uses) {
-			this.planCall(leg, state, seg, ctx);
+			this.planCall(leg, state, seg, ctx, location);
 			return leg;
 		}
 		leg.check = {
 			name: `${ctx.checkPrefix}${seg.name}`,
 			certain: seg.certain
-		};
-		const legLink = {
-			kind: "job",
-			id: job.id
-		};
-		if (combo) legLink.leg = Object.fromEntries(Object.entries(leg.values).map(([k, v]) => [k, v.known ? stringOf(v.value) : "?"]));
-		const location = {
-			workflow: ctx.wf.path,
-			chain: [...ctx.chain, legLink]
 		};
 		const steps = this.planSteps(job.steps, ctx.settings.steps, legId, runs, state, void 0, location);
 		if (this.detail === "steps") leg.steps = steps.plans;
@@ -45699,34 +45815,18 @@ var Planner = class {
 		return v;
 	}
 	/** A reusable workflow called by the leg: nested with the caller's inputs and secrets, its result from its jobs. */
-	planCall(leg, state, seg, ctx) {
+	planCall(leg, state, seg, ctx, location) {
 		const { job } = ctx;
 		const callee = this.index.calleeOf(job);
 		if (!callee) {
 			this.unsupportedCall(leg, job);
 			return;
 		}
-		if (ctx.depth + 1 >= this.maxDepth) {
-			leg.runs = {
-				verdict: "no",
-				chain: [...leg.runs.chain, {
-					kind: "limit",
-					limit: "nesting"
-				}]
-			};
-			leg.result = known$1("skipped");
-			return;
-		}
 		const inputs = callInputs(job, callee, state);
 		for (const v of Object.values(inputs)) this.noteValue(v);
-		const callLink = {
-			kind: "job",
-			id: job.id
-		};
-		if (Object.keys(leg.values).length) callLink.leg = Object.fromEntries(Object.entries(leg.values).map(([k, v]) => [k, v.known ? stringOf(v.value) : "?"]));
 		leg.call = this.planWorkflow(callee, {
 			depth: ctx.depth + 1,
-			chain: [...ctx.chain, callLink],
+			chain: location.chain,
 			caller: leg.id,
 			triggered: {
 				verdict: leg.runs.verdict,
@@ -45741,12 +45841,12 @@ var Planner = class {
 			checkPrefix: `${ctx.checkPrefix}${seg.name} / `
 		});
 		const legResults = leg.call.jobs.map((j) => j.result);
-		leg.result = leg.runs.verdict === "no" ? known$1("skipped") : jobResult({
+		leg.result = jobResult({
 			skipped: false,
 			continueOnError: known$1(false),
 			legResults
 		});
-		leg.outputs = leg.call.outputs;
+		leg.outputs = { ...leg.call.outputs };
 	}
 	unsupportedCall(leg, job) {
 		const why = job.uses?.kind === "remote-workflow" ? "a remote reusable workflow is not loaded" : "the called workflow was not found or cannot be called";
@@ -45812,6 +45912,10 @@ var Planner = class {
 		return out;
 	}
 	planStep(step, st, sid, parentId, parentRuns, state, status, location) {
+		this.units.set(sid, {
+			location,
+			kind: "step"
+		});
 		const evaluated = st?.if ?? impliedIf(step);
 		const cond = evaluateCondition(evaluated, state, stepStatusFunctions(status));
 		const parent = {
@@ -45865,10 +45969,7 @@ var Planner = class {
 			envWrites: {}
 		};
 		const facts = this.mocks.factsFor(location, sid, step.uses?.raw, target.model);
-		const envWrites = {
-			...this.scriptEnv(step, sid, state),
-			...this.envWritesOf(facts, sid)
-		};
+		const envWrites = this.envWrites(step, sid, state, facts);
 		const { produced, base } = this.producedOutcome(facts, runs, cond, sid);
 		if (target.action?.using === "composite") return {
 			...this.compositeProduct(target.action, step, sid, state, runs, location, facts, produced, base),
@@ -45887,12 +45988,25 @@ var Planner = class {
 			envWrites
 		};
 	}
-	/** The outputs in interface order, then the names only a mock added; a name nothing valued stays unknown. */
+	/**
+	* The outputs in interface order, then the names only a mock added; a name nothing valued stays unknown. Only what
+	* is unknown after the mocks is an unknown of the plan: a pinned output is not.
+	*/
 	finishOutputs(opaque, sid) {
 		const out = {};
-		for (const name of opaque.names) out[name] = opaque.outputs[name] ?? this.unknownOutput(sid, name);
+		for (const name of opaque.names) out[name] = opaque.outputs[name] ?? outputUnknown(sid, name);
 		for (const [name, v] of Object.entries(opaque.outputs)) out[name] ??= v;
+		for (const v of Object.values(out)) this.noteValue(v);
 		return out;
+	}
+	/** The `$GITHUB_ENV` writes the steps after this one read: the script's, under the mocked ones. */
+	envWrites(step, sid, state, facts) {
+		const writes = {
+			...this.scriptEnv(step, sid, state),
+			...this.envWritesOf(facts, sid)
+		};
+		for (const v of Object.values(writes)) this.noteValue(v);
+		return writes;
 	}
 	envWritesOf(facts, sid) {
 		const envWrites = {};
@@ -45902,13 +46016,13 @@ var Planner = class {
 		}
 		return envWrites;
 	}
-	/** The outcome as mocked, else success; a `maybe` step may also have been skipped. */
+	/** The outcome as mocked, else success; a step whose own `if:` is unknown may also have been skipped. */
 	producedOutcome(facts, runs, cond, sid) {
 		const produced = facts.outcome ? facts.outcome.value : known$1("success");
 		if (facts.outcome) this.record(facts.outcome.by, sid, "outcome");
 		return {
 			produced,
-			base: runs.verdict === "yes" ? produced : unknown$1(cond.value.known ? [] : cond.value.unknowns, [...candidates(produced) ?? [], "skipped"])
+			base: runs.verdict === "yes" ? produced : orSkipped(produced, cond.value, "last")
 		};
 	}
 	/** A composite action under its step: a mocked outcome makes it opaque, otherwise its inner steps decide. */
@@ -45958,11 +46072,7 @@ var Planner = class {
 	scriptOutputs(step, sid, state) {
 		const outputs = {};
 		const folded = foldWrites(substituteTemplates(step.run ?? "", state), { unknownId: (n) => `${sid}.outputs.${n}` });
-		for (const name of /* @__PURE__ */ new Set([...step.writesOutputs.names, ...Object.keys(folded)])) {
-			const v = folded[name] ?? this.unknownOutput(sid, name);
-			this.noteValue(v);
-			outputs[name] = v;
-		}
+		for (const name of /* @__PURE__ */ new Set([...step.writesOutputs.names, ...Object.keys(folded)])) outputs[name] = folded[name] ?? outputUnknown(sid, name);
 		const open = !(step.writesOutputs.mentions && !step.writesOutputs.dynamic);
 		return {
 			outputs,
@@ -45974,17 +46084,10 @@ var Planner = class {
 	/** The `$GITHUB_ENV` writes of a script, as the steps after it read them. */
 	scriptEnv(step, sid, state) {
 		if (step.run === void 0) return {};
-		const folded = foldWrites(substituteTemplates(step.run, state), {
+		return foldWrites(substituteTemplates(step.run, state), {
 			file: "GITHUB_ENV",
 			unknownId: (n) => `${sid}.env.${n}`
 		});
-		for (const v of Object.values(folded)) this.noteValue(v);
-		return folded;
-	}
-	unknownOutput(sid, name) {
-		const id = `${sid}.outputs.${name}`;
-		this.note([id]);
-		return unknown$1([id]);
 	}
 	planComposite(action, step, stepNode, state, runs, location) {
 		const id = compositeNodeId(stepNode, action.path);
@@ -46177,6 +46280,27 @@ function legValues(combo, legId) {
 	if (!combo) return {};
 	return Object.fromEntries(Object.entries(combo.values).map(([k, c]) => [k, c.known ? known$1(c.value) : unknown$1([`${legId}.matrix.${k}`])]));
 }
+/**
+* A result when the unit's own `if:` may leave it skipped: `skipped` joins its candidates (a job has listed it first, a
+* step last). A parent's `maybe` adds nothing: the unit's readers (`needs`, `steps`) run only where its parent does.
+*/
+function orSkipped(result, cond, at) {
+	if (cond.known) return result;
+	const ids = [...cond.unknowns, ...result.known ? [] : result.unknowns];
+	const options = candidates(result);
+	if (!options) return unknown$1(ids);
+	return unknown$1(ids, at === "first" ? ["skipped", ...options] : [...options, "skipped"]);
+}
+const outputUnknown = (sid, name) => unknown$1([`${sid}.outputs.${name}`]);
+/** The link of a leg in a location: its job, with the leg's values (`?` for an unknown one) when it has a matrix. */
+function legLinkOf(job, leg) {
+	const link = {
+		kind: "job",
+		id: job.id
+	};
+	if (Object.keys(leg.values).length) link.leg = Object.fromEntries(Object.entries(leg.values).map(([k, v]) => [k, v.known ? stringOf(v.value) : "?"]));
+	return link;
+}
 /** The verdict under a parent and an `if:` value: the first `no` wins, an unknown makes it `maybe`. */
 function decide(parent, value, chain) {
 	if (parent.verdict === "no") return {
@@ -46297,6 +46421,7 @@ function topoOrder(wf) {
 	return order;
 }
 const KINDS = [
+	[/^conflict:/, "conflict"],
 	[/^vars\./, "var"],
 	[/^inputs\./, "input"],
 	[/^secrets\./, "secret"],
@@ -46306,6 +46431,7 @@ const KINDS = [
 	[/^race:/, "race"],
 	[/\.outputs\./, "step-output"],
 	[/\.outcome$/, "outcome"],
+	[/\.env\./, "env"],
 	[/matrix/, "matrix"],
 	[/hashfiles/i, "hashfiles"]
 ];
@@ -46319,7 +46445,6 @@ function kindOf(id) {
 	return KINDS.find(([re]) => re.test(id))?.[1] ?? "unsupported";
 }
 const SCENARIO_PINS = [
-	[/^vars\.(.+)$/, (name) => ({ vars: { [name]: "" } })],
 	[/^inputs\.((?!.*\.default$).+)$/, (name) => ({ inputs: { [name]: "" } })],
 	[/^github\.(sha)$/, () => ({ sha: "" })],
 	[/^github\.(actor|triggering_actor)$/, () => ({ actor: { login: "" } })],
@@ -46327,7 +46452,10 @@ const SCENARIO_PINS = [
 	[/^github\.(ref|ref_name|ref_type)$/, () => ({ tag: "" })],
 	[/^scenario\.changed$/, () => ({ changed: ["path/to/file"] })]
 ];
-/** The scenario field that would pin an unknown read, when there is one. */
+/**
+* The scenario field that would pin an unknown read, when there is one. A step's or job's output, outcome or env
+* write is pinned by an assume entry, set over the finished plan (`assumePins`).
+*/
 function pinFor(id) {
 	for (const [re, fragment] of SCENARIO_PINS) {
 		const m = re.exec(id);
@@ -47593,7 +47721,8 @@ const REF_GROUP = [
 const MERGED = /* @__PURE__ */ new Set([
 	"inputs",
 	"vars",
-	"actor"
+	"actor",
+	"workflow_run"
 ]);
 /** The case's scenario over the file's: records merge key by key, the ref group is replaced whole, the rest replaced. */
 function mergeScenario(given, when) {

@@ -17,8 +17,8 @@ import type { Derived, ModelInfo } from '../worker/protocol';
 /**
  * The PinEditor's model (synthesis § 7): an assume entry for a step or job unknown, derived from the unknown's id
  * grammar (`<node>.outputs.<name>`, `<node>.outcome`, `<node>.env.<NAME>`) and `derived.kinds`, never from a string
- * heuristic, with what the plan knows to offer beside it. When the engine later emits pins for these unknowns, the UI
- * prefers `pin.fragment` and this derivation becomes the fallback.
+ * heuristic, with what the plan knows to offer beside it. The engine pins these unknowns with an assume entry
+ * (`pin.fragment`), which the UI prefers; this derivation is the fallback for one it leaves without a pin.
  */
 
 /** What a pin is decided against: the plan, its derived tables, and the models the worker ships. */

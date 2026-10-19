@@ -1,5 +1,5 @@
 import type { AssumeEntry, Json, ScenarioInput, Unknown } from '@simulci/engine';
-import { draftFor, type PinContext, type PinDraft } from '../panels/pin-draft';
+import { draftFor, draftOfEntry, type PinContext, type PinDraft } from '../panels/pin-draft';
 import type { FieldFocus } from '../state/store';
 
 /**
@@ -16,7 +16,10 @@ export type PinControl =
   | { kind: 'scenario'; label: string; fragment: Record<string, Json>; focus: Omit<FieldFocus, 'seq'> }
   /** An assume entry the engine wrote pins it (the fail-fast race): Assume cancelled. */
   | { kind: 'assume'; label: string; entry: AssumeEntry }
-  /** A step or job output, outcome or env write the engine has no pin for: Pin… opens the PinEditor, prefilled. */
+  /**
+   * A step or job output, outcome or env write: Pin… opens the PinEditor on the entry the engine wrote, or on one
+   * derived from the unknown's id when the engine wrote none.
+   */
   | { kind: 'editor'; label: string; draft: PinDraft }
   /**
    * Nothing the author writes pins it: the unknown's `gap`, or "only the run decides it" (generate.ts's words); or
@@ -41,7 +44,10 @@ export function pinControl(unknown: Unknown, ctx: PinContext): PinControl {
   return draft ? { kind: 'editor', label: 'Pin…', draft } : { kind: 'none', text: unknown.gap ?? NO_PIN };
 }
 
-/** The control for the pin the engine wrote: none for the config layer, a scenario fragment, a unit's entry. */
+/**
+ * The control for the pin the engine wrote: none for the config layer, a scenario fragment, a race's entry to apply as
+ * it is, a unit field's entry to open in the editor (its value is the author's to choose).
+ */
 function pinnedControl(
   unknown: Unknown,
   pin: NonNullable<Unknown['pin']>,
@@ -52,6 +58,7 @@ function pinnedControl(
   if (pin.layer === 'scenario') return scenarioControl(pin.fragment, ctx);
   if (pin.layer !== 'assume' || !namesUnit(pin.fragment)) return undefined;
   const entry = pin.fragment as AssumeEntry;
+  if (unknown.kind !== 'race') return { kind: 'editor', label: 'Pin…', draft: draftOfEntry(entry, ctx) };
   return { kind: 'assume', label: assumeLabel(entry), entry };
 }
 
@@ -125,11 +132,10 @@ const MERGED = new Set(['inputs', 'vars', 'actor', 'workflow_run']);
 
 /**
  * The scenario with a pin's fragment merged as the test runner merges `when` over `given` (engine
- * test/runner.ts `mergeScenario`): `inputs`, `vars` and `actor` key by key, the ref group (`ref`, `branch`, `tag`)
- * replaced whole when the fragment names any of it, anything else replaced. The triggering run merges key by key
- * too, where the runner replaces it: a pin writes one key of it (`branch`), and the run without its `name` is
- * refused. `keys` are what the assumed marks hold: the top-level keys written, and `inputs.<name>` for each dispatch
- * input, which has a control of its own.
+ * test/runner.ts `mergeScenario`): `inputs`, `vars`, `actor` and the triggering run key by key (a pin writes one key
+ * of the run, `branch`, and the run without its `name` is refused), the ref group (`ref`, `branch`, `tag`) replaced
+ * whole when the fragment names any of it, anything else replaced. `keys` are what the assumed marks hold: the
+ * top-level keys written, and `inputs.<name>` for each dispatch input, which has a control of its own.
  */
 export function applyScenarioPin(
   scenario: ScenarioInput,

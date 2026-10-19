@@ -141,6 +141,88 @@ jobs:
   });
 });
 
+describe('assume: jobs and their legs', () => {
+  const legs = `
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    outputs:
+      v: \${{ steps.s.outputs.v }}
+    strategy:
+      matrix:
+        n: [1, 2, 3]
+    steps:
+      - id: s
+        run: ./leg.sh
+  b:
+    needs: a
+    if: needs.a.outputs.v == 'x'
+    runs-on: ubuntu-latest
+    steps: [{ run: echo }]
+`;
+  const legResults = (plan: RunPlan) =>
+    plan.workflows[0]!.jobs[0]!.legs.map((l) => (l.result.known ? l.result.value : l.result.oneOf));
+
+  it('applies a job entry naming a leg, by [k=v] or matrix:, to that leg alone, and says SC108 once', () => {
+    for (const entry of [
+      { job: 'a[n=2]', outcome: 'failure' },
+      { job: 'a', matrix: { n: 2 }, outcome: 'failure' },
+    ]) {
+      const plan = run(legs, { event: 'push' }, [entry]);
+      expect(legResults(plan)).toEqual([['success', 'cancelled'], 'failure', ['success', 'cancelled']]);
+      expect(jobs(plan).a).toEqual({ runs: 'yes', result: 'failure' });
+      expect(plan.mocks).toEqual([
+        { ref: 'assume[0]', layer: 'case', at: '.github/workflows/ci.yml#a[n=2]', provides: ['outcome'] },
+      ]);
+      expect(codes(plan)).toEqual(['SC108']);
+    }
+    const all = run(legs, { event: 'push' }, [{ job: 'a', outcome: 'failure' }]);
+    expect(legResults(all)).toEqual(['failure', 'failure', 'failure']);
+    expect(codes(all)).toEqual(['SC108']);
+  });
+
+  it('decides a fail-fast race by its own pin, leaving the other leg’s race open', () => {
+    const failed = { step: 'a[n=2].s', outcome: 'failure' };
+    const race = run(legs, { event: 'push' }, [failed]).unknowns.find((u) => u.id.endsWith('#a[n=1]'))!;
+    expect(race.pin?.fragment).toEqual({ job: 'a', matrix: { n: '1' }, outcome: 'cancelled' });
+    const plan = run(legs, { event: 'push' }, [failed, race.pin!.fragment]);
+    expect(legResults(plan)).toEqual(['cancelled', 'failure', ['success', 'cancelled']]);
+    const races = plan.unknowns.filter((u) => u.kind === 'race').map((u) => u.id);
+    expect(races).toEqual(['race:fail-fast:.github/workflows/ci.yml#a[n=3]']);
+    expect(codes(plan)).toEqual(['SC108']);
+  });
+
+  it('overlays a job entry’s outputs on every leg it names, keeping the mock as their source, and says SC101 once', () => {
+    const plan = run(legs, { event: 'push' }, [{ job: 'a', outputs: { v: 'x' } }]);
+    expect(plan.workflows[0]!.jobs[0]!.outputs.v).toEqual({ known: true, value: 'x', by: 'assume[0]' });
+    expect(jobs(plan).b!.runs).toBe('yes');
+    expect(plan.mocks.map((m) => m.at)).toEqual(
+      ['1', '2', '3'].map((n) => `.github/workflows/ci.yml#a[n=${n}]`),
+    );
+    // One leg's value: the others are unknown, and the last to finish wins.
+    const one = run(legs, { event: 'push' }, [{ job: 'a', matrix: { n: 1 }, outputs: { v: 'x' } }]);
+    expect(jobs(one).b!.runs).toBe('maybe');
+    const undeclared = run(legs, { event: 'push' }, [{ job: 'a', outputs: { w: 'x' } }]);
+    expect(codes(undeclared)).toEqual(['SC101']);
+  });
+
+  it('overlays a calling job’s outputs without touching the called workflow’s', () => {
+    const plan = run(
+      'on: push\njobs:\n  call:\n    uses: ./.github/workflows/callee.yml\n',
+      { event: 'push' },
+      [{ job: 'call', outputs: { o: 'mocked' } }],
+      {
+        '.github/workflows/callee.yml':
+          'on:\n  workflow_call:\n    outputs:\n      o:\n        value: from-callee\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps: [{ run: echo }]\n',
+      },
+    );
+    const call = plan.workflows.find((w) => w.path === '.github/workflows/ci.yml')!.jobs[0]!;
+    expect(call.outputs.o).toEqual({ known: true, value: 'mocked', by: 'assume[0]' });
+    expect(call.legs[0]!.call!.outputs.o).toEqual({ known: true, value: 'from-callee' });
+  });
+});
+
 describe('assume: outputs and env', () => {
   const gated = `
 on: push

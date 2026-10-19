@@ -95,12 +95,12 @@ describe('the unknowns as rows', () => {
     expect(ids(gating)).toEqual(starterPush.plan.unknowns.map((u) => u.id));
     expect(idle).toEqual([]);
     expect(gating.map((row) => [row.path, row.kind, row.affects.map((a) => a.label)])).toEqual([
-      ['expression:success()', 'unsupported', ['build', 'deploy']],
       ['build.detect.outputs.changed', 'step-output', ['~npm-run-build']],
       ['scenario.changed', 'changed-files', ['CI']],
     ]);
-    expect(gating[1]!.affects).toEqual([{ id: `${ci}#build/~npm-run-build`, label: '~npm-run-build' }]);
-    expect(gating[2]!.unknown.pin).toMatchObject({ layer: 'scenario', fragment: { changed: ['docs/**'] } });
+    expect(gating[0]!.affects).toEqual([{ id: `${ci}#build/~npm-run-build`, label: '~npm-run-build' }]);
+    expect(gating[0]!.unknown.pin).toMatchObject({ layer: 'assume', fragment: { step: 'build.detect' } });
+    expect(gating[1]!.unknown.pin).toMatchObject({ layer: 'scenario', fragment: { changed: ['docs/**'] } });
     for (const row of gating) expect(row.reads).toBe(row.unknown.reads);
   });
 
@@ -153,7 +153,7 @@ describe('the unknowns as rows', () => {
 
   it('walks matrix legs and called workflows up to the node asked about', () => {
     const success = rowsOf(starterPush, `${ci}#build`);
-    expect(ids(success.gating)).toEqual(['expression:success()', `${ci}#build/steps.detect.outputs.changed`]);
+    expect(ids(success.gating)).toEqual([`${ci}#build/steps.detect.outputs.changed`]);
     expect(ids(rowsOf(starterPush, `${ci}#test`).gating)).toEqual([]);
     expect(ids(rowsOf(starterPush, `${ci}#test[node=22]`).gating)).toEqual([]);
     // The changed files affect the job that calls package.yml, not the jobs inside it.

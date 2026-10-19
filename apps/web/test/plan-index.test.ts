@@ -154,7 +154,11 @@ describe('the plan index', () => {
     }
     const index = indexOf(starterPush);
     expect(index.affectedBy.get(ci)).toEqual(['scenario.changed']);
-    expect(index.affectedBy.get(`${ci}#deploy`)).toEqual(['expression:success()']);
+    // deploy is maybe only through its workflow: what the run reads in it is decided.
+    expect(index.affectedBy.get(`${ci}#deploy`)).toBeUndefined();
+    expect(index.affectedBy.get(`${ci}#build/~npm-run-build`)).toEqual([
+      `${ci}#build/steps.detect.outputs.changed`,
+    ]);
     expect(index.affectedBy.get(`${ci}#preview`)).toBeUndefined();
   });
 

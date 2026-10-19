@@ -1,4 +1,4 @@
-import { checksOf, type RunPlan, type ScenarioInput, simulate } from '@simulci/engine';
+import { checksOf, decidingReason, type RunPlan, type ScenarioInput, simulate } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 
 const wf = (yaml: string, scenario: ScenarioInput, extra: Record<string, string> = {}): RunPlan =>
@@ -206,6 +206,125 @@ jobs:
       scenario: { event: 'push', vars: { DEPLOY: 'true' } },
     });
     expect(verdicts(pinned)).toEqual({ deploy: 'yes' });
+  });
+});
+
+describe('simulate: results under a maybe, kinds and limits', () => {
+  const CI = '.github/workflows/ci.yml';
+
+  it('reads a job’s result and a step’s outcome where their parent runs, adding skipped only for their own if', () => {
+    const plan = wf(
+      `
+on:
+  push:
+    paths: ['src/**']
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - id: s
+        run: npm test
+      - if: steps.s.outcome == 'success'
+        run: echo passed
+  b:
+    needs: a
+    runs-on: ubuntu-latest
+    steps: [{ run: echo }]
+  c:
+    needs: a
+    if: github.actor != 'me'
+    runs-on: ubuntu-latest
+    steps: [{ run: echo }]
+  d:
+    needs: c
+    runs-on: ubuntu-latest
+    steps: [{ run: echo }]
+`,
+      { event: 'push', branch: 'main' },
+    );
+    // The changed files decide the workflow; whatever runs in it reads the jobs before it as they end.
+    expect(verdicts(plan)).toEqual({ a: 'maybe', b: 'maybe', c: 'maybe', d: 'maybe' });
+    expect(results(plan)).toMatchObject({ a: 'success', b: 'success' });
+    expect(plan.workflows[0]!.jobs[0]!.legs[0]!.steps!.map((s) => [s.runs.verdict, s.outcome])).toEqual([
+      ['maybe', { known: true, value: 'success' }],
+      ['maybe', { known: true, value: 'success' }],
+    ]);
+    // c's own if: may skip it, and d's success() reads that, by the unknown behind it.
+    const skippable = { known: false, unknowns: ['github.actor'], oneOf: ['skipped', 'success'] };
+    expect(results(plan)).toMatchObject({ c: skippable, d: skippable });
+    expect(plan.unknowns.map((u) => [u.id, u.affects])).toEqual([
+      ['github.actor', [`${CI}#c`, `${CI}#d`]],
+      ['scenario.changed', [CI]],
+    ]);
+  });
+
+  it('drops a script output an entry pins, and names a conflict and the vars context by their kinds', () => {
+    const files = {
+      [CI]: `
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - id: v
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - if: steps.v.outputs.sha != ''
+        run: echo
+      - if: toJSON(vars) != '{}' && vars.MISSING == ''
+        run: echo
+`,
+    };
+    const kinds = (assume: { step: string; outputs: Record<string, string> }[]) =>
+      simulate({ files, scenario: { event: 'push' }, assume }).unknowns.map((u) => [
+        u.id,
+        u.kind,
+        u.pin?.layer,
+      ]);
+    // A variable the scenario does not set reads as '': only the whole context is unknown, and no field pins it.
+    expect(kinds([])).toEqual([
+      [`${CI}#a/steps.v.outputs.sha`, 'step-output', 'assume'],
+      ['vars.', 'var', undefined],
+    ]);
+    expect(kinds([{ step: 'a.v', outputs: { sha: 'abc' } }])).toEqual([['vars.', 'var', undefined]]);
+    expect(
+      kinds([
+        { step: 'a.v', outputs: { sha: '1' } },
+        { step: 'a.v', outputs: { sha: '2' } },
+      ]),
+    ).toEqual([
+      [`conflict:${CI}#a/steps.v.outputs.sha`, 'conflict', undefined],
+      ['vars.', 'var', undefined],
+    ]);
+  });
+
+  it('stops a call past the nesting limit at the job, with or without a matrix', () => {
+    const files = {
+      [CI]: `
+on: push
+jobs:
+  call:
+    uses: ./.github/workflows/callee.yml
+  legs:
+    strategy:
+      matrix:
+        n: [1, 2]
+    uses: ./.github/workflows/callee.yml
+`,
+      '.github/workflows/callee.yml':
+        'on: workflow_call\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps: [{ run: echo }]\n',
+    };
+    const jobsAt = (maxDepth: number) =>
+      simulate({ files, scenario: { event: 'push' }, maxDepth }).workflows.find((w) => w.path === CI)!.jobs;
+    for (const job of jobsAt(1)) {
+      expect(job.runs.verdict).toBe('no');
+      expect(decidingReason(job.runs.chain, 'no')).toEqual({ kind: 'limit', limit: 'nesting' });
+      expect(job.result).toEqual({ known: true, value: 'skipped' });
+      expect(job.legs.map((l) => [l.runs.verdict, l.call])).toEqual([['no', undefined]]);
+    }
+    expect(jobsAt(2).map((j) => [j.runs.verdict, j.legs.length])).toEqual([
+      ['yes', 1],
+      ['yes', 2],
+    ]);
   });
 });
 

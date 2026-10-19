@@ -120,17 +120,14 @@ describe('the Unknowns tab', () => {
   });
 
   it('edits the entry a step output already has when Pin… opens on it again, so no second entry conflicts', async () => {
-    const { store, user } = mount(source, [detect]);
-    // The output is pinned, so it decides no verdict now: it waits among the collapsed rest, still with Pin….
-    await user.click(screen.getByText(/that decides? no verdict$/));
-    const idle = screen.getByRole('list', { name: 'Unknowns that decide no verdict' });
-    await user.click(
-      within(rowOf('build.detect.outputs.changed', idle)).getByRole('button', { name: 'Pin…' }),
-    );
+    const held: AssumeEntry = { step: 'build.detect', outputs: { changed: { unknown: true } } };
+    const { store, user } = mount(source, [held]);
+    // The entry holds the output unknown, so its row stays, still with Pin….
+    await user.click(within(rowOf('build.detect.outputs.changed')).getByRole('button', { name: 'Pin…' }));
     const value = within(screen.getByRole('form', { name: /^Pin build\.detect/ })).getByLabelText(
       'Value of changed',
     );
-    expect(value).toHaveProperty('value', 'true');
+    expect(value.getAttribute('placeholder')).toBe('unknown');
     await user.clear(value);
     await user.type(value, 'false');
     await user.click(screen.getByRole('button', { name: 'Apply' }));
@@ -201,15 +198,15 @@ describe('the Unknowns tab', () => {
   });
 
   it('keeps the unknowns that affect the selection when the author asks, and offers no toggle for the workflow', async () => {
-    const { user } = mount(push, [], 'deploy');
+    const { user } = mount(push, [], 'build');
     const paths = () =>
       within(gating())
         .getAllByRole('listitem')
         .map((li) => li.querySelector('code')?.textContent);
-    expect(paths()).toHaveLength(3);
+    expect(paths()).toHaveLength(2);
     await user.click(screen.getByRole('checkbox', { name: /affecting/ }));
-    // The changed files decide the workflow above deploy, the step output a step of build: neither is deploy's.
-    expect(paths()).toEqual(['expression:success()']);
+    // The changed files decide the workflow above build, the step output a step of build.
+    expect(paths()).toEqual(['build.detect.outputs.changed']);
     cleanup();
     mount(push);
     expect(screen.queryByRole('checkbox', { name: /affecting/ })).toBeNull();
