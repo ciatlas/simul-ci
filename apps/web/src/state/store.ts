@@ -37,8 +37,11 @@ export interface PlanState {
   derived: Derived;
   text: string;
   ms: { simulate: number; derive: number };
-  /** The files version and the project version the plan answers. */
-  for: { files: number; project: number };
+  /**
+   * The files version and the project version the plan answers, and the case layer it was simulated with: the plan
+   * names the assume entries by position, so it speaks of the list it was given and of no other.
+   */
+  for: { files: number; project: number; assume?: AssumeEntry[] };
 }
 
 export interface Notice {
@@ -137,7 +140,10 @@ export interface SessionActions {
   setAssume: (assume: AssumeEntry[]) => void;
   setDetail: (detail: 'legs' | 'steps') => void;
   setFocus: (focus: string | undefined) => void;
-  /** Selects a node by its depth-0 workflow and its unit path; no unit path selects the workflow itself. */
+  /**
+   * Selects a node by its depth-0 workflow and its unit path; no unit path selects the workflow itself. A new
+   * selection takes the YAML pane back to its file; the selection already held changes nothing.
+   */
   select: (focus: string | undefined, sel: string | undefined) => void;
   toggleExpanded: (job: string) => void;
   setRepresentative: (job: string, leg: string) => void;
@@ -227,7 +233,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       set((s) => ({
         scenario: withPatch(s.scenario, patch),
         scenarioFrom: 'author',
-        assumed: s.assumed.filter((k) => !(k in patch)),
+        assumed: s.assumed.filter((k) => !edits(k, s.scenario, patch)),
         stale: s.plan !== undefined,
         error: authorsErrorCleared(s.error, 'scenario'),
       })),
@@ -246,8 +252,11 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       set((s) => ({ assume, stale: s.plan !== undefined, error: authorsErrorCleared(s.error, 'assume') })),
     setDetail: (detail) => set((s) => ({ detail, stale: s.plan !== undefined })),
     setFocus: (focus) => set({ focus }),
-    // A new selection takes the YAML pane back to its file.
-    select: (focus, sel) => set((s) => ({ focus, sel, ui: withYamlFile(s.ui, undefined) })),
+    // Returning `s` skips the update: a held selection keeps the tab the author picked.
+    select: (focus, sel) =>
+      set((s) =>
+        s.focus === focus && s.sel === sel ? s : { focus, sel, ui: withYamlFile(s.ui, undefined) },
+      ),
     toggleExpanded: (job) => set((s) => ({ ui: { ...s.ui, expanded: toggled(s.ui.expanded, job) } })),
     setRepresentative: (job, leg) =>
       set((s) => ({ ui: { ...s.ui, representative: { ...s.ui.representative, [job]: leg } } })),
@@ -304,6 +313,24 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     dismissNotice: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
   }));
 }
+
+/**
+ * Whether a patch edits what an assumed mark is on: its key, or for `inputs.<name>` that one input, so an edit of
+ * another input keeps the mark.
+ */
+function edits(mark: string, scenario: ScenarioInput, patch: Partial<ScenarioInput>): boolean {
+  const [key = '', name] = mark.split(/\.(.*)/s);
+  if (!(key in patch)) return false;
+  if (name === undefined) return true;
+  const before = (scenario as Record<string, unknown>)[key];
+  const after = (patch as Record<string, unknown>)[key];
+  return JSON.stringify(entryOf(before, name)) !== JSON.stringify(entryOf(after, name));
+}
+
+const entryOf = (record: unknown, name: string): unknown =>
+  typeof record === 'object' && record !== null && Object.hasOwn(record, name)
+    ? (record as Record<string, unknown>)[name]
+    : undefined;
 
 /** A patch value of `undefined` removes the key: the schema is strict and the URL carries only what is set. */
 function withPatch(scenario: ScenarioInput, patch: Partial<ScenarioInput>): ScenarioInput {

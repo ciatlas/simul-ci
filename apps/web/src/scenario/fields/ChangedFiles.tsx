@@ -1,12 +1,13 @@
 import { fieldAria } from '../aria';
 import { changedText, parseChanged, sameChanged } from '../form';
 import { withLine } from '../lines';
-import { Chips, Field, type GroupProps, monoControl, useFieldIds, useRawText } from './kit';
+import { Assumed, Chips, Field, type GroupProps, marked, monoControl, useFieldIds, useRawText } from './kit';
 
 /**
  * The files the push or pull request changes, one per line, `path (added)` or `path (renamed from old)` for a
- * status. Always in view for the events whose `paths` the engine reads (a tag push skips them): empty means
- * unknown, and `paths` filters cannot decide. Each pattern's chip adds a file it selects.
+ * status. Always in view for the events whose `paths` the engine reads (a tag push skips them), and on any other
+ * while the scenario carries some, which a model reads there (`showsChanged`): empty means unknown, and `paths`
+ * filters cannot decide. Each pattern's chip adds a file it selects.
  */
 export function ChangedFilesField({ f }: GroupProps) {
   const ids = useFieldIds();
@@ -18,6 +19,7 @@ export function ChangedFilesField({ f }: GroupProps) {
   };
   const hint = f.model.hints.changed;
   const issue = f.issue('changed');
+  const assumed = f.assumed('changed');
   const count = Array.isArray(changed) ? changed.length : 0;
   return (
     <Field
@@ -40,15 +42,17 @@ export function ChangedFilesField({ f }: GroupProps) {
       hint={hint?.text}
       issue={issue}
     >
-      <textarea
-        className={`${monoControl} min-h-24${changed === undefined ? ' border-might' : ''}`}
-        value={text}
-        onChange={(e) => write(e.target.value)}
-        placeholder={'src/index.ts\ndocs/readme.md (added)'}
-        spellCheck={false}
-        data-field="changed"
-        {...fieldAria(ids, { hint: hint?.text, issue })}
-      />
+      <Assumed id={ids.assumed} on={assumed}>
+        <textarea
+          className={`${monoControl} min-h-24${changed === undefined ? ' border-might' : ''}${marked(assumed)}`}
+          value={text}
+          onChange={(e) => write(e.target.value)}
+          placeholder={'src/index.ts\ndocs/readme.md (added)'}
+          spellCheck={false}
+          data-field="changed"
+          {...fieldAria(ids, { hint: hint?.text, issue, assumed })}
+        />
+      </Assumed>
       <Chips
         chips={hint?.chips ?? []}
         label="Add a file the paths filters select"

@@ -108,6 +108,46 @@ describe('a focus request', () => {
     expect(value.slice(selectionStart, selectionEnd)).toBe('true');
   });
 
+  it('opens Advanced for a pin into it though the author closed it while one of its keys was set', async () => {
+    const scenario: ScenarioInput = { event: 'push', branch: 'main', sha: 'abc1234' };
+    const { store, user } = mount(scenario);
+    expect(advanced().getAttribute('aria-expanded')).toBe('true');
+    await user.click(advanced());
+    expect(advanced().getAttribute('aria-expanded')).toBe('false');
+    await user.click(screen.getByRole('button', { name: 'a pin' }));
+    act(() =>
+      store.getState().pinScenario({ ...scenario, repository: 'owner/name' }, ['repository'], {
+        path: 'repository',
+      }),
+    );
+    const repository = () => screen.getByLabelText<HTMLInputElement>('Repository');
+    await waitFor(() => expect(document.activeElement).toBe(repository()));
+    expect(advanced().getAttribute('aria-expanded')).toBe('true');
+    expect([repository().selectionStart, repository().selectionEnd]).toEqual([0, 'owner/name'.length]);
+    await taken(store);
+    // Once taken, the request opens it no more: the author can close it again.
+    await user.click(advanced());
+    act(() => store.getState().patchScenario({ message: 'docs' }));
+    expect(advanced().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('shows and focuses the changed files a pin writes on a dispatch, and keeps them in view while cleared', async () => {
+    const scenario: ScenarioInput = { event: 'workflow_dispatch', branch: 'main' };
+    const { store, user } = mount(scenario);
+    expect(screen.queryByLabelText(/Changed files/)).toBeNull();
+    act(() =>
+      store
+        .getState()
+        .pinScenario({ ...scenario, changed: ['path/to/file'] }, ['changed'], { path: 'changed' }),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(changed()));
+    expect([changed().selectionStart, changed().selectionEnd]).toEqual([0, 'path/to/file'.length]);
+    await taken(store);
+    await user.clear(changed());
+    expect(store.getState().scenario.changed).toBeUndefined();
+    expect(document.activeElement).toBe(changed());
+  });
+
   it('puts the focus in the changed files of a push with their text selected', async () => {
     const { store } = mount({ event: 'push', branch: 'main', changed: ['src/a.ts', 'docs/b.md'] });
     act(() => store.getState().focusField({ path: 'changed' }));

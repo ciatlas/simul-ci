@@ -1,14 +1,16 @@
 import type {
   AssumeEntry,
   JobPlan,
+  LegPlan,
   MockValue,
   NodeId,
   RunPlan,
+  StepPlan,
   Unknown,
   Value,
   WorkflowPlan,
 } from '@simulci/engine';
-import { planIndex } from '../plan/index';
+import { stringOf } from '@simulci/engine/plan';
 import { type PlanNode, planNodes } from '../plan/nodes';
 import type { Derived, ModelInfo } from '../worker/protocol';
 
@@ -33,9 +35,10 @@ export type DraftAbout = { field: 'outputs' | 'env'; name: string } | { field: '
 
 export interface PinDraft {
   /**
-   * The entry as it would be written: `step:` or `job:` by unit path (`build.detect`, `test[node=22]`,
-   * `caller/job.step`), `workflow:` only when another depth-0 workflow has a job of the same id, and the field the
-   * unknown is about prefilled (an output or env value `''`, the outcome `failure`).
+   * The entry as it would be written: `step:` or `job:` by unit path (`build.detect`, `caller/job.step`), the leg of
+   * the path's last segment as `matrix:` values (`test.detect` with `node: lts/*`), `workflow:` (the file the unit is
+   * declared in) only when another depth-0 workflow has a job of the same id as the unit's first job, and the field
+   * the unknown is about prefilled (an output or env value `''`, the outcome `failure`).
    */
   entry: AssumeEntry;
   about: DraftAbout;
@@ -56,24 +59,105 @@ interface Unit {
 const STEP_OUTCOMES: Outcome[] = ['success', 'failure'];
 const JOB_OUTCOMES: Outcome[] = ['success', 'failure', 'cancelled'];
 
-/** The draft for a step or job unknown; undefined when the id names no step, leg or job of the plan. */
+/**
+ * The draft for a step or job unknown; undefined when the id names no step, leg or job of the plan, or a unit under a
+ * leg whose values its path cannot hold.
+ */
 export function draftFor(unknown: Unknown, ctx: PinContext): PinDraft | undefined {
   const ref = parseUnknownId(unknown.id, ctx.derived.kinds);
   if (!ref) return undefined;
   const nodes = planNodes(ctx.plan);
   const unit = unitOf(ref.node, ctx.derived.kinds[ref.node], nodes);
-  if (!unit) return undefined;
-  const path = ctx.derived.unitPaths[unit.id];
-  if (path === undefined) return undefined;
-  if (ref.about.field === 'env' && unit.kind === 'job') return undefined;
+  if (!unit || (ref.about.field === 'env' && unit.kind === 'job')) return undefined;
+  const named = unitNamed({ nodes, paths: ctx.derived.unitPaths }, unit.id);
+  if (!named) return undefined;
   const entry: AssumeEntry = {};
   const workflow = qualifier(nodes, unit.id, ctx.plan);
   if (workflow !== undefined) entry.workflow = workflow;
-  entry[unit.kind] = path;
+  entry[unit.kind] = named.path;
+  if (named.matrix) entry.matrix = named.matrix;
   if (ref.about.field === 'outcome') entry.outcome = 'failure';
   else entry[ref.about.field] = { [ref.about.name]: '' };
   const producer = nodes.get(ref.node);
   return offers(entry, ref.about, unit.kind, producer, ctx.models);
+}
+
+/** A unit as an entry names it: the unit path, and the values of the leg its last segment selects. */
+interface Named {
+  path: string;
+  matrix?: Record<string, string>;
+}
+
+/** What a unit's name is read from: the plan's nodes and their unit paths (`derived.unitPaths`). */
+interface Units {
+  nodes: Map<NodeId, PlanNode>;
+  paths: Record<NodeId, string>;
+}
+
+/**
+ * The path and `matrix:` values an entry names a unit by. The leg of the path's last segment goes in `matrix:`,
+ * each value as the engine compares it (`lts/*`, an object as its JSON), since `[k=v]` cannot hold a `/`, `,` or `]`.
+ * A leg further up (the leg that calls the workflow, the leg of a composite action's step) stays in the path, where
+ * `matrix:` would not reach it; undefined when the path cannot hold its values.
+ */
+function unitNamed({ nodes, paths }: Units, id: NodeId): Named | undefined {
+  const path = paths[id];
+  const node = nodes.get(id);
+  if (path === undefined || !node || !outerLegs(nodes, node).every(legInPath)) return undefined;
+  const own = ownLeg(node);
+  const named = own ? withoutLeg(path, own, paths) : { path };
+  // A calling leg whose matrix only the run knows is `[*]`, which no path selects.
+  return named.path.includes('[*]') ? undefined : named;
+}
+
+/** The leg of a unit's own segment: a leg's, or that of a step the leg runs (not one inside a composite action). */
+function ownLeg(node: PlanNode): LegPlan | undefined {
+  if (node.kind === 'leg') return node.leg;
+  return node.kind === 'step' && runsInLeg(node) ? node.leg : undefined;
+}
+
+/** A step of the leg itself, where a composite action's inner step is not. */
+const runsInLeg = (node: { step: StepPlan; leg: LegPlan }): boolean =>
+  node.leg.steps?.includes(node.step) === true;
+
+/** The legs a unit's path selects before its own segment: a composite action step's, then each calling leg's. */
+function outerLegs(nodes: Map<NodeId, PlanNode>, node: PlanNode): LegPlan[] {
+  const legs: LegPlan[] = node.kind === 'step' && !runsInLeg(node) ? [node.leg] : [];
+  for (let caller = callerOf(nodes, node.workflow); caller; caller = callerOf(nodes, caller.workflow))
+    if (caller.kind === 'leg') legs.push(caller.leg);
+  return legs;
+}
+
+/** The job or leg that calls a workflow (a job stands for its single leg); none for a depth-0 workflow. */
+function callerOf(nodes: Map<NodeId, PlanNode>, wf: WorkflowPlan): PlanNode | undefined {
+  const caller = wf.depth > 0 && wf.caller !== undefined ? nodes.get(wf.caller) : undefined;
+  return caller?.kind === 'workflow' ? undefined : caller;
+}
+
+/**
+ * Whether `[k=v,…]` in a path reads back as the leg's values: a known matrix, no key or value with a `/`, `,`, `]`
+ * or surrounding space, no key with a `=`, and no null value (`null` in the path, `''` to the engine).
+ */
+function legInPath(leg: LegPlan): boolean {
+  if (leg.legKey !== '' && Object.keys(leg.values).length === 0) return false;
+  return Object.entries(leg.values).every(
+    ([key, v]) =>
+      plainCell(key) &&
+      !key.includes('=') &&
+      (!v.known || (v.value !== null && plainCell(stringOf(v.value)))),
+  );
+}
+
+const plainCell = (s: string): boolean => s.trim() === s && !/[/,\]]/.test(s);
+
+/** The unit's path with its own leg's `[…]` taken out, and the leg's values as the engine compares them. */
+function withoutLeg(path: string, leg: LegPlan, paths: Record<NodeId, string>): Named {
+  const legPath = paths[leg.id];
+  const suffix = `[${leg.legKey}]`;
+  if (leg.legKey === '' || !legPath?.endsWith(suffix) || !path.startsWith(legPath)) return { path };
+  const bare = `${legPath.slice(0, -suffix.length)}${path.slice(legPath.length)}`;
+  const values = Object.entries(leg.values).map(([k, v]) => [k, v.known ? stringOf(v.value) : '?'] as const);
+  return values.length ? { path: bare, matrix: Object.fromEntries(values) } : { path: bare };
 }
 
 /**
@@ -133,8 +217,9 @@ function enclosingUnit(node: PlanNode | undefined): Unit | undefined {
 }
 
 /**
- * `workflow:` for the unit's depth-0 workflow, when another depth-0 workflow of the plan has a job of the same id
- * as the unit's first job, so the entry would name both without it.
+ * `workflow:` when another depth-0 workflow of the plan has a job of the same id as the unit's first job, so the
+ * entry would name both without it: the file the unit is declared in, which the engine matches it against (a called
+ * workflow's unit is in the callee's file).
  */
 function qualifier(nodes: Map<NodeId, PlanNode>, unit: NodeId, plan: RunPlan): string | undefined {
   const root = rootJob(nodes, unit);
@@ -142,7 +227,7 @@ function qualifier(nodes: Map<NodeId, PlanNode>, unit: NodeId, plan: RunPlan): s
   const shared = plan.workflows.some(
     (wf) => wf.depth === 0 && wf !== root.workflow && wf.jobs.some((j) => j.jobId === root.job.jobId),
   );
-  return shared ? root.workflow.path : undefined;
+  return shared ? nodes.get(unit)?.workflow.path : undefined;
 }
 
 /** The depth-0 workflow a unit belongs to and its job there: a called workflow's unit climbs to the calling job. */
@@ -211,23 +296,37 @@ function modelOf(uses: string, models: readonly ModelInfo[]): ModelInfo | undefi
 /** The draft for editing an entry the author already has: the same offers, about its first stated field. */
 export function draftOfEntry(entry: AssumeEntry, ctx: PinContext): PinDraft {
   const kind: Unit['kind'] = entry.step !== undefined || entry.uses !== undefined ? 'step' : 'job';
-  const unit = entry.step ?? entry.job;
-  const id = unit === undefined ? undefined : nodeOfPath(unit, entry.workflow, ctx);
-  const producer = id === undefined ? undefined : planNodes(ctx.plan).get(id);
+  const units: Units = { nodes: planNodes(ctx.plan), paths: ctx.derived.unitPaths };
+  const id = nodeOfEntry(entry, units);
+  const producer = id === undefined ? undefined : units.nodes.get(id);
   return offers({ ...entry }, aboutOf(entry), kind, producer, ctx.models);
 }
 
 /**
- * The node a unit path names (the reverse of `derived.unitPaths`, per depth-0 workflow: a job before its single leg,
- * a step before its composite action), in the first workflow that has it, within `workflow` when the entry names one.
+ * The node an entry's unit names, the first in plan order (a job before its single leg, a step before its composite
+ * action): by its unit path as written (`test[node=22].detect`), or by the path and `matrix:` values a draft writes,
+ * within the file `workflow:` names when the entry names one (the unit's own, as the engine matches it).
  */
-function nodeOfPath(path: string, workflow: string | undefined, ctx: PinContext): NodeId | undefined {
-  for (const [wf, paths] of planIndex(ctx).byPath) {
-    if (workflow !== undefined && !workflowMatches(workflow, wf)) continue;
-    const id = paths.get(path);
-    if (id !== undefined) return id;
-  }
+function nodeOfEntry(entry: AssumeEntry, units: Units): NodeId | undefined {
+  const path = entry.step ?? entry.job;
+  if (path === undefined) return undefined;
+  for (const [id, node] of units.nodes)
+    if (inFile(entry.workflow, node) && namesNode(entry, path, id, units)) return id;
   return undefined;
+}
+
+/** A job, leg or step, in the file `workflow:` names when the entry names one. */
+function inFile(workflow: string | undefined, node: PlanNode): boolean {
+  if (node.kind === 'workflow' || node.kind === 'composite') return false;
+  return workflow === undefined || workflowMatches(workflow, node.workflow.path);
+}
+
+/** Whether an entry's path names a node: as written, or as a draft writes it with values the node's leg has. */
+function namesNode(entry: AssumeEntry, path: string, id: NodeId, units: Units): boolean {
+  if (entry.matrix === undefined && units.paths[id] === path) return true;
+  const named = unitNamed(units, id);
+  if (named?.path !== path) return false;
+  return Object.entries(entry.matrix ?? {}).every(([k, v]) => named.matrix?.[k] === String(v));
 }
 
 /** The engine's rule (paths.ts `workflowMatches`): the path, its file name, or the file name without `.yml`. */

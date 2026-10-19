@@ -3,6 +3,7 @@ import { type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useR
 import type { SessionState } from '../../state/store';
 import { type FieldIds, fieldAria, fieldIds } from '../aria';
 import type { Chip, FormModel } from '../derive';
+import type { FieldRequest } from '../focus';
 import { clipOf, type NoteSide, noteSide } from '../note';
 
 /**
@@ -20,6 +21,8 @@ export interface FieldContext {
   assumed: (key: string) => boolean;
   /** The worker's refusal a field shows, by the field `deriveForm` routes it to. */
   issue: (field: string) => string | undefined;
+  /** The field a pin or a reason asked the form to focus, until the form takes it: a closed group opens for it. */
+  requested?: FieldRequest | undefined;
   patch: (patch: Partial<ScenarioInput>) => void;
   setScenario: (scenario: ScenarioInput) => void;
 }
@@ -245,23 +248,36 @@ interface TextFieldProps {
   onChange: (value: string) => void;
   placeholder?: string;
   hint?: string;
+  /** Whether the page chose the value (a pin wrote it), which the assumed mark says until an edit. */
+  assumed?: boolean;
 }
 
 /** A one-line text field in the monospace face: names, refs and ids. */
-export function TextField({ f, field, label, value, onChange, placeholder, hint }: TextFieldProps) {
+export function TextField({
+  f,
+  field,
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+  assumed = false,
+}: TextFieldProps) {
   const ids = useFieldIds();
   const issue = f.issue(field);
   return (
     <Field ids={ids} label={label} hint={hint} issue={issue}>
-      <input
-        className={monoControl}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        spellCheck={false}
-        data-field={field}
-        {...fieldAria(ids, { hint, issue })}
-      />
+      <Assumed id={ids.assumed} on={assumed}>
+        <input
+          className={monoControl + marked(assumed)}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          spellCheck={false}
+          data-field={field}
+          {...fieldAria(ids, { hint, issue, assumed })}
+        />
+      </Assumed>
     </Field>
   );
 }
@@ -299,10 +315,15 @@ interface SwitchProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   aria?: Record<string, string | boolean | undefined>;
+  /**
+   * Whether the page chose the value: the track's outline is dashed, as an assumed control's border is, and keeps its
+   * colour, which holds the switch's 3:1 where the assumed border's would not.
+   */
+  assumed?: boolean;
 }
 
 /** A native checkbox with the switch role, drawn as a track; the label is its name. */
-export function Switch({ label, checked, onChange, aria }: SwitchProps) {
+export function Switch({ label, checked, onChange, aria, assumed = false }: SwitchProps) {
   return (
     <label className="inline-flex cursor-pointer items-center gap-2 text-xs">
       <input
@@ -314,10 +335,10 @@ export function Switch({ label, checked, onChange, aria }: SwitchProps) {
         {...aria}
       />
       {/* Off: a muted outline and knob on the surface; on: the accent track, the knob moved right. Both
-          outlines hold 3:1 against the form's chrome (test/contrast.test.ts). */}
+          outlines hold 3:1 against the form's chrome (test/contrast.test.ts); a value the page chose dashes it. */}
       <span
         aria-hidden="true"
-        className="relative h-4 w-7 shrink-0 rounded-full border border-muted bg-surface after:absolute after:top-0.5 after:left-0.5 after:size-2.5 after:rounded-full after:bg-muted peer-checked:border-accent peer-checked:bg-accent peer-checked:after:translate-x-3 peer-checked:after:bg-surface peer-focus-visible:outline-2 peer-focus-visible:outline-accent peer-focus-visible:outline-offset-1"
+        className={`relative h-4 w-7 shrink-0 rounded-full border border-muted bg-surface after:absolute after:top-0.5 after:left-0.5 after:size-2.5 after:rounded-full after:bg-muted peer-checked:border-accent peer-checked:bg-accent peer-checked:after:translate-x-3 peer-checked:after:bg-surface peer-focus-visible:outline-2 peer-focus-visible:outline-accent peer-focus-visible:outline-offset-1${assumed ? ' border-dashed' : ''}`}
       />
       <span>{label}</span>
     </label>

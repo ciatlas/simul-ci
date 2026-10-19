@@ -178,6 +178,14 @@ describe('the Problems tab', () => {
     expect([store.getState().focus, store.getState().sel]).toEqual([CI, 'call']);
   });
 
+  it('draws a warning’s glyph in the amber kept for text, beside the word', () => {
+    mount(true);
+    const items = within(screen.getByRole('list', { name: 'Problems' })).getAllByRole('listitem');
+    const warning = items.find((item) => item.textContent?.includes('warning'))!;
+    const glyph = warning.querySelector('[aria-hidden="true"]')!;
+    expect([glyph.textContent, glyph.classList.contains('text-might-text')]).toEqual(['!', true]);
+  });
+
   it('says so when there is nothing to report', () => {
     mount(false);
     expect(

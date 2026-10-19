@@ -71,6 +71,30 @@ describe('the URL picker', () => {
     ).toEqual({ scenario });
   });
 
+  it('drops the assume entries when one names its unit, workflow or preset with something not text, or a record with something else', () => {
+    const junk = [
+      { step: 5, outcome: 'failure' },
+      { uses: 5, outcome: 'failure' },
+      { job: null, outcome: 'failure' },
+      { workflow: ['ci.yml'], step: 'a.b', outcome: 'failure' },
+      { step: 'a.b', as: { name: 'hit' } },
+      { step: 'build.detect', matrix: null, outcome: 'failure' },
+      { step: 'build.detect', outputs: 'true' },
+      { step: 'build.detect', env: ['A'] },
+    ];
+    for (const entry of junk)
+      expect(
+        readSearch({ event: 'push', a: [{ job: 'a', outcome: 'success' }, entry] }),
+        JSON.stringify(entry),
+      ).toEqual({ scenario: { event: 'push' } });
+    const kept = [
+      { workflow: 'ci.yml', step: 'a.b', outcome: 'failure' },
+      { job: 'a', uses: 'actions/cache', as: 'hit' },
+      { job: 'test', matrix: { node: 22 }, outcome: 'cancelled' },
+    ];
+    expect(readSearch({ event: 'push', a: kept })).toEqual({ scenario: { event: 'push' }, assume: kept });
+  });
+
   it('keeps assume entries out of the URL once they are too long for one', () => {
     const assume = Array.from({ length: 200 }, (_, i) => ({
       step: `job.step${i}`,

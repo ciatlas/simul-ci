@@ -64,6 +64,18 @@ describe('the page keys', () => {
     expect(page('f', { isComposing: true })).toBeUndefined();
   });
 
+  it('takes [, ] and \\ typed with Option or AltGr, and leaves them to Ctrl alone, Cmd or an IME', () => {
+    // A German Mac types [ with Option; a German, French or Spanish PC types \ with AltGr, which sets Ctrl and Alt.
+    expect(page('[', { altKey: true })).toBe('pane:left');
+    expect(page(']', { altKey: true })).toBe('pane:right');
+    expect(page('\\', { altKey: true, ctrlKey: true })).toBe('pane:yaml');
+    expect(page('[', { ctrlKey: true })).toBeUndefined();
+    expect(page(']', { metaKey: true })).toBeUndefined();
+    expect(page('\\', { altKey: true, metaKey: true })).toBeUndefined();
+    expect(page('[', { altKey: true, isComposing: true })).toBeUndefined();
+    expect(page('1', { altKey: true, ctrlKey: true })).toBeUndefined();
+  });
+
   it('never fires while the author types in a field, an editable region or the YAML pane, nor in a dialog', () => {
     document.body.innerHTML = `
       <input id="input"><textarea id="textarea"></textarea><select id="select"></select>
@@ -121,7 +133,7 @@ describe('the page key listener', () => {
 
   beforeEach(() => {
     store = createSessionStore();
-    win = Object.assign(new EventTarget(), { innerWidth: 1280 });
+    win = Object.assign(new EventTarget(), { innerWidth: 1280, document });
     stop = installShortcuts(store, win as unknown as Window);
     calls = [];
     unregister = viewport.register({
@@ -181,14 +193,7 @@ describe('the page key listener', () => {
     expect(store.getState().ui.prefs.panel).toBe('problems');
   });
 
-  it('closes and opens the scenario column, the right panel and the YAML pane with [, ] and \\', () => {
-    expect([press('['), press(']'), press('\\')]).toEqual([false, false, false]);
-    expect(store.getState().ui.prefs.collapsed).toEqual({ left: true, right: true, yaml: false });
-    press('[');
-    expect(store.getState().ui.prefs.collapsed.left).toBe(false);
-  });
-
-  it('jumps to the Reasons tab with r and puts the focus in it once it has rendered', () => {
+  it('moves the focus to the new tab when 1 to 4 is pressed inside the panel, and leaves it alone elsewhere', () => {
     stop();
     const frames: FrameRequestCallback[] = [];
     const full = Object.assign(new EventTarget(), {
@@ -197,16 +202,54 @@ describe('the page key listener', () => {
       requestAnimationFrame: (f: FrameRequestCallback) => frames.push(f),
     });
     stop = installShortcuts(store, full as unknown as Window);
-    store.getState().setPanel('problems');
-    expect(full.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', cancelable: true }))).toBe(false);
-    expect(store.getState().ui.prefs.panel).toBe('reasons');
-    const panel = document.createElement('div');
-    panel.dataset.panel = 'reasons';
-    panel.tabIndex = -1;
-    document.body.append(panel);
-    for (const f of frames) f(0);
-    expect(document.activeElement).toBe(panel);
-    panel.remove();
+    document.body.innerHTML = `
+      <div role="tabpanel" data-panel="reasons"><button id="inside">Effects</button></div>
+      <div role="tabpanel" data-panel="unknowns" tabindex="-1"></div>
+      <button id="outside">elsewhere</button>`;
+    const key = (k: string) => full.dispatchEvent(new KeyboardEvent('keydown', { key: k, cancelable: true }));
+    document.getElementById('inside')!.focus();
+    key('2');
+    for (const f of frames.splice(0)) f(0);
+    expect(document.activeElement).toBe(document.querySelector('[data-panel="unknowns"]'));
+    document.getElementById('outside')!.focus();
+    key('1');
+    for (const f of frames.splice(0)) f(0);
+    expect(document.activeElement?.id).toBe('outside');
+    document.body.innerHTML = '';
+  });
+
+  it('closes and opens the scenario column, the right panel and the YAML pane with [, ] and \\', () => {
+    expect([press('['), press(']'), press('\\')]).toEqual([false, false, false]);
+    expect(store.getState().ui.prefs.collapsed).toEqual({ left: true, right: true, yaml: false });
+    press('[');
+    expect(store.getState().ui.prefs.collapsed.left).toBe(false);
+  });
+
+  it('hands the focus to the plan when a key closes the pane that holds it, and leaves it alone otherwise', () => {
+    document.body.innerHTML = `
+      <aside data-pane="left"><button id="inside">x</button></aside>
+      <section data-plan tabindex="-1"></section><button id="outside">y</button>`;
+    const plan = document.querySelector('[data-plan]');
+    document.getElementById('inside')!.focus();
+    press('[');
+    expect(store.getState().ui.prefs.collapsed.left).toBe(true);
+    expect(document.activeElement).toBe(plan);
+    press('[');
+    document.getElementById('outside')!.focus();
+    press('[');
+    expect(store.getState().ui.prefs.collapsed.left).toBe(true);
+    expect(document.activeElement?.id).toBe('outside');
+    document.body.innerHTML = '';
+  });
+
+  it('does nothing while the author has turned the page keys off, and acts again once they are on', () => {
+    store.getState().setPrefs({ keys: false });
+    expect([press('t'), press('['), press('2'), press('r')]).toEqual([true, true, true, true]);
+    const s = store.getState();
+    expect([s.ui.view, s.ui.prefs.collapsed.left, s.ui.prefs.panel]).toEqual(['graph', false, 'reasons']);
+    store.getState().setPrefs({ keys: true });
+    expect(press('t')).toBe(false);
+    expect(store.getState().ui.view).toBe('text');
   });
 
   it('stops listening once stopped', () => {

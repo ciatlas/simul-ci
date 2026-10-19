@@ -135,6 +135,14 @@ describe('the reasons of a push to main in the starter', () => {
     expect(ifOf(gate).evaluated).toBeUndefined();
   });
 
+  it('offers no Unknowns row for a value the engine decided the condition without', () => {
+    // On a push, `github.event_name == 'pull_request'` decides preview's if: before the labels are read.
+    const labels = 'github.event.pull_request.labels.*.name';
+    const body = ifOf(modelOf(push, CI, 'preview'));
+    expect(Object.hasOwn(push.derived.unknownPaths, labels)).toBe(false);
+    expect(body.reads.find((r) => r.ref === labels)).toEqual({ ref: labels, value: '?', unknowns: [] });
+  });
+
   it('gives the residual of an if: that stays unknown', () => {
     const body = ifOf(modelOf(push, CI, 'build.#3'));
     expect(body.value).toBe('unknown');
@@ -210,7 +218,7 @@ describe('the reasons of a release', () => {
     expect(filterOf(branch, 1)).toEqual({
       kind: 'filter',
       filter: 'tags',
-      text: 'not matched',
+      text: 'without a branch filter: a branch push does not run it',
       patterns: ['v*'],
       subject: { label: 'ref', text: 'main' },
     });
@@ -398,9 +406,10 @@ describe('the kinds no sample shows', () => {
     const m = reasonsModel(state, indexOf(state), job)!;
     expect(m.header.result).toBe('one of success, failure');
     expect(ifOf(m)).toMatchObject({ status: 'unknown', residual: 'x' });
+    // `y` is no unknown of the plan: the value says `?` with no Unknowns row to show.
     expect(ifOf(m).reads).toEqual([
       { ref: 'needs.a.outputs.n', value: '3', unknowns: [], from: 'build' },
-      { ref: 'needs.a.outputs.m', value: '? one of "a", "b"', unknowns: [{ id: 'y', label: 'y' }] },
+      { ref: 'needs.a.outputs.m', value: '? one of "a", "b"', unknowns: [] },
     ]);
     jobPlan.result = { known: true, value: 'failure' };
     expect(reasonsModel(state, indexOf(state), job)!.header.result).toBe('failure');
@@ -420,6 +429,112 @@ describe('the kinds no sample shows', () => {
   it('has nothing to say without a node, or about one the plan does not have', () => {
     expect(reasonsModel(push, indexOf(push), undefined)).toBeUndefined();
     expect(reasonsModel(push, indexOf(push), `${CI}#gone`)).toBeUndefined();
+  });
+});
+
+describe('conditions as GitHub evaluates them', () => {
+  const W = '.github/workflows/z.yml';
+  const files = {
+    [W]: [
+      'on: push',
+      'jobs:',
+      '  a:',
+      '    runs-on: x',
+      '    outputs: { x: "${{ steps.s.outputs.x }}" }',
+      '    steps: [{ id: s, run: echo }]',
+      '  b:',
+      '    needs: a',
+      "    if: needs.a.outputs.x == 'a' || needs.a.outputs.x == 'b'",
+      '    runs-on: x',
+      '    steps:',
+      '      - run: echo',
+      '        if: 0',
+      '      - run: echo',
+      "        if: ${{ github.ref == 'refs/heads/main' }}",
+      '  c:',
+      '    if: ${{ always() }}',
+      '    runs-on: x',
+      '    steps: [{ run: echo }]',
+      '',
+    ].join('\n'),
+  };
+  const push = simulated(files, { event: 'push', branch: 'main' });
+  const ifAt = (id: string): IfBody => ifOf(reasonsModel(push, indexOf(push), `${W}#${id}`)!);
+
+  it('adds no success() to an if: in ${{ }} that calls a status function', () => {
+    expect(ifAt('c')).toMatchObject({ expr: '${{ always() }}', implicitSuccess: false });
+    expect(ifAt('c').evaluated).toBeUndefined();
+  });
+
+  it('adds it to an if: in ${{ }} that calls none', () => {
+    expect(ifAt('b/~echo~2')).toMatchObject({
+      expr: "${{ github.ref == 'refs/heads/main' }}",
+      evaluated: "success() && (github.ref == 'refs/heads/main')",
+      implicitSuccess: true,
+    });
+  });
+
+  it('gives a number the engine keeps no text of as the condition evaluated', () => {
+    const body = ifAt('b/~echo');
+    expect(body.expr).toBe('success() && (0)');
+    expect(body.evaluated).toBeUndefined();
+    expect(body.value).toBe('false');
+  });
+
+  it('lists a value the condition reads twice once', () => {
+    expect(ifAt('b').reads.map((r) => r.ref)).toEqual(['needs.a.outputs.x']);
+  });
+});
+
+describe('ref filters against the scenario', () => {
+  const W = '.github/workflows/z.yml';
+  const workflow = (on: string): Record<string, string> => ({
+    [W]: `on:\n${on}\njobs:\n  a:\n    runs-on: x\n    steps: [{ run: echo }]\n`,
+  });
+  const filterIn = (on: string, scenario: ScenarioInput): FilterBody => {
+    const model = modelOf(simulated(workflow(on), scenario), W);
+    return model.rows.map((r) => r.body).findLast((b): b is FilterBody => b.kind === 'filter')!;
+  };
+  const main: ScenarioInput = { event: 'push', branch: 'main' };
+  const tag: ScenarioInput = { event: 'push', tag: 'v1' };
+
+  it('says a push filtered only by the other kind of ref does not run, whatever the patterns', () => {
+    expect(filterIn("  push:\n    tags-ignore: ['v*']", main)).toMatchObject({
+      text: 'without a branch filter: a branch push does not run it',
+      subject: { label: 'ref', text: 'main' },
+    });
+    expect(filterIn("  push:\n    branches-ignore: ['wip/*']", tag)).toMatchObject({
+      text: 'without a tag filter: a tag push does not run it',
+      subject: { label: 'ref', text: 'v1' },
+    });
+    expect(filterIn('  push:\n    branches: [main]', tag).text).toBe(
+      'without a tag filter: a tag push does not run it',
+    );
+  });
+
+  it('keeps the words of a filter of the ref kind pushed', () => {
+    expect(filterIn("  push:\n    branches-ignore: ['wip/*']", { event: 'push', branch: 'wip/a' }).text).toBe(
+      'ignored',
+    );
+    expect(filterIn("  push:\n    tags-ignore: ['v*']", tag).text).toBe('ignored');
+    expect(filterIn("  push:\n    tags: ['v*']", tag).text).toBe('matched');
+  });
+
+  it("names the branch a pull request or a workflow_run filter matches: the base, the triggering run's", () => {
+    expect(
+      filterIn('  pull_request:\n    branches: [main]', { ...pr, base: 'dev', head: 'x' }),
+    ).toMatchObject({
+      text: 'not matched',
+      subject: { label: 'base branch', text: 'dev' },
+    });
+    const run: ScenarioInput = {
+      event: 'workflow_run',
+      workflow_run: { name: 'B', branch: 'main', conclusion: 'success' },
+    };
+    expect(filterIn('  workflow_run:\n    workflows: [B]\n    branches-ignore: [main]', run)).toMatchObject({
+      text: 'ignored',
+      subject: { label: "triggering run's branch", text: 'main' },
+    });
   });
 });
 

@@ -67,6 +67,63 @@ jobs:
 const jobVerdict = (r: PlanResponse, jobId: string) =>
   r.plan.workflows[0]?.jobs.find((j) => j.jobId === jobId)?.runs.verdict;
 
+const AFTER = '.github/workflows/after.yml';
+
+/** A workflow the CI run on main triggers: both its filters read the triggering run. */
+const afterCi = {
+  [AFTER]: `on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./report.sh
+`,
+};
+
+const DEPLOY = '.github/workflows/deploy.yml';
+
+/** A dispatch input whose default only the run evaluates, read by a job. */
+const dispatched = {
+  [DEPLOY]: `on:
+  workflow_dispatch:
+    inputs:
+      target:
+        default: \${{ github.ref_name }}
+jobs:
+  deploy:
+    if: inputs.target == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./deploy.sh
+`,
+};
+
+/** The same default on a called workflow's input, which the caller's `with:` sets and no scenario field does. */
+const called = {
+  [CI]: `on: push
+jobs:
+  call:
+    uses: ./.github/workflows/reuse.yml
+`,
+  '.github/workflows/reuse.yml': `on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        default: \${{ github.ref_name }}
+jobs:
+  deploy:
+    if: inputs.target == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./deploy.sh
+`,
+};
+
 const failFast = {
   [CI]: `on: push
 jobs:
@@ -168,14 +225,39 @@ describe('pinControl', () => {
     });
   });
 
-  it('sets an input whose default only the run evaluates', () => {
-    const r = simulated(starter, { event: 'push', branch: 'main' });
-    expect(pinControl(synthetic('inputs.target.default', { kind: 'input' }), contextOf(r))).toEqual({
+  it('sets a dispatch input whose default only the run evaluates, and the input decides the job', () => {
+    const scenario: ScenarioInput = { event: 'workflow_dispatch', branch: 'main' };
+    const before = simulated(dispatched, scenario);
+    const control = pinControl(unknownOf(before, 'inputs.target.default'), contextOf(before));
+    expect(control).toEqual({
       kind: 'scenario',
       label: 'Set input target',
       fragment: { inputs: { target: '' } },
       focus: { path: 'inputs.target' },
     });
+    if (control.kind !== 'scenario') return;
+    const typed = applyScenarioPin(scenario, { inputs: { target: 'main' } });
+    const after = simulated(dispatched, typed.scenario);
+    expect(after.plan.unknowns.map((u) => u.id)).not.toContain('inputs.target.default');
+    expect(jobVerdict(after, 'deploy')).toBe('yes');
+  });
+
+  it("sets no scenario input for a called workflow's default, which only the caller's with: sets", () => {
+    const scenario: ScenarioInput = { event: 'push', branch: 'main' };
+    const before = simulated(called, scenario);
+    const unknown = unknownOf(before, 'inputs.target.default');
+    expect(pinControl(unknown, contextOf(before))).toEqual({
+      kind: 'none',
+      text: unknown.gap ?? 'only the run decides it',
+    });
+    // What the input pin would have written: the scenario input is not what the callee reads.
+    const stray = simulated(called, applyScenarioPin(scenario, { inputs: { target: 'main' } }).scenario);
+    expect(stray.plan.unknowns.map((u) => u.id)).toContain('inputs.target.default');
+    // A dispatch of another workflow still reads none of it.
+    const dispatch = simulated({ ...called, ...dispatched }, { event: 'workflow_dispatch', branch: 'main' });
+    expect(pinControl(synthetic('inputs.other.default', { kind: 'input' }), contextOf(dispatch)).kind).toBe(
+      'none',
+    );
   });
 
   it('applies a scenario fragment that is no record to nothing', () => {
@@ -185,7 +267,12 @@ describe('pinControl', () => {
   });
 
   it('names each scenario field a fragment writes', () => {
-    const r = simulated(starter, { event: 'push', branch: 'main' });
+    // A run named, so a fragment writing another key of the run is offered.
+    const r = simulated(afterCi, {
+      event: 'workflow_run',
+      workflow_run: { name: 'CI' },
+      action: 'completed',
+    });
     const cases: [Record<string, Json>, string, { path: string; entry?: string }][] = [
       [{ action: 'opened' }, 'Set the activity type', { path: 'action' }],
       [{ workflow_run: { name: 'CI' } }, 'Set the triggering workflow', { path: 'workflow_run.name' }],
@@ -208,6 +295,48 @@ describe('pinControl', () => {
         focus,
       });
     }
+  });
+
+  it("sets the triggering run's branch beside its name, and the run is decided", () => {
+    const scenario: ScenarioInput = {
+      event: 'workflow_run',
+      workflow_run: { name: 'CI' },
+      action: 'completed',
+    };
+    const before = simulated(afterCi, scenario);
+    const control = pinControl(unknownOf(before, 'scenario.workflow_run.branch'), contextOf(before));
+    expect(control).toMatchObject({
+      kind: 'scenario',
+      label: 'Set its branch',
+      focus: { path: 'workflow_run.branch' },
+    });
+    if (control.kind !== 'scenario') return;
+    const pinned = applyScenarioPin(scenario, control.fragment);
+    expect(pinned.scenario.workflow_run).toEqual({ name: 'CI', branch: 'main' });
+    const after = simulated(afterCi, pinned.scenario);
+    expect(after.plan.unknowns.map((u) => u.id)).not.toContain('scenario.workflow_run.branch');
+    expect(after.plan.workflows[0]?.triggered.verdict).toBe('yes');
+  });
+
+  it('offers the branch of a triggering run only once the run is named', () => {
+    const scenario: ScenarioInput = { event: 'workflow_run', action: 'completed' };
+    const before = simulated(afterCi, scenario);
+    const ctx = contextOf(before);
+    expect(pinControl(unknownOf(before, 'scenario.workflow_run.branch'), ctx)).toEqual({
+      kind: 'none',
+      text: 'set the triggering workflow first',
+    });
+    const name = pinControl(unknownOf(before, 'scenario.workflow_run.name'), ctx);
+    expect(name).toMatchObject({ kind: 'scenario', label: 'Set the triggering workflow' });
+    if (name.kind !== 'scenario') return;
+    const named = applyScenarioPin(scenario, name.fragment).scenario;
+    const between = simulated(afterCi, named);
+    const branch = pinControl(unknownOf(between, 'scenario.workflow_run.branch'), contextOf(between));
+    if (branch.kind !== 'scenario') throw new Error(branch.kind);
+    // The second pin keeps the name the first wrote: the worker plans the run.
+    const both = applyScenarioPin(named, branch.fragment).scenario;
+    expect(both.workflow_run).toEqual({ name: 'CI', branch: 'main' });
+    expect(simulated(afterCi, both).plan.workflows[0]?.triggered.verdict).toBe('yes');
   });
 
   it('assumes the cancelled leg the fail-fast race leaves open', () => {
@@ -253,6 +382,9 @@ describe('pinControl', () => {
   });
 });
 
+const isRecordOf = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
 describe('applyScenarioPin', () => {
   const cases: [string, ScenarioInput, Record<string, Json>][] = [
     [
@@ -273,11 +405,6 @@ describe('applyScenarioPin', () => {
       { actor: { login: '' } },
     ],
     ['the changed files are replaced', { event: 'push', changed: ['a.ts'] }, { changed: ['docs/**'] }],
-    [
-      'the triggering run is replaced',
-      { event: 'workflow_run', workflow_run: { name: 'CI', branch: 'x' } },
-      { workflow_run: { branch: 'main' } },
-    ],
     ['a record over no record is written', { event: 'push' }, { vars: { A: '' } }],
   ];
 
@@ -285,9 +412,24 @@ describe('applyScenarioPin', () => {
     it(`merges as the test runner merges when over given: ${name}`, () => {
       const { scenario: out, keys } = applyScenarioPin(scenario, fragment);
       expect(out).toEqual(mergeScenario(scenario as never, fragment as never));
-      expect(keys).toEqual(Object.keys(fragment));
+      // A dispatch input has a control of its own, so its mark is its own.
+      const inputs = isRecordOf(fragment.inputs)
+        ? Object.keys(fragment.inputs).map((n) => `inputs.${n}`)
+        : [];
+      expect(keys).toEqual(inputs.length ? inputs : Object.keys(fragment));
     });
   }
+
+  it('merges the triggering run key by key, where the test runner replaces it whole', () => {
+    const scenario: ScenarioInput = { event: 'workflow_run', workflow_run: { name: 'CI', branch: 'x' } };
+    const { scenario: out, keys } = applyScenarioPin(scenario, { workflow_run: { branch: 'main' } });
+    expect(out).toEqual({ event: 'workflow_run', workflow_run: { name: 'CI', branch: 'main' } });
+    expect(keys).toEqual(['workflow_run']);
+    expect(applyScenarioPin({ event: 'workflow_run' }, { workflow_run: { name: 'CI' } }).scenario).toEqual({
+      event: 'workflow_run',
+      workflow_run: { name: 'CI' },
+    });
+  });
 
   it('replaces the ref group whole', () => {
     const { scenario } = applyScenarioPin(

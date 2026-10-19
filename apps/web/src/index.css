@@ -5,7 +5,8 @@
 /*
  * The token sheet: a warm neutral ramp, one accent that never means a status, and the four run states shared by the
  * form, the panels and the graph. Light and dark are both first-class; the OS decides unless the author did.
- * `data-theme` is set before the first paint by public/theme.js, then kept by app/theme.ts.
+ * `data-theme` is set before the first paint by public/theme.js, then kept by app/theme.ts. `--might` marks and
+ * outlines; text and glyphs in amber take `--might-text`, which keeps 4.5:1 on every surface.
  */
 :root {
   --bg: #f7f4ee;
@@ -22,6 +23,7 @@
   --skip: #8d8477;
   --skip-soft: #ebe6dd;
   --might: #b26b00;
+  --might-text: #945800;
   --might-soft: #f8e8c8;
   --unknown: #6b4fbb;
   --unknown-soft: #e8e1f7;
@@ -45,6 +47,7 @@
   --skip: #8d8477;
   --skip-soft: #262220;
   --might: #f0b445;
+  --might-text: #f0b445;
   --might-soft: #342a12;
   --unknown: #a98cf0;
   --unknown-soft: #27203a;
@@ -70,6 +73,7 @@
   --color-skip: var(--skip);
   --color-skip-soft: var(--skip-soft);
   --color-might: var(--might);
+  --color-might-text: var(--might-text);
   --color-might-soft: var(--might-soft);
   --color-unknown: var(--unknown);
   --color-unknown-soft: var(--unknown-soft);

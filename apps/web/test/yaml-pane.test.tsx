@@ -5,12 +5,16 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
-import { AppProvider } from '../src/app/providers';
+import { AppProvider, useSession } from '../src/app/providers';
 import { sampleByName } from '../src/input/samples';
+import { planIndex, selectionOf } from '../src/plan/index';
 import { createSessionStore, initialSessionState, type SessionStore } from '../src/state/store';
 import { handle, initialState } from '../src/worker/handle';
 import type { Outline } from '../src/worker/protocol';
 import {
+  type LineBox,
+  OWN_SCROLL,
+  scrollTopFor,
   blankState,
   FLASH_MS,
   gutterNodes,
@@ -61,6 +65,47 @@ afterEach(() => {
   onMark.mockReset();
   delete document.documentElement.dataset.theme;
 });
+
+/** CodeMirror's measure request, which it declares without exporting. */
+interface MeasureRequest<T> {
+  key?: unknown;
+  read: (view: EditorView) => T;
+  write?: (measure: T, view: EditorView) => void;
+}
+
+/**
+ * The pane's own scrolls (`scrollOwnTo`), read off CodeMirror's measure requests: the position each asks for, and
+ * whether it centres the line or only brings it into view.
+ */
+function ownScrolls() {
+  const spy = vi.spyOn(EditorView.prototype, 'requestMeasure');
+  const requests = () =>
+    spy.mock.calls
+      .map(([request]) => request as MeasureRequest<LineBox> | undefined)
+      .filter((r): r is MeasureRequest<LineBox> => r?.key === OWN_SCROLL);
+  const decode = (request: MeasureRequest<LineBox>) => {
+    let pos = -1;
+    const probe = {
+      lineBlockAt: (p: number) => {
+        pos = p;
+        return { top: 0, height: 0 };
+      },
+      scrollDOM: { clientHeight: 0, scrollTop: 0 },
+    };
+    request.read(probe as unknown as EditorView);
+    // A line below the view: centred it lands at 80, brought into view at 60.
+    request.write?.({ top: 100, height: 10, view: 50, scrolled: 0 }, probe as unknown as EditorView);
+    return { pos, y: probe.scrollDOM.scrollTop === 80 ? 'center' : 'nearest' };
+  };
+  return {
+    count: () => requests().length,
+    last: () => {
+      const r = requests().at(-1);
+      return r && decode(r);
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
 
 describe('the pane’s extensions', () => {
   const text = 'a: 1\nb: 2\nc: 3\n';
@@ -158,12 +203,13 @@ describe('the pane’s extensions', () => {
 });
 
 describe('the YAML pane', () => {
-  function mount(
+  /** A session on the starter's files and plan, focused on CI, with the pane open. */
+  function storeWith(
     over: Partial<ReturnType<typeof initialSessionState>> = {},
     outline: Outline = main.outline,
-  ) {
+  ): SessionStore {
     const initial = initialSessionState();
-    const store = createSessionStore({
+    return createSessionStore({
       ...initial,
       files: { version: 1, byPath: starter },
       project: { status: 'ready', version: 1, outline, files: 3 },
@@ -175,6 +221,13 @@ describe('the YAML pane', () => {
       },
       ...over,
     });
+  }
+
+  function mount(
+    over: Partial<ReturnType<typeof initialSessionState>> = {},
+    outline: Outline = main.outline,
+  ) {
+    const store = storeWith(over, outline);
     const result = render(
       <AppProvider app={{ store } as unknown as App}>
         <YamlPane />
@@ -243,27 +296,76 @@ describe('the YAML pane', () => {
     expect(lineOf(container, 30)?.dataset.tone).toBe('yes');
   });
 
+  it('marks a line two legs share from the selected leg', () => {
+    const { container, store } = mount();
+    const nodes = () => gutterNodes(viewOf(container).state);
+    expect(nodes().get(23)).toBe(`${CI}#test[node=22]/~actions-checkout`);
+    const { focus, sel } = selectionOf(planIndex(main.plan), `${CI}#test[node=24]/~npm-test`);
+    act(() => store.getState().select(focus, sel));
+    expect(nodes().get(23)).toBe(`${CI}#test[node=24]/~actions-checkout`);
+    expect(nodes().get(28)).toBe(`${CI}#test[node=24]/~npm-test`);
+  });
+
   it('brings the deciding line to the middle when the selection changes, and only into view after a mark', () => {
-    const scroll = vi.spyOn(EditorView, 'scrollIntoView');
+    const scroll = ownScrolls();
     try {
       const { container, store } = mount();
       const doc = viewOf(container).state.doc;
       // The focused workflow is selected first: its paths filter decided.
-      expect(scroll).toHaveBeenLastCalledWith(doc.line(5).from, { y: 'center' });
+      expect(scroll.last()).toEqual({ pos: doc.line(5).from, y: 'center' });
       act(() => store.getState().select(CI, 'deploy'));
-      expect(scroll).toHaveBeenLastCalledWith(doc.line(43).from, { y: 'center' });
-      const calls = scroll.mock.calls.length;
+      expect(scroll.last()).toEqual({ pos: doc.line(43).from, y: 'center' });
+      const calls = scroll.count();
       act(() => store.getState().planReceived({ ...main.plan }));
-      expect(scroll).toHaveBeenCalledTimes(calls);
+      expect(scroll.count()).toBe(calls);
       const build = () => container.querySelector<HTMLElement>(`.cm-sc-mark[data-node="${CI}#build"]`)!;
       fireEvent.mouseDown(build(), { button: 0 });
-      expect(scroll).toHaveBeenLastCalledWith(doc.line(30).from, { y: 'nearest' });
+      expect(scroll.last()).toEqual({ pos: doc.line(30).from, y: 'nearest' });
       // The selection's own mark moves nothing, and the next selection is centred again.
       fireEvent.mouseDown(build(), { button: 0 });
       act(() => store.getState().select(CI, 'deploy'));
-      expect(scroll).toHaveBeenLastCalledWith(doc.line(43).from, { y: 'center' });
+      expect(scroll.last()).toEqual({ pos: doc.line(43).from, y: 'center' });
     } finally {
-      scroll.mockRestore();
+      scroll.restore();
+    }
+  });
+
+  it('brings the selection back once the plan of new files comes', () => {
+    const scroll = ownScrolls();
+    try {
+      const { container, store } = mount({ sel: 'deploy' });
+      const deciding = { pos: viewOf(container).state.doc.line(43).from, y: 'center' };
+      expect(scroll.last()).toEqual(deciding);
+      const before = scroll.count();
+      act(() => store.getState().setFiles({ ...starter }, store.getState().source));
+      act(() => store.getState().projectReady(2, main.outline, 3));
+      // The states of the old files are gone; the plan of the new ones puts the selection back in view.
+      act(() => store.getState().planReceived({ ...main.plan, for: { files: 2, project: 2 } }));
+      expect(store.getState()).toMatchObject({ focus: CI, sel: 'deploy' });
+      expect(scroll.count()).toBe(before + 1);
+      expect(scroll.last()).toEqual(deciding);
+    } finally {
+      scroll.restore();
+    }
+  });
+
+  it('centres a line, or moves the least that shows it and not at all when it shows', () => {
+    const box = { top: 100, height: 10, view: 50, scrolled: 0 };
+    expect(scrollTopFor(box, 'center')).toBe(80);
+    expect(scrollTopFor({ ...box, top: 10 }, 'center')).toBe(0);
+    expect(scrollTopFor(box, 'nearest')).toBe(60);
+    expect(scrollTopFor({ ...box, scrolled: 120 }, 'nearest')).toBe(100);
+    expect(scrollTopFor({ ...box, scrolled: 70 }, 'nearest')).toBeUndefined();
+  });
+
+  it('scrolls the editor alone on a selection, never the page around it', () => {
+    const page = vi.spyOn(EditorView, 'scrollIntoView');
+    try {
+      const { store } = mount();
+      act(() => store.getState().select(CI, 'deploy'));
+      expect(page).not.toHaveBeenCalled();
+    } finally {
+      page.mockRestore();
     }
   });
 
@@ -361,6 +463,22 @@ describe('the YAML pane', () => {
     }
   });
 
+  it('drops a reveal the author moved away from before the pane could show it', () => {
+    const store = storeWith();
+    // While the editor loads: a file:line link, then a selection, which takes the pane back to its file.
+    store.getState().revealLine({ file: RELEASE, line: 9 });
+    store.getState().select(CI, 'build');
+    const { container } = render(
+      <AppProvider app={{ store } as unknown as App}>
+        <YamlPane />
+      </AppProvider>,
+    );
+    expect(content(container).getAttribute('aria-label')).toBe(`${CI}, read-only`);
+    fireEvent.click(tab('release.yml'));
+    expect(content(container).getAttribute('aria-label')).toBe(`${RELEASE}, read-only`);
+    expect(classes(container).get(9)).toBeUndefined();
+  });
+
   it('draws the problem lines, with a red dot and words on the tab', () => {
     const outline = structuredClone(main.outline);
     outline.files
@@ -405,6 +523,41 @@ describe('the YAML pane', () => {
     } finally {
       destroy.mockRestore();
     }
+  });
+
+  it('hands the focus to the plan when it closes while holding it', () => {
+    const store = storeWith();
+    // The view's layout (app/SimulateView.tsx): the plan, with the pane under it while it is open.
+    function Layout() {
+      const closed = useSession((s) => s.ui.prefs.collapsed.yaml);
+      return (
+        <>
+          <button type="button">Elsewhere</button>
+          <section data-plan tabIndex={-1} aria-label="The plan" />
+          {!closed && (
+            <section data-pane="yaml" aria-label="Workflow source">
+              <YamlPane />
+            </section>
+          )}
+        </>
+      );
+    }
+    render(
+      <AppProvider app={{ store } as unknown as App}>
+        <Layout />
+      </AppProvider>,
+    );
+    const close = () => screen.getByRole('button', { name: 'Close the workflow source' });
+    close().focus();
+    fireEvent.click(close());
+    expect(store.getState().ui.prefs.collapsed.yaml).toBe(true);
+    expect(screen.queryByRole('region', { name: 'Workflow source' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('region', { name: 'The plan' }));
+    // A press that did not move the focus into the pane (Safari's) leaves it where it is.
+    act(() => store.getState().togglePane('yaml'));
+    screen.getByRole('button', { name: 'Elsewhere' }).focus();
+    fireEvent.click(close());
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Elsewhere' }));
   });
 
   it('says so when no file is loaded', () => {

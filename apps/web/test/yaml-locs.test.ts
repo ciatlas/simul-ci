@@ -57,7 +57,7 @@ const rows = (marks: ReturnType<typeof gutterMarks>) =>
 
 describe('the verdict gutter', () => {
   it('marks the on: line, every job and the steps of the first leg of a workflow, with their verdicts', () => {
-    expect(rows(gutterMarks(main.plan, main.outline, CI, {}))).toEqual([
+    expect(rows(gutterMarks(main, main.outline, CI, {}))).toEqual([
       [2, CI, 'yes', 'workflow'],
       [16, 'test', 'yes', 'job'],
       [23, 'test[node=22]/~actions-checkout', 'yes', 'step'],
@@ -76,15 +76,15 @@ describe('the verdict gutter', () => {
   });
 
   it('marks an untriggered workflow on its on: line alone', () => {
-    expect(rows(gutterMarks(main.plan, main.outline, RELEASE, {}))).toEqual([[2, RELEASE, 'no', 'workflow']]);
+    expect(rows(gutterMarks(main, main.outline, RELEASE, {}))).toEqual([[2, RELEASE, 'no', 'workflow']]);
   });
 
   it('takes a matrix job’s steps from the leg the author picked, while the plan still has it', () => {
     const test = `${CI}#test`;
-    const marks = gutterMarks(main.plan, main.outline, CI, { [test]: `${test}[node=24]` });
+    const marks = gutterMarks(main, main.outline, CI, { [test]: `${test}[node=24]` });
     expect(lineNodes(marks).get(23)).toBe(`${test}[node=24]/~actions-checkout`);
     expect(lineNodes(marks).get(16)).toBe(test);
-    const gone = gutterMarks(main.plan, main.outline, CI, { [test]: `${test}[node=20]` });
+    const gone = gutterMarks(main, main.outline, CI, { [test]: `${test}[node=20]` });
     expect(lineNodes(gone).get(23)).toBe(`${test}[node=22]/~actions-checkout`);
     const job = main.plan.workflows[0]!.jobs[0]!;
     expect(representativeLeg(job, {})?.id).toBe(`${test}[node=22]`);
@@ -93,23 +93,23 @@ describe('the verdict gutter', () => {
 
   it('marks a composite action’s steps in its action.yml from the first step that uses it', () => {
     const action = `${RELEASE}#publish/~github-actions-setup>.github/actions/setup`;
-    expect(gutterMarks(tag.plan, tag.outline, SETUP, {})).toEqual([
+    expect(gutterMarks(tag, tag.outline, SETUP, {})).toEqual([
       { line: 6, node: `${action}/~actions-setup-node`, verdict: 'yes', kind: 'step' },
       { line: 9, node: `${action}/steps.cache`, verdict: 'yes', kind: 'step' },
       { line: 14, node: `${action}/~npm-ci`, verdict: 'maybe', kind: 'step' },
     ]);
     // The step that uses it is marked in the workflow.
-    expect(lineNodes(gutterMarks(tag.plan, tag.outline, RELEASE, {})).get(14)).toBe(
+    expect(lineNodes(gutterMarks(tag, tag.outline, RELEASE, {})).get(14)).toBe(
       `${RELEASE}#publish/~github-actions-setup`,
     );
     // Nothing uses it when Release is not triggered.
-    expect(gutterMarks(main.plan, main.outline, SETUP, {})).toEqual([]);
+    expect(gutterMarks(main, main.outline, SETUP, {})).toEqual([]);
   });
 
   it('marks a called workflow’s jobs from the first leg that calls it, its on: line by its own trigger', () => {
     const push = simulated(monorepo, { event: 'push', branch: 'main' });
     const web = `${CI}#web>${PACKAGE}`;
-    expect(gutterMarks(push.plan, push.outline, PACKAGE, {})).toEqual([
+    expect(gutterMarks(push, push.outline, PACKAGE, {})).toEqual([
       { line: 2, node: PACKAGE, verdict: 'no', kind: 'workflow' },
       { line: 10, node: `${web}#test`, verdict: 'maybe', kind: 'job' },
       { line: 13, node: `${web}#test/~actions-checkout`, verdict: 'maybe', kind: 'step' },
@@ -124,9 +124,96 @@ describe('the verdict gutter', () => {
     ]);
   });
 
+  describe('in a file the plan reaches more than once', () => {
+    const DEPLOY = '.github/workflows/deploy.yml';
+    const ACTION = '.github/actions/greet';
+    const GREET = `${ACTION}/action.yml`;
+    // Two callers of one workflow, two legs of one job, two users of one action: each pair decides differently.
+    const shared = simulated(
+      {
+        [CI]: [
+          'on: push',
+          'jobs:',
+          '  prod:',
+          '    uses: ./.github/workflows/deploy.yml',
+          '    with: { env: prod }',
+          '  staging:',
+          '    uses: ./.github/workflows/deploy.yml',
+          '    with: { env: staging }',
+          '  build:',
+          '    runs-on: ubuntu-latest',
+          '    strategy: { matrix: { os: [linux, mac] } }',
+          '    steps:',
+          '      - run: echo hi',
+          "        if: matrix.os == 'mac'",
+          '  greet:',
+          '    runs-on: ubuntu-latest',
+          '    steps:',
+          '      - uses: ./.github/actions/greet',
+          '        with: { who: a }',
+          '      - uses: ./.github/actions/greet',
+          '        with: { who: b }',
+          '',
+        ].join('\n'),
+        [DEPLOY]: [
+          'on:',
+          '  workflow_call:',
+          '    inputs: { env: { type: string, required: true } }',
+          'jobs:',
+          '  ship:',
+          "    if: inputs.env == 'prod'",
+          '    runs-on: ubuntu-latest',
+          '    steps:',
+          '      - run: echo ship',
+          '',
+        ].join('\n'),
+        [GREET]: [
+          'inputs: { who: { required: true } }',
+          'runs:',
+          '  using: composite',
+          '  steps:',
+          '    - run: echo a',
+          '      shell: bash',
+          "      if: inputs.who == 'a'",
+          '',
+        ].join('\n'),
+      },
+      { event: 'push', branch: 'main' },
+    );
+    const at = (file: string, line: number, selected?: string, representative = {}) =>
+      gutterMarks(shared, shared.outline, file, representative, selected).find((m) => m.line === line);
+
+    it('marks a shared line from the first context that reaches it while nothing in the file is selected', () => {
+      expect(at(DEPLOY, 5)).toMatchObject({ node: `${CI}#prod>${DEPLOY}#ship`, verdict: 'yes' });
+      expect(at(DEPLOY, 5, `${CI}#build`)).toMatchObject({ node: `${CI}#prod>${DEPLOY}#ship` });
+      expect(at(CI, 13)).toMatchObject({ node: `${CI}#build[os=linux]/~echo-hi`, verdict: 'no' });
+      expect(at(GREET, 5)).toMatchObject({ node: `${CI}#greet/~github-actions-greet>${ACTION}/~echo-a` });
+      expect(at(DEPLOY, 5, `${CI}#gone`)).toMatchObject({ node: `${CI}#prod>${DEPLOY}#ship` });
+    });
+
+    it('marks it from the selection’s own caller, leg or user of the action, and from what the selection holds', () => {
+      const ship = { node: `${CI}#staging>${DEPLOY}#ship`, verdict: 'no' };
+      expect(at(DEPLOY, 5, ship.node)).toMatchObject(ship);
+      expect(at(DEPLOY, 5, `${CI}#staging`)).toMatchObject(ship);
+      expect(at(DEPLOY, 5, `${CI}#staging>${DEPLOY}`)).toMatchObject(ship);
+      // A skipped job has no steps: the other caller's still fill the lines left.
+      expect(at(DEPLOY, 9, ship.node)).toMatchObject({ node: `${CI}#prod>${DEPLOY}#ship/~echo-ship` });
+      // The selection's leg wins over the leg the author picked for the card.
+      const mac = { node: `${CI}#build[os=mac]/~echo-hi`, verdict: 'yes' };
+      const linux = { [`${CI}#build`]: `${CI}#build[os=linux]` };
+      expect(at(CI, 13, mac.node, linux)).toMatchObject(mac);
+      expect(at(CI, 13, `${CI}#build[os=mac]`, linux)).toMatchObject(mac);
+      const second = `${CI}#greet/~github-actions-greet~2`;
+      const inner = { node: `${second}>${ACTION}/~echo-a`, verdict: 'no' };
+      expect(at(GREET, 5, inner.node)).toMatchObject(inner);
+      expect(at(GREET, 5, second)).toMatchObject(inner);
+      expect(at(GREET, 5, `${second}>${ACTION}`)).toMatchObject(inner);
+    });
+  });
+
   it('marks nothing in a file the plan does not reach, and only the on: lines the outline knows', () => {
-    expect(gutterMarks(main.plan, main.outline, 'README.md', {})).toEqual([]);
-    expect(gutterMarks(main.plan, undefined, CI, {})[0]).toMatchObject({ line: 16, kind: 'job' });
+    expect(gutterMarks(main, main.outline, 'README.md', {})).toEqual([]);
+    expect(gutterMarks(main, undefined, CI, {})[0]).toMatchObject({ line: 16, kind: 'job' });
   });
 });
 

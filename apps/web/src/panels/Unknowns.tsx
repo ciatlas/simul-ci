@@ -11,14 +11,55 @@ import { focusAfter, type UnknownRowModel, unknownRows } from './unknown-rows';
  * The Unknowns tab (synthesis § 7), the mock-authoring surface: the Assumptions list, then the unknowns, those that
  * decide a verdict first and the rest collapsed, each with its pin control. A toggle keeps the ones that affect the
  * selection. A pin never updates the list itself: the next plan drops the row, and the focus moves to the next one.
+ * The Assumptions show before the first plan too, so an entry the worker refuses can be seen and removed.
  */
 export function Unknowns() {
   const selected = useSelected();
-  if (!selected) return <EmptyNote>The unknowns show with the first plan.</EmptyNote>;
-  return <UnknownList selected={selected} />;
+  const section = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const title: Title = { ref: heading, id: useId() };
+  // The Assumptions keep their place when the first plan comes, and the focus in them stays.
+  return (
+    <section ref={section} aria-labelledby={title.id} className="flex flex-col gap-4">
+      <Assumptions onEmptied={() => heading.current?.focus()} />
+      {selected ? (
+        <UnknownList selected={selected} section={section} title={title} />
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Heading title={title} />
+          <EmptyNote>The unknowns show with the first plan.</EmptyNote>
+        </div>
+      )}
+    </section>
+  );
 }
 
-function UnknownList({ selected }: { selected: Selected }) {
+/** The tab's heading, which takes the focus when what had it went. */
+interface Title {
+  ref: RefObject<HTMLHeadingElement | null>;
+  id: string;
+}
+
+function Heading({ title }: { title: Title }) {
+  return (
+    <h3
+      ref={title.ref}
+      id={title.id}
+      tabIndex={-1}
+      className="font-medium text-muted text-xs uppercase tracking-wide"
+    >
+      Unknowns
+    </h3>
+  );
+}
+
+interface ListProps {
+  selected: Selected;
+  section: RefObject<HTMLElement | null>;
+  title: Title;
+}
+
+function UnknownList({ selected, section, title }: ListProps) {
   const { plan, index, node } = selected;
   const focus = useSession((s) => s.focus);
   const [affecting, setAffecting] = useState(false);
@@ -32,7 +73,7 @@ function UnknownList({ selected }: { selected: Selected }) {
     [plan, index, filter],
   );
   const shown = [...rows.gating, ...(idleOpen ? rows.idle : [])].map((r) => r.unknown.id);
-  const pins = usePinFocus(plan.plan, shown);
+  const pins = usePinFocus(plan.plan, shown, section, title.ref);
   const label = narrowed === undefined ? '' : (labels.get(narrowed) ?? narrowed);
 
   const row = (r: UnknownRowModel) => (
@@ -47,37 +88,24 @@ function UnknownList({ selected }: { selected: Selected }) {
   );
 
   return (
-    <section ref={pins.section} aria-labelledby={pins.headingId} className="flex flex-col gap-4">
-      <Assumptions onEmptied={() => pins.heading.current?.focus()} />
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3
-            ref={pins.heading}
-            id={pins.headingId}
-            tabIndex={-1}
-            className="font-medium text-muted text-xs uppercase tracking-wide"
-          >
-            Unknowns
-          </h3>
-          <AffectingToggle node={narrowed} label={label} on={affecting} onChange={setAffecting} />
-        </div>
-        <Rows
-          total={plan.plan.unknowns.length}
-          filtered={filter === undefined ? undefined : label}
-          gating={rows.gating.map(row)}
-          idle={rows.idle.map(row)}
-          idleOpen={idleOpen}
-          setIdleOpen={setIdleOpen}
-        />
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Heading title={title} />
+        <AffectingToggle node={narrowed} label={label} on={affecting} onChange={setAffecting} />
       </div>
-    </section>
+      <Rows
+        total={plan.plan.unknowns.length}
+        filtered={filter === undefined ? undefined : label}
+        gating={rows.gating.map(row)}
+        idle={rows.idle.map(row)}
+        idleOpen={idleOpen}
+        setIdleOpen={setIdleOpen}
+      />
+    </div>
   );
 }
 
 interface PinFocus {
-  section: RefObject<HTMLElement | null>;
-  heading: RefObject<HTMLHeadingElement | null>;
-  headingId: string;
   /** The ref callback of a row, by unknown id. */
   register: (id: string) => (el: HTMLElement | null) => void;
   /** A row wrote an assume entry: the next plan should drop it. */
@@ -89,10 +117,12 @@ interface PinFocus {
  * tab), the next row shown takes it, else the one before, else the tab's heading. A pin the plan did not take leaves
  * the focus where it is; the author's focus elsewhere is never moved.
  */
-function usePinFocus(plan: RunPlan, shown: string[]): PinFocus {
-  const section = useRef<HTMLElement>(null);
-  const heading = useRef<HTMLHeadingElement>(null);
-  const headingId = useId();
+function usePinFocus(
+  plan: RunPlan,
+  shown: string[],
+  section: RefObject<HTMLElement | null>,
+  heading: RefObject<HTMLHeadingElement | null>,
+): PinFocus {
   const items = useRef(new Map<string, HTMLElement>());
   const pending = useRef<{ id: string; order: string[] }>(undefined);
 
@@ -107,9 +137,6 @@ function usePinFocus(plan: RunPlan, shown: string[]): PinFocus {
   }, [plan]);
 
   return {
-    section,
-    heading,
-    headingId,
     register: (id) => (el) => {
       if (el) items.current.set(id, el);
       else items.current.delete(id);

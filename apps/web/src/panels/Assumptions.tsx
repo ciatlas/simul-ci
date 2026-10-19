@@ -1,9 +1,9 @@
 import type { AssumeEntry, Diagnostic } from '@simulci/engine';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useApp, useSession } from '../app/providers';
-import { withEntry, withoutEntry } from '../scenario/apply-pin';
 import type { PlanState } from '../state/store';
-import { type AssumptionRow, assumptionRows, entryLabel, issuesOf } from './assumption-rows';
+import { withEntry, withoutEntry } from '../scenario/apply-pin';
+import { type AssumptionRow, assumptionRows, entryIds, entryLabel, issuesOf } from './assumption-rows';
 import { SectionTitle } from './kit';
 import { draftOfEntry, type PinContext } from './pin-draft';
 import { PinEditor } from './PinEditor';
@@ -11,8 +11,9 @@ import { appliedText } from './unknown-rows';
 
 /**
  * The Assumptions list (synthesis § 7): the case layer made visible, exactly the generated case's `assume` in order.
- * Each entry says where it applied and what the plan's diagnostics say of it, and opens in the PinEditor or goes. The
- * worker's refusal of the layer shows on the entries it names. Nothing shows while the layer is empty.
+ * Each entry says where it applied and what the plan's diagnostics say of it once a plan simulated with the list
+ * answers it, and opens in the PinEditor or goes. The worker's refusal of the layer shows on the entries it names,
+ * before the first plan too. Nothing shows while the layer is empty.
  */
 
 interface Props {
@@ -20,13 +21,15 @@ interface Props {
   onEmptied?: () => void;
 }
 
-/** The case layer's entries above the unknowns; nothing while there is none or no plan yet. */
+/** The case layer's entries above the unknowns; nothing while there is none. */
 export function Assumptions({ onEmptied }: Props) {
   const assume = useSession((s) => s.assume);
-  const plan = useSession((s) => s.plan);
-  if (assume.length === 0 || !plan) return null;
-  return <AssumptionList assume={assume} plan={plan} onEmptied={onEmptied} />;
+  if (assume.length === 0) return null;
+  return <AssumptionList assume={assume} onEmptied={onEmptied} />;
 }
+
+/** What a row says where it applied while no plan simulated with the list has come. */
+const PENDING = 'where it applies shows with the next plan';
 
 const STATUS: Record<Exclude<AssumptionRow['status'], 'ok'>, { text: string; className: string }> = {
   error: { text: 'invalid for tests', className: 'border-danger bg-danger-soft text-danger' },
@@ -36,19 +39,26 @@ const STATUS: Record<Exclude<AssumptionRow['status'], 'ok'>, { text: string; cla
 
 function AssumptionList({
   assume,
-  plan,
   onEmptied,
 }: {
   assume: AssumeEntry[];
-  plan: PlanState;
   onEmptied: (() => void) | undefined;
 }) {
   const { store } = useApp();
+  const plan = useSession((s) => s.plan);
   const error = useSession((s) => s.error);
   const models = useSession((s) => s.engine.models);
-  const rows = useMemo(() => assumptionRows(assume, plan.plan, plan.derived), [assume, plan]);
-  const ctx = useMemo<PinContext>(() => ({ plan: plan.plan, derived: plan.derived, models }), [plan, models]);
+  // The plan names the entries by position: a plan simulated with another list says nothing of these.
+  const answer = plan && answers(plan, assume) ? plan : undefined;
+  const rows = useMemo(() => assumptionRows(assume, answer), [assume, answer]);
+  const ctx = useMemo<PinContext | undefined>(
+    () => plan && { plan: plan.plan, derived: plan.derived, models },
+    [plan, models],
+  );
   const refused = error?.kind === 'assume' ? (error.issues ?? []) : [];
+  // An entry's row, its editor with it, follows the entry when a removal moves it.
+  const [ids] = useState(entryIds);
+  const keys = ids.of(assume);
   const items = useRef(new Map<number, HTMLElement>());
   const removed = useRef<number>(undefined);
 
@@ -72,6 +82,7 @@ function AssumptionList({
   };
   const replace = (index: number, entry: AssumeEntry): void => {
     const s = store.getState();
+    ids.carry(s.assume, index, entry);
     s.setAssume(withEntry(s.assume, entry, index));
   };
 
@@ -81,7 +92,7 @@ function AssumptionList({
       <ol className="flex flex-col gap-2">
         {rows.map((row) => (
           <Item
-            key={row.index}
+            key={keys[row.index]}
             row={row}
             ctx={ctx}
             issues={issuesOf(refused, row.index)}
@@ -100,7 +111,8 @@ function AssumptionList({
 
 interface ItemProps {
   row: AssumptionRow;
-  ctx: PinContext;
+  /** What the editor is decided against; without a plan the entry cannot be edited, only removed. */
+  ctx: PinContext | undefined;
   /** The worker's refusal of this entry. */
   issues: string[];
   register: (el: HTMLElement | null) => void;
@@ -130,7 +142,7 @@ function Item({ row, ctx, issues, register, onReplace, onRemove }: ItemProps) {
         <span className="min-w-0 flex-1 break-all font-mono text-text">{label}</span>
         <StatusChip status={row.status} />
       </div>
-      <p className="text-muted">{appliedText(row.applied)}</p>
+      <p className="text-muted">{row.applied ? appliedText(row.applied) : PENDING}</p>
       <Diagnostics diagnostics={row.diagnostics} />
       {issues.length > 0 && (
         <ul className="flex flex-col gap-0.5 text-danger">
@@ -143,17 +155,19 @@ function Item({ row, ctx, issues, register, onReplace, onRemove }: ItemProps) {
         </ul>
       )}
       <div className="flex gap-2">
-        <button
-          ref={edit}
-          type="button"
-          aria-expanded={editing}
-          aria-controls={editing ? editor : undefined}
-          aria-label={`Edit ${label}`}
-          onClick={() => setEditing((e) => !e)}
-          className={button}
-        >
-          Edit
-        </button>
+        {ctx && (
+          <button
+            ref={edit}
+            type="button"
+            aria-expanded={editing}
+            aria-controls={editing ? editor : undefined}
+            aria-label={`Edit ${label}`}
+            onClick={() => setEditing((e) => !e)}
+            className={button}
+          >
+            Edit
+          </button>
+        )}
         <button
           type="button"
           aria-label={`Remove ${label}`}
@@ -166,7 +180,7 @@ function Item({ row, ctx, issues, register, onReplace, onRemove }: ItemProps) {
           Remove
         </button>
       </div>
-      {editing && (
+      {editing && ctx && (
         <div id={editor}>
           <PinEditor
             key={JSON.stringify(row.entry)}
@@ -204,3 +218,7 @@ function Diagnostics({ diagnostics }: { diagnostics: Diagnostic[] }) {
     </ul>
   );
 }
+
+/** Whether a plan was simulated with this case layer (a plan that does not say is taken at its word). */
+const answers = (plan: PlanState, assume: AssumeEntry[]): boolean =>
+  plan.for.assume === undefined || plan.for.assume === assume;

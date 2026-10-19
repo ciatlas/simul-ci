@@ -25,7 +25,7 @@ export function Problems() {
 /** The severity in words, with a glyph that does not lean on its colour. */
 const SEVERITY: Record<ProblemRow['severity'], { glyph: string; className: string }> = {
   error: { glyph: '✕', className: 'text-danger' },
-  warning: { glyph: '!', className: 'text-might' },
+  warning: { glyph: '!', className: 'text-might-text' },
   info: { glyph: 'i', className: 'text-muted' },
 };
 

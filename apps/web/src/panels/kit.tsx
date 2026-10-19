@@ -53,7 +53,7 @@ const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
 const GATE: Record<'pass' | 'fail' | 'open', { glyph: string; label: string; className: string }> = {
   pass: { glyph: '✓', label: 'passes', className: 'text-run' },
   fail: { glyph: '✗', label: 'fails', className: 'text-danger' },
-  open: { glyph: '?', label: 'undecided', className: 'text-might' },
+  open: { glyph: '?', label: 'undecided', className: 'text-might-text' },
 };
 
 /** A gate's answer (`reasonGate`): ✓ passes, ✗ fails, ? undecided; the glyph is named for a screen reader. */

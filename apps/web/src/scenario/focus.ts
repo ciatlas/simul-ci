@@ -23,6 +23,35 @@ export function resolveField(
   return at === -1 ? undefined : fields.get(focus.path.slice(0, at));
 }
 
+/** A focus request resolved to the field that shows it. */
+export interface FieldRequest {
+  field: string;
+  seq: number;
+}
+
+/** The field a request asks for, with its `seq`; none without a request, or when the form shows no field for it. */
+export function requestedField(
+  focus: FieldFocus | undefined,
+  fields: ReadonlyMap<string, string>,
+): FieldRequest | undefined {
+  if (!focus) return undefined;
+  const field = resolveField(focus, fields);
+  return field === undefined ? undefined : { field, seq: focus.seq };
+}
+
+/**
+ * The request a closed group opens for: one that asks for a field the group holds and that it has not opened for
+ * (`opened`, the `seq` of the last one), so each request opens it once and the author can close it again.
+ */
+export function opensFor(
+  request: FieldRequest | undefined,
+  held: readonly string[],
+  opened: number | undefined,
+): number | undefined {
+  if (!request || request.seq === opened || !held.includes(request.field)) return undefined;
+  return request.seq;
+}
+
 /** The fields written as `name=value` lines, whose entry's value the focus selects. */
 const ENTRY_FIELDS = new Set(['vars']);
 

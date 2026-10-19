@@ -1,7 +1,7 @@
 import type { AssumeEntry, Diagnostic, ScenarioInput } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 import { sampleByName } from '../src/input/samples';
-import { assumptionRows, entryLabel, issuesOf } from '../src/panels/assumption-rows';
+import { assumptionRows, entryIds, entryLabel, issuesOf } from '../src/panels/assumption-rows';
 import { handle, initialState } from '../src/worker/handle';
 import type { EngineResponse } from '../src/worker/protocol';
 
@@ -25,7 +25,7 @@ describe('assumptionRows', () => {
   ];
   const r = answer(push, assume);
   if (r.type !== 'plan') throw new Error(JSON.stringify(r));
-  const rows = assumptionRows(assume, r.plan, r.derived);
+  const rows = assumptionRows(assume, r);
 
   it('lists every entry in order, by the ref the plan names it with', () => {
     expect(rows.map((row) => [row.index, row.ref, row.entry])).toEqual(
@@ -71,20 +71,67 @@ describe('assumptionRows', () => {
         { ...said('error', 'X'), mock: 'cli[0]' },
       ],
     };
-    const [row] = assumptionRows([assume[0]!], plan, r.derived);
+    const [row] = assumptionRows([assume[0]!], { plan, derived: r.derived });
     expect(row?.diagnostics.map((d) => d.code)).toEqual(['E', 'W', 'I']);
     expect(row?.status).toBe('error');
     expect(row?.applied).toEqual([{ at: `${CI}#gone`, provides: ['outcome'] }]);
-    const [warned] = assumptionRows(
-      [assume[0]!],
-      { ...plan, diagnostics: [said('info', 'I'), said('warning', 'W')] },
-      r.derived,
-    );
+    const [warned] = assumptionRows([assume[0]!], {
+      plan: { ...plan, diagnostics: [said('info', 'I'), said('warning', 'W')] },
+      derived: r.derived,
+    });
     expect(warned?.status).toBe('warning');
   });
 
   it('lists nothing for an empty case layer', () => {
-    expect(assumptionRows([], r.plan, r.derived)).toEqual([]);
+    expect(assumptionRows([], r)).toEqual([]);
+  });
+
+  it('says nothing of where an entry applied, nor of its diagnostics, while no plan answers the list', () => {
+    // After a removal the plan's assume[1] is another entry than the list's: nothing is paired by position then.
+    const rest = assume.slice(1);
+    expect(assumptionRows(rest)).toEqual(
+      rest.map((entry, index) => ({
+        index,
+        entry,
+        ref: `assume[${index}]`,
+        applied: undefined,
+        diagnostics: [],
+        status: 'ok',
+      })),
+    );
+  });
+});
+
+describe('entryIds', () => {
+  const [a, b, c] = [{ job: 'a', outcome: 'success' }, { job: 'b' }, { job: 'c' }] as AssumeEntry[];
+
+  it('keeps an entry’s id when a removal moves it, and gives a new entry the next id', () => {
+    const ids = entryIds();
+    expect(ids.of([a!, b!, c!])).toEqual([0, 1, 2]);
+    expect(ids.of([b!, c!])).toEqual([1, 2]);
+    expect(ids.of([b!, c!, { ...a! }])).toEqual([1, 2, 3]);
+    // An equal entry is still another entry.
+    expect(ids.of([a!, b!])).toEqual([0, 1]);
+  });
+
+  it('hands an entry’s id to the one that replaces it', () => {
+    const ids = entryIds();
+    const list = [a!, b!, c!];
+    expect(ids.of(list)).toEqual([0, 1, 2]);
+    const edited: AssumeEntry = { job: 'b', outcome: 'failure' };
+    ids.carry(list, 1, edited);
+    expect(ids.of([a!, edited, c!])).toEqual([0, 1, 2]);
+    // Past the end there is nothing to take over.
+    const added: AssumeEntry = { job: 'x' };
+    ids.carry(list, 7, added);
+    expect(ids.of([added])).toEqual([3]);
+  });
+
+  it('tells the same object twice in the list apart', () => {
+    const ids = entryIds();
+    expect(ids.of([a!, a!, b!])).toEqual([0, 1, 2]);
+    expect(ids.of([a!, b!])).toEqual([0, 2]);
+    expect(ids.of([a!, a!, a!])).toEqual([0, 1, 3]);
   });
 });
 

@@ -1,6 +1,7 @@
 import type { Diagnostic } from '@simulci/engine';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from '../app/providers';
+import { focusPanel } from '../app/shortcuts';
 import { MARK_LABEL, Mark } from '../graph/Mark';
 import { EmptyNote, LocLink, SectionTitle, type Selected, useSelected } from './kit';
 import { ReasonRow } from './ReasonRow';
@@ -40,7 +41,11 @@ function NodeReasons({ selected }: { selected: Selected }) {
       <button
         type="button"
         className="self-start rounded border border-border px-1.5 py-0.5 text-text hover:border-border-strong"
-        onClick={() => setPanel('node')}
+        onClick={() => {
+          // The tab closes with the button in it: the focus follows to the Node tab's panel.
+          setPanel('node');
+          focusPanel('node');
+        }}
       >
         Effects in the Node tab
       </button>

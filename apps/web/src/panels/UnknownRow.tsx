@@ -6,7 +6,7 @@ import { applyScenarioPin, type PinControl, pinControl, withEntry } from '../sce
 import type { PlanState } from '../state/store';
 import { LocLink } from './kit';
 import { PinEditor } from './PinEditor';
-import { affectsText, type UnknownRowModel } from './unknown-rows';
+import { affectsText, type PinTarget, pinTarget, type UnknownRowModel } from './unknown-rows';
 
 /**
  * One unknown of the Unknowns tab: its unit path, its kind, what it affects (a click selects the first), where it is
@@ -152,7 +152,10 @@ function AssumePin({
   );
 }
 
-/** Pin…: the PinEditor under the row, prefilled; Apply adds its entry to the case layer and closes it. */
+/**
+ * Pin…: the PinEditor under the row, prefilled; Apply adds its entry to the case layer and closes it. An entry that
+ * already states what the unknown is about opens instead, and Apply puts the edit in its place (`pinTarget`).
+ */
 function EditorPin({
   control,
   onPinned,
@@ -161,16 +164,18 @@ function EditorPin({
   onPinned: () => void;
 }) {
   const { store } = useApp();
-  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState<PinTarget>();
   const toggle = useRef<HTMLButtonElement>(null);
   const editor = useId();
   const close = (): void => {
-    setOpen(false);
+    setTarget(undefined);
     toggle.current?.focus();
   };
   const apply = (entry: AssumeEntry): void => {
     const s = store.getState();
-    s.setAssume(withEntry(s.assume, entry));
+    // The entry it edits, where it is now; gone meanwhile, the edit is a new entry.
+    const at = target?.replaces === undefined ? -1 : s.assume.indexOf(target.replaces);
+    s.setAssume(withEntry(s.assume, entry, at));
     close();
     onPinned();
   };
@@ -179,16 +184,16 @@ function EditorPin({
       <button
         ref={toggle}
         type="button"
-        aria-expanded={open}
-        aria-controls={open ? editor : undefined}
-        onClick={() => setOpen((o) => !o)}
+        aria-expanded={target !== undefined}
+        aria-controls={target ? editor : undefined}
+        onClick={() => setTarget(target ? undefined : pinTarget(store.getState().assume, control.draft))}
         className={`${button} self-start`}
       >
         {control.label}
       </button>
-      {open && (
+      {target && (
         <div id={editor}>
-          <PinEditor draft={control.draft} onApply={apply} onCancel={close} />
+          <PinEditor draft={target.draft} onApply={apply} onCancel={close} />
         </div>
       )}
     </>

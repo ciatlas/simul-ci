@@ -1,6 +1,6 @@
 import { debounce, type Timers } from '../lib/debounce';
 import { defaultScenario } from '../scenario/defaults';
-import type { SessionStore } from '../state/store';
+import type { SessionState, SessionStore } from '../state/store';
 import type { EngineClient, SimulateResult } from '../worker/client';
 
 /**
@@ -88,14 +88,19 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
     const id = ++request;
     const files = s.files.version;
     const project = s.project.version;
+    const { assume } = s;
     busy(1);
-    const r = await client.simulate({ project, scenario: s.scenario, assume: s.assume, detail: s.detail });
+    const r = await client.simulate({ project, scenario: s.scenario, assume, detail: s.detail });
     busy(-1);
     if (id !== request) return;
-    await settle(r, files, project);
+    await settle(r, { files, project, assume });
   };
 
-  const settle = async (r: SimulateResult, files: number, project: number): Promise<void> => {
+  const settle = async (
+    r: SimulateResult,
+    asked: NonNullable<SessionState['plan']>['for'],
+  ): Promise<void> => {
+    const { files } = asked;
     const now = store.getState();
     if (r.type === 'superseded') return;
     if (r.type === 'plan') {
@@ -105,7 +110,7 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
           derived: r.derived,
           text: r.text,
           ms: r.ms,
-          for: { files, project },
+          for: asked,
         });
       return;
     }

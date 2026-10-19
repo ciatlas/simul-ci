@@ -88,6 +88,56 @@ jobs:
 };
 const M = '.github/workflows/m.yml';
 
+/** A matrix job whose step after `detect` reads its output, on every leg. */
+const detectIn = (matrix: string) => `on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+${matrix}
+    steps:
+      - id: detect
+        uses: acme/detect@v1
+      - if: steps.detect.outputs.changed == 'true'
+        run: npm test
+`;
+
+const PACKAGE = '.github/workflows/package.yml';
+
+/** ci.yml calls package.yml from a job `web`; other.yml has a job `web` of its own. */
+const shared = {
+  [CI]: `on: push
+jobs:
+  web:
+    uses: ./${PACKAGE}
+`,
+  '.github/workflows/other.yml': `on: push
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo web
+`,
+  [PACKAGE]: `on: workflow_call
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: deps
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: npm ci
+`,
+};
+
+/** The step-output unknowns of the `detect` step, one per leg. */
+const detectUnknowns = (r: PlanResponse): Unknown[] =>
+  r.plan.unknowns.filter((u) => u.id.endsWith('/steps.detect.outputs.changed'));
+
 describe('draftFor', () => {
   const push: ScenarioInput = { event: 'push', branch: 'main', changed: ['src/a.ts'] };
   const ci = simulated(starter, push);
@@ -155,14 +205,86 @@ describe('draftFor', () => {
     );
   });
 
-  it("drafts a leg's outcome with its leg in the path, and a step outcome with two choices", () => {
+  it("drafts a leg's outcome with its values as matrix:, and a step outcome with two choices", () => {
     expect(draftFor(unknown(`${CI}#test[node=22].outcome`), contextOf(ci))?.entry).toEqual({
-      job: 'test[node=22]',
+      job: 'test',
+      matrix: { node: '22' },
       outcome: 'failure',
     });
     const step = draftFor(unknown(`${CI}#test[node=24]/~npm-test.outcome`), contextOf(ci));
-    expect(step?.entry).toEqual({ step: 'test[node=24].#4', outcome: 'failure' });
+    expect(step?.entry).toEqual({ step: 'test.#4', matrix: { node: '24' }, outcome: 'failure' });
     expect(step?.outcomes).toEqual(['success', 'failure']);
+  });
+
+  it('drafts a leg whose value holds a slash, and the entry decides that leg alone', () => {
+    const files = { [CI]: detectIn('        node: [lts/*, 22]') };
+    const r = simulated(files, { event: 'push', branch: 'main' });
+    const lts = unknownIn(r, `${CI}#test[node=lts/*]/steps.detect.outputs.changed`);
+    const draft = draftFor(lts, contextOf(r));
+    expect(draft?.entry).toEqual({
+      step: 'test.detect',
+      matrix: { node: 'lts/*' },
+      outputs: { changed: '' },
+    });
+    const entry: AssumeEntry = { ...draft!.entry, outputs: { changed: 'true' } };
+    expect(AssumeEntrySchema.safeParse(entry).success).toBe(true);
+    const after = simulated(files, { event: 'push', branch: 'main' }, [entry]);
+    expect(after.plan.diagnostics).toEqual([]);
+    expect(verdictAt(after, 'test[node=lts/*].#2')).toBe('yes');
+    expect(verdictAt(after, 'test[node=22].#2')).toBe('maybe');
+    expect(after.plan.mocks).toContainEqual(
+      expect.objectContaining({ ref: 'assume[0]', provides: ['outputs.changed'] }),
+    );
+  });
+
+  it('drafts a leg whose value is an object as its JSON, and the entry decides that leg alone', () => {
+    const files = {
+      [CI]: detectIn('        config: [{ os: ubuntu, arch: x64 }, { os: windows, arch: arm64 }]'),
+    };
+    const r = simulated(files, { event: 'push', branch: 'main' });
+    const ubuntu = detectUnknowns(r).find((u) => u.id.includes('ubuntu'));
+    const draft = draftFor(ubuntu!, contextOf(r));
+    expect(draft?.entry).toEqual({
+      step: 'test.detect',
+      matrix: { config: '{"os":"ubuntu","arch":"x64"}' },
+      outputs: { changed: '' },
+    });
+    const entry: AssumeEntry = { ...draft!.entry, outputs: { changed: 'true' } };
+    const after = simulated(files, { event: 'push', branch: 'main' }, [entry]);
+    expect(after.plan.diagnostics).toEqual([]);
+    const affecting = detectUnknowns(after).filter((u) => u.affects.length > 0);
+    expect(affecting.map((u) => u.id.includes('windows'))).toEqual([true]);
+  });
+
+  it("keeps a calling leg's values in the path, and drafts nothing when the path cannot hold them", () => {
+    const files = {
+      [CI]: `on: push
+jobs:
+  web:
+    strategy:
+      matrix:
+        pkg: [web, apps/api]
+    uses: ./${PACKAGE}
+`,
+      [PACKAGE]: detectIn('        node: [22]').replace('on: push', 'on: workflow_call'),
+    };
+    const r = simulated(files, { event: 'push', branch: 'main' });
+    const [web, api] = ['pkg=web', 'pkg=apps/api'].map((leg) =>
+      detectUnknowns(r).find((u) => u.id.includes(`#web[${leg}]>`)),
+    );
+    const draft = draftFor(web!, contextOf(r));
+    expect(draft?.entry).toEqual({
+      step: 'web[pkg=web]/test.detect',
+      matrix: { node: '22' },
+      outputs: { changed: '' },
+    });
+    const after = simulated(files, { event: 'push', branch: 'main' }, [
+      { ...draft!.entry, outputs: { changed: 'true' } },
+    ]);
+    expect(after.plan.diagnostics).toEqual([]);
+    expect(verdictAt(after, 'web[pkg=web]/test[node=22].#2')).toBe('yes');
+    expect(verdictAt(after, 'web[pkg=apps/api]/test[node=22].#2')).toBe('maybe');
+    expect(draftFor(api!, contextOf(r))).toBeUndefined();
   });
 
   it('drafts an env write for a step, naming the workflow when another has a job of the same id', () => {
@@ -207,6 +329,26 @@ describe('draftFor', () => {
       job: 'web/test',
       outcome: 'failure',
     });
+  });
+
+  it("names a called workflow's unit by the file it is declared in, which the engine matches", () => {
+    const r = simulated(shared, { event: 'push', branch: 'main' });
+    const id = `${CI}#web>${PACKAGE}#test/steps.cache.outputs.cache-hit`;
+    const draft = draftFor(unknownIn(r, id), contextOf(r));
+    expect(draft).toEqual({
+      entry: { workflow: PACKAGE, step: 'web/test.cache', outputs: { 'cache-hit': '' } },
+      about: { field: 'outputs', name: 'cache-hit' },
+      outcomes: ['success', 'failure'],
+      candidates: ['true', 'false', ''],
+      model: { id: 'actions/cache', presets: ['hit', 'partial', 'miss'] },
+    });
+    const entry: AssumeEntry = { ...draft!.entry, outputs: { 'cache-hit': 'true' } };
+    const after = simulated(shared, { event: 'push', branch: 'main' }, [entry]);
+    expect(after.plan.diagnostics).toEqual([]);
+    expect(verdictAt(after, 'web/test.#2')).toBe('no');
+    expect(after.plan.mocks).toContainEqual(expect.objectContaining({ ref: 'assume[0]' }));
+    // Editing the entry finds the same unit, in the file the entry names.
+    expect(draftOfEntry(entry, contextOf(r))).toEqual({ ...draft, entry, about: draft!.about });
   });
 
   it('drafts nothing for what names no step, leg or job', () => {
@@ -254,6 +396,25 @@ describe('draftOfEntry', () => {
     const elsewhere = draftOfEntry({ ...entry, workflow: 'ci' }, contextOf(tag));
     expect(elsewhere.candidates).toEqual([]);
     expect(elsewhere.model).toBeUndefined();
+  });
+
+  it('finds the leg an entry names by its matrix values, as a draft writes them', () => {
+    const files = {
+      [CI]: detectIn('        node: [lts/*, 22]').replace('acme/detect@v1', 'actions/cache@v4'),
+    };
+    const r = simulated(files, { event: 'push', branch: 'main' });
+    const lts = draftFor(unknownIn(r, `${CI}#test[node=lts/*]/steps.detect.outputs.cache-hit`), contextOf(r));
+    expect(lts?.entry).toEqual({
+      step: 'test.detect',
+      matrix: { node: 'lts/*' },
+      outputs: { 'cache-hit': '' },
+    });
+    expect(draftOfEntry(lts!.entry, contextOf(r))).toEqual(lts);
+    // The path as written still names its leg; values no leg has name none.
+    const bracketed = { step: 'test[node=22].detect', outputs: { 'cache-hit': 'true' } };
+    expect(draftOfEntry(bracketed, contextOf(r)).model?.id).toBe('actions/cache');
+    const none = { step: 'test.detect', matrix: { node: '20' }, outputs: { 'cache-hit': 'true' } };
+    expect(draftOfEntry(none, contextOf(r)).candidates).toEqual([]);
   });
 
   it('is about an env write, then the outcome, when the entry states no output', () => {
@@ -432,5 +593,34 @@ describe('entryYaml', () => {
 
   it('quotes a key YAML would misread', () => {
     expect(entryYaml({ step: 'a.b', env: { on: '1' } })).toBe("- step: a.b\n  env:\n    'on': '1'");
+  });
+});
+
+describe('a unit under a calling job whose matrix only the run knows', () => {
+  it('gets no draft, since no path selects the `[*]` leg', () => {
+    const files = {
+      [CI]: `on: push
+jobs:
+  web:
+    strategy:
+      matrix: \${{ fromJSON(vars.M) }}
+    uses: ./.github/workflows/package.yml
+`,
+      '.github/workflows/package.yml': `on: workflow_call
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - id: detect
+        uses: acme/detect@v1
+      - run: echo built
+        if: steps.detect.outputs.changed == 'true'
+`,
+    };
+    const r = simulated(files, { event: 'push', branch: 'main' });
+    const u = r.plan.unknowns.find((x) => x.id.endsWith('/steps.detect.outputs.changed'));
+    expect(u).toBeDefined();
+    expect(Object.values(r.derived.unitPaths).some((p) => p.includes('[*]'))).toBe(true);
+    expect(draftFor(u!, contextOf(r))).toBeUndefined();
   });
 });

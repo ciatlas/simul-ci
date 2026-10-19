@@ -18,6 +18,20 @@ describe('the store for the panels', () => {
     expect(store.getState().assumed).toEqual(['branch']);
   });
 
+  it('keeps the mark of a pinned dispatch input until that input is edited, whatever happens to the others', () => {
+    const store = createSessionStore();
+    store.getState().setScenario({ event: 'workflow_dispatch', inputs: { level: 'high' } });
+    store
+      .getState()
+      .pinScenario({ event: 'workflow_dispatch', inputs: { level: 'high', target: '' } }, ['inputs.target'], {
+        path: 'inputs.target',
+      });
+    store.getState().patchScenario({ inputs: { level: 'low', target: '' } });
+    expect(store.getState().assumed).toEqual(['inputs.target']);
+    store.getState().patchScenario({ inputs: { level: 'low', target: 'prod' } });
+    expect(store.getState().assumed).toEqual([]);
+  });
+
   it('forgets a focus request once the form took it, and only that one', () => {
     const store = createSessionStore();
     store.getState().focusField({ path: 'changed' });
@@ -41,6 +55,18 @@ describe('the store for the panels', () => {
     s = store.getState();
     expect(s.ui.yamlFile).toBeUndefined();
     expect('yamlFile' in s.ui).toBe(false);
+  });
+
+  it('keeps the tab the author picked when the selection already held is selected again', () => {
+    const store = createSessionStore();
+    store.getState().select('ci.yml', undefined);
+    store.getState().setYamlFile('release.yml');
+    const before = store.getState();
+    before.select('ci.yml', undefined);
+    expect(store.getState()).toBe(before);
+    expect(store.getState().ui.yamlFile).toBe('release.yml');
+    store.getState().select('ci.yml', 'build');
+    expect(store.getState().ui.yamlFile).toBeUndefined();
   });
 
   it('toggles a pane and switches the panel tab as preferences', () => {

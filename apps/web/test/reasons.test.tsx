@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import type { ScenarioInput } from '@simulci/engine';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
 import { sampleByName } from '../src/input/samples';
+import { Panels } from '../src/panels/Panels';
 import { Reasons } from '../src/panels/Reasons';
 import { DEFAULT_PREFS } from '../src/state/prefs';
 import { createSessionStore, initialSessionState, type PlanState } from '../src/state/store';
@@ -30,8 +31,15 @@ function planState(scenario: ScenarioInput): PlanState {
 }
 
 const push = planState({ event: 'push', branch: 'main' });
+const labeled = planState({
+  event: 'pull_request',
+  base: 'main',
+  head: 'topic',
+  number: 1,
+  action: 'labeled',
+});
 
-function mount(options: { plan?: PlanState | null; sel?: string; left?: boolean } = {}) {
+function mount(options: { plan?: PlanState | null; sel?: string; left?: boolean; panels?: boolean } = {}) {
   const initial = initialSessionState({
     ...DEFAULT_PREFS,
     collapsed: { ...DEFAULT_PREFS.collapsed, left: options.left ?? false },
@@ -39,9 +47,7 @@ function mount(options: { plan?: PlanState | null; sel?: string; left?: boolean 
   const plan = options.plan === null ? {} : { plan: options.plan ?? push };
   const store = createSessionStore({ ...initial, ...plan, focus: CI, sel: options.sel });
   render(
-    <AppProvider app={{ store } as unknown as App}>
-      <Reasons />
-    </AppProvider>,
+    <AppProvider app={{ store } as unknown as App}>{options.panels ? <Panels /> : <Reasons />}</AppProvider>,
   );
   return { store, user: userEvent.setup() };
 }
@@ -120,13 +126,6 @@ describe('the Reasons tab', () => {
   });
 
   it('opens the Unknowns tab from an unknown the condition reads, and the Node tab for the effects', async () => {
-    const labeled = planState({
-      event: 'pull_request',
-      base: 'main',
-      head: 'topic',
-      number: 1,
-      action: 'labeled',
-    });
     const { store, user } = mount({ plan: labeled, sel: 'preview' });
     await user.click(
       screen.getByRole('button', { name: 'Show github.event.pull_request.labels.*.name in Unknowns' }),
@@ -134,6 +133,20 @@ describe('the Reasons tab', () => {
     expect(store.getState().ui.prefs.panel).toBe('unknowns');
     await user.click(screen.getByRole('button', { name: 'Effects in the Node tab' }));
     expect(store.getState().ui.prefs.panel).toBe('node');
+  });
+
+  it('hands the focus to the panel of the tab its buttons open, never to the page', async () => {
+    const { store, user } = mount({ plan: labeled, sel: 'preview', panels: true });
+    const panel = (tab: string) => document.querySelector(`[data-panel="${tab}"]`);
+    screen.getByRole('button', { name: 'Effects in the Node tab' }).focus();
+    await user.keyboard('{Enter}');
+    expect(store.getState().ui.prefs.panel).toBe('node');
+    await waitFor(() => expect(document.activeElement).toBe(panel('node')));
+    act(() => store.getState().setPanel('reasons'));
+    screen.getByRole('button', { name: 'Show github.event.pull_request.labels.*.name in Unknowns' }).focus();
+    await user.keyboard('{Enter}');
+    expect(store.getState().ui.prefs.panel).toBe('unknowns');
+    await waitFor(() => expect(document.activeElement).toBe(panel('unknowns')));
   });
 
   it('follows the selection', () => {

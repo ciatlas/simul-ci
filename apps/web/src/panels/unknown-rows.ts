@@ -1,13 +1,13 @@
 import type { AssumeEntry, Loc, MockValue, NodeId, RunPlan, Unknown, UnknownKind } from '@simulci/engine';
 import type { PlanIndex } from '../plan/index';
 import type { Derived } from '../worker/protocol';
-import type { Outcome } from './pin-draft';
+import type { DraftAbout, Outcome, PinDraft } from './pin-draft';
 import { planLabels } from './outline-tree';
 
 /**
  * The Unknowns tab's model (synthesis § 7), apart from React: the plan's unknowns as rows, the ones that decide a
- * verdict apart from the rest, the row the focus moves to once a pin removed one, and the PinEditor's fields as the
- * author edits them, turned back into an assume entry.
+ * verdict apart from the rest, the row the focus moves to once a pin removed one, the entry a pin writes, and the
+ * PinEditor's fields as the author edits them, turned back into an assume entry.
  */
 
 export interface AffectedNode {
@@ -174,17 +174,43 @@ function recordOf(pairs: readonly EditorPair[]): Record<string, MockValue> | und
   return Object.fromEntries(named.map((p) => [p.name.trim(), p.held ?? p.value]));
 }
 
-/** What the fields say wrong before they are an entry: a value without a name, a name given twice. */
-export function formProblems(form: EditorForm): string[] {
-  const problems: string[] = [];
+/** What is wrong with one row of the fields, which its name field shows. */
+export interface FormProblem {
+  field: PairField;
+  /** The row's `id`. */
+  pair: number;
+  message: string;
+}
+
+/**
+ * What the fields say wrong before they are an entry, row by row and named as the rows are (`output 2`): a value
+ * without a name, a name an earlier row has.
+ */
+export function formProblems(form: EditorForm): FormProblem[] {
+  const problems: FormProblem[] = [];
   for (const field of ['outputs', 'env'] as const) {
     const names = form[field].map((p) => p.name.trim());
-    if (form[field].some((p, i) => names[i] === '' && (p.value !== '' || p.held !== undefined)))
-      problems.push(`an ${NOUN[field]} value has no name`);
-    const twice = names.find((name, i) => name !== '' && names.indexOf(name) !== i);
-    if (twice !== undefined) problems.push(`two ${NOUN[field]}s are named ${twice}`);
+    for (const [i, pair] of form[field].entries()) {
+      const message = rowProblem(field, names, i, pair);
+      if (message !== undefined) problems.push({ field, pair: pair.id, message });
+    }
   }
   return problems;
+}
+
+function rowProblem(
+  field: PairField,
+  names: readonly string[],
+  i: number,
+  pair: EditorPair,
+): string | undefined {
+  const name = names[i] ?? '';
+  if (name === '')
+    return pair.value !== '' || pair.held !== undefined
+      ? `${NOUN[field]} ${i + 1} has a value but no name`
+      : undefined;
+  const first = names.indexOf(name);
+  return first === i ? undefined : `${NOUN[field]}s ${first + 1} and ${i + 1} are both named ${name}`;
 }
 
 /** The fields with an empty row added at the end of `field`. */
@@ -237,6 +263,47 @@ export function withPreset(form: EditorForm, preset: string | undefined, draft?:
   }
   const filled = (p: EditorPair): boolean => p.value !== '' || p.held !== undefined;
   return { ...form, as: preset, outputs: form.outputs.filter(filled), env: form.env.filter(filled) };
+}
+
+/** What the editor opened from an unknown starts from, and the entry of the case layer its Apply replaces. */
+export interface PinTarget {
+  draft: PinDraft;
+  replaces?: AssumeEntry;
+}
+
+/**
+ * Where a pin from the editor goes: into the entry of the case layer that names the draft's unit as the draft does
+ * and states the field the draft is about (or a preset, which may), since a second entry would conflict with it
+ * (SC103); else into a new entry. The editor then starts from that entry, with the draft's field added if it lacks it.
+ */
+export function pinTarget(assume: readonly AssumeEntry[], draft: PinDraft): PinTarget {
+  const unit = unitKey(draft.entry);
+  const replaces = assume.find((e) => unitKey(e) === unit && mayState(e, draft.about));
+  if (!replaces) return { draft };
+  return { draft: { ...draft, entry: withAbout(replaces, draft) }, replaces };
+}
+
+const unitKey = (e: AssumeEntry): string => JSON.stringify([e.workflow, e.step, e.job, e.uses, e.matrix]);
+
+function mayState(entry: AssumeEntry, about: DraftAbout): boolean {
+  if (entry.as !== undefined) return true;
+  if (about.field === 'outcome') return entry.outcome !== undefined;
+  return Object.hasOwn(entry[about.field] ?? {}, about.name);
+}
+
+/** The entry with the draft's prefilled field when it does not state that field itself. */
+function withAbout(entry: AssumeEntry, draft: PinDraft): AssumeEntry {
+  const { about } = draft;
+  if (about.field === 'outcome') {
+    const outcome = entry.outcome ?? draft.entry.outcome;
+    return outcome === undefined ? entry : { ...entry, outcome };
+  }
+  const record = entry[about.field] ?? {};
+  if (Object.hasOwn(record, about.name)) return entry;
+  return {
+    ...entry,
+    [about.field]: { ...record, [about.name]: draft.entry[about.field]?.[about.name] ?? '' },
+  };
 }
 
 /** The outcomes the radio group offers: the unit's, the entry's own when it is not one of them, and `none`. */

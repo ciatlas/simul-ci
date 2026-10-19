@@ -1,5 +1,12 @@
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from 'react';
-import { deriveForm, type GroupId, routeIssues, showsRef } from '../scenario/derive';
+import {
+  changedKeepKey,
+  deriveForm,
+  type GroupId,
+  routeIssues,
+  showsChanged,
+  showsRef,
+} from '../scenario/derive';
 import { ActivityTypeField } from '../scenario/fields/ActivityType';
 import { AdvancedFields } from '../scenario/fields/Advanced';
 import { ChangedFilesField } from '../scenario/fields/ChangedFiles';
@@ -12,9 +19,16 @@ import { PullRequestFields } from '../scenario/fields/PullRequest';
 import { RefField } from '../scenario/fields/Ref';
 import { ReleaseFields } from '../scenario/fields/Release';
 import { WorkflowRunFields } from '../scenario/fields/WorkflowRun';
-import { FOCUS_FRAMES, resolveField, retryFrames, selectionFor, textOf } from '../scenario/focus';
+import {
+  FOCUS_FRAMES,
+  requestedField,
+  resolveField,
+  retryFrames,
+  selectionFor,
+  textOf,
+} from '../scenario/focus';
 import { useKept } from '../scenario/keep';
-import type { Issue } from '../state/store';
+import type { FieldFocus, Issue } from '../state/store';
 import type { Outline } from '../worker/protocol';
 import { useApp, useSession } from './providers';
 
@@ -41,8 +55,8 @@ const GROUPS: Record<GroupId, (props: GroupProps) => ReactNode> = {
 
 export function ScenarioForm() {
   const outline = useSession((s) => s.project.outline);
-  // The fields go with the project and come back with the next one, so what they keep in view (the Ref under the
-  // caret, Merged, the fork) is decided afresh for it, as on a first mount.
+  // The fields go with the project and come back with the next one, so what they keep in view (the Ref or the
+  // changed files under the caret, Merged, the fork) is decided afresh for it, as on a first mount.
   return outline ? <Fields outline={outline} /> : null;
 }
 
@@ -54,14 +68,16 @@ function Fields({ outline }: { outline: Outline }) {
   const issues = useSession((s) => (s.error?.kind === 'scenario' ? s.error.issues : undefined));
   const patch = useSession((s) => s.patchScenario);
   const setScenario = useSession((s) => s.setScenario);
+  const request = useSession((s) => s.fieldFocus);
   const keepRef = useKept(scenario.event, showsRef(scenario), from === 'author');
+  const keepChanged = useKept(changedKeepKey(scenario), showsChanged(scenario), from === 'author');
   const model = useMemo(
-    () => deriveForm(outline, scenario, focus, { ref: keepRef }),
-    [outline, scenario, focus, keepRef],
+    () => deriveForm(outline, scenario, focus, { ref: keepRef, changed: keepChanged }),
+    [outline, scenario, focus, keepRef, keepChanged],
   );
   const routed = useMemo(() => routeIssues(issues ?? [], model.fields), [issues, model]);
   const form = useRef<HTMLFormElement>(null);
-  useFieldFocus(form, model.fields);
+  useFieldFocus(form, request, model.fields);
 
   const f: FieldContext = {
     scenario,
@@ -69,6 +85,7 @@ function Fields({ outline }: { outline: Outline }) {
     from,
     assumed: (key) => assumed.includes(key),
     issue: (field) => routed.byField.get(field),
+    requested: requestedField(request, model.fields),
     patch,
     setScenario: (next) => setScenario(next),
   };
@@ -90,12 +107,15 @@ function Fields({ outline }: { outline: Outline }) {
 
 /**
  * Takes the store's focus request (`fieldFocus`): opens the scenario column when it is closed, then, once the field
- * shows (Advanced mounts its rows after a pin opens it), focuses the control with the example selected so the author
- * types over it. Each request is taken once, its field found or not, so the form never pulls the focus back.
+ * shows (Advanced opens for a request for one of its rows and mounts them after), focuses the control with the
+ * example selected so the author types over it. Each request is taken once, its field found or not, so the form never pulls the focus back.
  */
-function useFieldFocus(form: RefObject<HTMLFormElement | null>, fields: Map<string, string>): void {
+function useFieldFocus(
+  form: RefObject<HTMLFormElement | null>,
+  request: FieldFocus | undefined,
+  fields: Map<string, string>,
+): void {
   const { store } = useApp();
-  const request = useSession((s) => s.fieldFocus);
   const taken = useRef<number>(undefined);
   useEffect(() => {
     if (!request || request.seq === taken.current) return undefined;

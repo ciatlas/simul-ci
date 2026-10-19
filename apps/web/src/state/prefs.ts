@@ -1,7 +1,7 @@
 /** The right panel's tabs. */
 export type PanelTab = 'reasons' | 'unknowns' | 'node' | 'problems';
 
-const PANEL_TABS: readonly PanelTab[] = ['reasons', 'unknowns', 'node', 'problems'];
+const PANEL_TABS: ReadonlySet<PanelTab> = new Set<PanelTab>(['reasons', 'unknowns', 'node', 'problems']);
 
 /** Layout preferences in localStorage: nothing that decides a result, nothing another viewer needs. */
 export interface Prefs {
@@ -10,6 +10,8 @@ export interface Prefs {
   collapsed: { left: boolean; right: boolean; yaml: boolean };
   /** The right panel's open tab. */
   panel: PanelTab;
+  /** Whether the page's single-key shortcuts act (app/shortcuts.ts); the author can turn them off (WCAG 2.1.4). */
+  keys: boolean;
   /** `simulci.prefs` is versioned so a later shape can drop an older one. */
   v: 1;
 }
@@ -20,6 +22,7 @@ export const DEFAULT_PREFS: Prefs = {
   theme: 'system',
   collapsed: { left: false, right: false, yaml: true },
   panel: 'reasons',
+  keys: true,
   v: 1,
 };
 
@@ -53,7 +56,8 @@ export function readPrefs(store: StorageLike | undefined = storage()): Prefs {
         right: flag(parsed.collapsed?.right, DEFAULT_PREFS.collapsed.right),
         yaml: flag(parsed.collapsed?.yaml, DEFAULT_PREFS.collapsed.yaml),
       },
-      panel: PANEL_TABS.includes(parsed.panel as PanelTab) ? (parsed.panel as PanelTab) : DEFAULT_PREFS.panel,
+      panel: PANEL_TABS.has(parsed.panel as PanelTab) ? (parsed.panel as PanelTab) : DEFAULT_PREFS.panel,
+      keys: flag(parsed.keys, DEFAULT_PREFS.keys),
     };
   } catch {
     return DEFAULT_PREFS;

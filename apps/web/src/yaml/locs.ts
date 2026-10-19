@@ -1,5 +1,6 @@
 import type { JobPlan, LegPlan, NodeId, RunPlan, StepPlan, Tri, WorkflowPlan } from '@simulci/engine';
-import { declaredAt, decisionOf, planNodes } from '../plan/nodes';
+import { planIndex } from '../plan/index';
+import { declaredAt, decisionOf, type PlanNode, planNodes } from '../plan/nodes';
 import type { Derived, Outline, OutlineFile } from '../worker/protocol';
 
 /**
@@ -19,7 +20,7 @@ export interface LineMark {
 /** A walk over the plan for one file: the marks claimed so far, by line. */
 interface MarkWalk {
   file: string;
-  representative: Readonly<Record<NodeId, NodeId>>;
+  representative: Record<NodeId, NodeId>;
   marks: Map<number, LineMark>;
 }
 
@@ -27,34 +28,61 @@ interface MarkWalk {
  * The marks of a file, by line: the `on:` line of each depth-0 workflow declared in it (its trigger verdict), every
  * job declared in it, and every step declared in it as the job's representative leg runs it (`representative[job]`,
  * else the first leg). A called workflow's jobs come from the representative leg that calls it, a composite action's
- * steps from the first step that uses it. The first node to claim a line keeps it.
+ * steps from the first step that uses it. The first node to claim a line keeps it, and the selection claims first:
+ * itself and what it holds, then each node it is in, outwards, with every leg on its way as its job's representative.
+ * So a file two callers, two legs or two users of an action share shows the selection's verdicts on its lines.
  */
 export function gutterMarks(
-  plan: RunPlan,
+  plan: { plan: RunPlan; derived: Derived },
   outline: Outline | undefined,
   file: string,
   representative: Readonly<Record<NodeId, NodeId>>,
+  selected?: NodeId,
 ): LineMark[] {
-  const w: MarkWalk = { file, representative, marks: new Map() };
+  const around = selected === undefined ? [] : nodesAround(plan, selected);
+  const w: MarkWalk = { file, representative: { ...representative }, marks: new Map() };
+  for (const n of around) if (n.kind === 'leg') w.representative[n.job.id] = n.leg.id;
   const onLine = outline?.workflows.find((o) => o.path === file)?.onLine;
-  const roots = plan.workflows.filter((wf) => wf.depth === 0);
+  const roots = plan.plan.workflows.filter((wf) => wf.depth === 0);
   for (const wf of roots)
     if (wf.path === file && onLine !== undefined) claim(w, onLine, wf.id, wf.triggered.verdict, 'workflow');
+  for (const n of around) markAround(w, n);
   for (const wf of roots) markWorkflow(w, wf);
   return [...w.marks.values()].sort((a, b) => a.line - b.line);
+}
+
+/** A node and the nodes it is in, innermost first, up to its depth-0 workflow; a called workflow is in its caller. */
+function nodesAround(plan: { plan: RunPlan; derived: Derived }, node: NodeId): PlanNode[] {
+  const nodes = planNodes(plan.plan);
+  const index = planIndex(plan);
+  const around: PlanNode[] = [];
+  for (let id: NodeId | undefined = node; id !== undefined; id = index.nodes.get(id)?.parent) {
+    const n = nodes.get(id);
+    if (n) around.push(n);
+  }
+  return around;
 }
 
 function claim(w: MarkWalk, line: number, node: NodeId, verdict: Tri, kind: LineMark['kind']): void {
   if (!w.marks.has(line)) w.marks.set(line, { line, node, verdict, kind });
 }
 
+/** The selection or a node it is in claims its lines: a leg through its job, a composite through its step. */
+function markAround(w: MarkWalk, n: PlanNode): void {
+  if (n.kind === 'workflow') markWorkflow(w, n.workflow);
+  else if (n.kind === 'job') markJob(w, n.job);
+  else if (n.kind === 'step') markStep(w, n.step);
+}
+
 function markWorkflow(w: MarkWalk, wf: WorkflowPlan): void {
-  for (const job of wf.jobs) {
-    if (job.loc?.file === w.file) claim(w, job.loc.line, job.id, job.runs.verdict, 'job');
-    const leg = representativeLeg(job, w.representative);
-    if (leg?.call) markWorkflow(w, leg.call);
-    for (const step of leg?.steps ?? []) markStep(w, step);
-  }
+  for (const job of wf.jobs) markJob(w, job);
+}
+
+function markJob(w: MarkWalk, job: JobPlan): void {
+  if (job.loc?.file === w.file) claim(w, job.loc.line, job.id, job.runs.verdict, 'job');
+  const leg = representativeLeg(job, w.representative);
+  if (leg?.call) markWorkflow(w, leg.call);
+  for (const step of leg?.steps ?? []) markStep(w, step);
 }
 
 function markStep(w: MarkWalk, step: StepPlan): void {

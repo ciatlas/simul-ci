@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { deriveForm } from '../src/scenario/derive';
-import { type NextFrame, resolveField, retryFrames, selectionFor, textOf } from '../src/scenario/focus';
+import {
+  type NextFrame,
+  opensFor,
+  requestedField,
+  resolveField,
+  retryFrames,
+  selectionFor,
+  textOf,
+} from '../src/scenario/focus';
 import type { Outline } from '../src/worker/protocol';
 
 const outline: Outline = {
@@ -49,6 +57,28 @@ describe('the field a focus request lands on', () => {
     expect(resolveField({ path: 'cron' }, push)).toBeUndefined();
     expect(resolveField({ path: 'inputs.deploy' }, push)).toBeUndefined();
     expect(resolveField({ path: 'github.sha' }, push)).toBeUndefined();
+  });
+});
+
+describe('a closed group a focus request opens', () => {
+  it('opens for a request for one of its fields, once per request', () => {
+    const push = deriveForm(outline, { event: 'push' }, undefined);
+    const repository = requestedField({ path: 'repository', seq: 4 }, push.fields);
+    expect(repository).toEqual({ field: 'repository', seq: 4 });
+    expect(opensFor(repository, push.advanced, undefined)).toBe(4);
+    expect(opensFor(repository, push.advanced, 3)).toBe(4);
+    expect(opensFor(repository, push.advanced, 4)).toBeUndefined();
+    expect(opensFor(requestedField({ path: 'actor', seq: 5 }, push.fields), push.advanced, 4)).toBe(5);
+  });
+
+  it('stays as it is for a request of another field, one the form does not show, or none', () => {
+    const push = deriveForm(outline, { event: 'push' }, undefined);
+    expect(opensFor(requestedField({ path: 'changed', seq: 1 }, push.fields), push.advanced, undefined)).toBe(
+      undefined,
+    );
+    expect(requestedField({ path: 'cron', seq: 2 }, push.fields)).toBeUndefined();
+    expect(requestedField(undefined, push.fields)).toBeUndefined();
+    expect(opensFor(undefined, push.advanced, undefined)).toBeUndefined();
   });
 });
 

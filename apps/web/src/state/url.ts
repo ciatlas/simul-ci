@@ -103,7 +103,20 @@ function scenarioOf(raw: Record<string, unknown>): ScenarioInput | undefined {
   return scenario as unknown as ScenarioInput;
 }
 
-const isEntry = (e: unknown): e is AssumeEntry => isObject(e);
+/** The keys an assume entry names its unit, its workflow and its preset by, which the panels read as text. */
+const ENTRY_TEXT = ['workflow', 'step', 'job', 'uses', 'as'] as const;
+
+/**
+ * An object whose unit, workflow and preset are text and whose matrix, outputs and env are records where it states
+ * them; the worker judges the rest.
+ */
+/** The keys of an assume entry that hold records: a value of another shape would break what reads them. */
+const ENTRY_RECORDS = ['matrix', 'outputs', 'env'] as const;
+
+const isEntry = (e: unknown): e is AssumeEntry =>
+  isObject(e) &&
+  ENTRY_TEXT.every((key) => e[key] === undefined || typeof e[key] === 'string') &&
+  ENTRY_RECORDS.every((key) => e[key] === undefined || isObject(e[key]));
 
 /** Reads the search params; anything unexpected is left out rather than refused. */
 export function readSearch(raw: Record<string, unknown>): UrlState {

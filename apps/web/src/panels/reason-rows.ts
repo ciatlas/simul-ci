@@ -10,6 +10,7 @@ import type {
   Reason,
   Result,
   RunPlan,
+  Scenario,
   ScheduleReason,
   Tri,
   TypesReason,
@@ -95,7 +96,10 @@ export interface TypesBody {
 export interface FilterBody {
   kind: 'filter';
   filter: FilterKind;
-  /** The engine's `matched` in words: `matched`, `not matched`, `ignored`, `not ignored`, `undecided`. */
+  /**
+   * The engine's `matched` in words: `matched`, `not matched`, `ignored`, `not ignored`, `undecided`; for a push
+   * filtered only by the other kind of ref, why that push does not run it.
+   */
   text: string;
   patterns: string[];
   subject: Subject;
@@ -104,7 +108,7 @@ export interface FilterBody {
 
 /** What a filter's patterns are matched against. */
 export interface Subject {
-  /** `ref`, `changed files` or `triggering workflow`. */
+  /** `ref`, `base branch`, `triggering run's branch`, `changed files` or `triggering workflow`. */
   label: string;
   /** The value as a line, or what the scenario does not say. */
   text?: string;
@@ -124,10 +128,14 @@ export interface ParentBody {
 /** An `if:` as written and as evaluated, the status it read, its value and every context value it read. */
 export interface IfBody {
   kind: 'if';
-  /** As written; empty when the unit has none. */
+  /**
+   * As written; empty when the unit has none. When the engine kept no text of what is written (a number, `if: 0`), the
+   * condition as GitHub evaluates it.
+   */
   expr: string;
-  /** As GitHub evaluates it, when that differs from what is written. */
+  /** As GitHub evaluates it, when that differs from what is written inside its `${{ }}`. */
   evaluated?: string;
+  /** GitHub added the `success()`: the unit has no `if:`, or one that calls no status function. */
   implicitSuccess: boolean;
   /** The job status the status functions read: `failure`, `one of success, cancelled`, `unknown`. */
   status: string;
@@ -142,6 +150,7 @@ export interface IfBody {
 export interface ReadRow {
   ref: string;
   value: string;
+  /** The unknowns it waits for that the plan lists, each a row of the Unknowns tab. */
   unknowns: { id: string; label: string }[];
   from?: string;
 }
@@ -156,6 +165,7 @@ interface Context {
   node: PlanNode;
   index: PlanIndex;
   derived: Derived;
+  scenario: Scenario;
   labels: Map<NodeId, string>;
   /** Where the deciding reason is written. */
   decidingLoc?: Loc;
@@ -176,7 +186,7 @@ export function reasonsModel(
   const { derived } = state;
   // A composite action is decided with its step: the step's tables are its own.
   const decided = node.kind === 'composite' ? node.step.id : id;
-  const ctx: Context = { node, index, derived, labels: labelsOf(state.plan) };
+  const ctx: Context = { node, index, derived, scenario: state.plan.scenario, labels: labelsOf(state.plan) };
   const loc = derived.decidingLoc[decided];
   if (loc) ctx.decidingLoc = loc;
   const decision = decisionOf(node);
@@ -249,7 +259,7 @@ function bodyOf(reason: Reason, ctx: Context): RowBody {
     return { kind: 'event', text, on: ctx.node.workflow.on };
   }
   if (reason.kind === 'types') return typesBody(reason);
-  if (reason.kind === 'filter') return filterBody(reason);
+  if (reason.kind === 'filter') return filterBody(reason, ctx.scenario);
   if (reason.kind === 'parent') return parentBody(reason, ctx);
   if (reason.kind === 'if') return ifBody(reason, ctx);
   return { kind: 'text', text: sentence(reason) };
@@ -288,13 +298,13 @@ const RUN_BRANCH: FieldRequest = { label: "Set the triggering run's branch", pat
 /** The unknown a `workflow_run` branch filter waits for when the scenario names no branch. */
 const RUN_BRANCH_UNKNOWN = 'scenario.workflow_run.branch';
 
-function filterBody(r: FilterReason): FilterBody {
+function filterBody(r: FilterReason, scenario: Scenario): FilterBody {
   const body: FilterBody = {
     kind: 'filter',
     filter: r.filter,
-    text: filterOutcome(r),
+    text: filterOutcome(r, scenario),
     patterns: r.patterns,
-    subject: subjectOf(r),
+    subject: subjectOf(r, scenario.event),
   };
   const set = filterField(r);
   if (set) body.set = set;
@@ -302,15 +312,40 @@ function filterBody(r: FilterReason): FilterBody {
 }
 
 /** `matched` is the engine's: whether the filter lets the run through, which an `-ignore` filter words the other way. */
-function filterOutcome(r: FilterReason): string {
+function filterOutcome(r: FilterReason, scenario: Scenario): string {
   if (!r.matched.known) return 'undecided';
   const ignore = r.filter.endsWith('-ignore');
   if (r.matched.value) return ignore ? 'not ignored' : 'matched';
-  return ignore ? 'ignored' : 'not matched';
+  return otherRefKind(r.filter, scenario) ?? (ignore ? 'ignored' : 'not matched');
 }
 
-function subjectOf(r: FilterReason): Subject {
-  const label = SUBJECT_LABEL[r.filter] ?? 'subject';
+/** The kind of ref a push's ref filter is for. */
+const REF_KIND: Partial<Record<FilterKind, 'branch' | 'tag'>> = {
+  branches: 'branch',
+  'branches-ignore': 'branch',
+  tags: 'tag',
+  'tags-ignore': 'tag',
+};
+
+/**
+ * A push filtered only by the other kind of ref, tags on a branch push or branches on a tag push, does not run
+ * whatever the patterns say (engine triggers.ts, `pushRefGate`): the words for that, undefined for any other filter.
+ */
+function otherRefKind(filter: FilterKind, scenario: Scenario): string | undefined {
+  const kind = REF_KIND[filter];
+  const pushed = scenario.refType === 'tag' ? 'tag' : 'branch';
+  if (scenario.event !== 'push' || kind === undefined || kind === pushed) return undefined;
+  return `without a ${pushed} filter: a ${pushed} push does not run it`;
+}
+
+/** A push matches its ref, a `workflow_run` the branch the triggering run ran on, a pull request its base branch. */
+function subjectLabel(filter: FilterKind, event: string): string {
+  if (!filter.startsWith('branches') || event === 'push') return SUBJECT_LABEL[filter] ?? 'subject';
+  return event === 'workflow_run' ? "triggering run's branch" : 'base branch';
+}
+
+function subjectOf(r: FilterReason, event: string): Subject {
+  const label = subjectLabel(r.filter, event);
   const { subject } = r;
   if (!subject.known) return { label, text: missingSubject(r) };
   if (Array.isArray(subject.value)) return { label, files: subject.value };
@@ -362,17 +397,49 @@ function parentBody(r: ParentReason, ctx: Context): ParentBody {
 }
 
 function ifBody(r: IfReason, ctx: Context): IfBody {
+  const inner = innerIf(r.expr);
+  // The engine keeps no text of an `if:` that is a number: what GitHub evaluates stands for what is written.
+  const unwritten = inner === '' && r.evaluated !== 'success()';
   const body: IfBody = {
     kind: 'if',
-    expr: r.expr,
-    implicitSuccess: r.implicitSuccess,
+    expr: unwritten ? r.evaluated : r.expr,
+    implicitSuccess: addsSuccess(inner, r.evaluated),
     status: statusWords(r.status),
     value: r.value.known ? String(r.value.value) : 'unknown',
-    reads: (r.reads ?? []).map((read) => readRow(read, ctx)),
+    reads: onceEach(r.reads).map((read) => readRow(read, ctx)),
   };
-  if (r.evaluated !== r.expr.trim()) body.evaluated = r.evaluated;
+  if (!unwritten && r.evaluated !== inner) body.evaluated = r.evaluated;
   if (r.residual !== undefined) body.residual = r.residual;
   return body;
+}
+
+/**
+ * An `if:` as written, trimmed and without a `${{ }}` around the whole of it: what GitHub evaluates when it adds
+ * nothing.
+ */
+function innerIf(expr: string): string {
+  const written = expr.trim();
+  return /^\$\{\{([\s\S]*)\}\}$/.exec(written)?.[1]?.trim() ?? written;
+}
+
+/**
+ * Whether GitHub added the implicit `success()`, read from the two texts: the engine's own flag also counts the
+ * `${{ }}` it strips, so `${{ always() }}` would get one. GitHub evaluates a missing `if:` as `success()`, and one
+ * that calls no status function as `success() && (…)`.
+ */
+function addsSuccess(inner: string, evaluated: string): boolean {
+  if (evaluated === inner) return false;
+  return evaluated === 'success()' || evaluated.startsWith('success() && (');
+}
+
+/** The values a condition reads, once each: `needs.a.outputs.x == 'a' || needs.a.outputs.x == 'b'` reads one. */
+function onceEach(reads: IfReason['reads'] | undefined): IfReason['reads'] {
+  const seen = new Set<string>();
+  return (reads ?? []).filter((read) => {
+    if (seen.has(read.ref)) return false;
+    seen.add(read.ref);
+    return true;
+  });
 }
 
 function statusWords(status: Value<Result>): string {
@@ -385,12 +452,18 @@ function readRow(read: IfReason['reads'][number], ctx: Context): ReadRow {
   const row: ReadRow = {
     ref: read.ref,
     value: readValue(value),
-    unknowns: value.known
-      ? []
-      : value.unknowns.map((id) => ({ id, label: ctx.derived.unknownPaths[id] ?? id })),
+    unknowns: value.known ? [] : listed(value.unknowns, ctx.derived.unknownPaths),
   };
   if (read.from !== undefined) row.from = ctx.labels.get(read.from) ?? read.from;
   return row;
+}
+
+/**
+ * The unknowns the plan lists, with their unit paths. A read can name one the engine never registered: it decided the
+ * condition without it (`github.event_name == 'pull_request' && …` on a push), and the Unknowns tab has no row for it.
+ */
+function listed(ids: string[], paths: Record<string, string>): { id: string; label: string }[] {
+  return ids.filter((id) => Object.hasOwn(paths, id)).map((id) => ({ id, label: paths[id] ?? id }));
 }
 
 /** `formatValue`'s words for a known value, the empty string shown as `''`; `?` and the candidates for an unknown. */

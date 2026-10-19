@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { useApp, useSession } from '../app/providers';
+import { togglePaneKeepingFocus } from '../app/shortcuts';
 import { MARK_LABEL } from '../graph/Mark';
 import { planLabels } from '../panels/outline-tree';
 import { planIndex, resolveSelection, selectionOf } from '../plan/index';
@@ -24,6 +25,7 @@ import {
   PaneDocs,
   pageIsDark,
   paneState,
+  scrollOwnTo,
   scrollToLine,
   setDeciding,
   setFlash,
@@ -47,7 +49,8 @@ import {
  * The YAML pane (synthesis § 8): the loaded files as tabs over one read-only CodeMirror view with the verdict gutter,
  * the selection's deciding line and the lines the parsers refused. It shows the file that decided the selection
  * until the author picks a tab; a `file:line` link (`revealLine`) switches to its file, centres the line and flashes
- * it once. Pressing a mark selects its node. Nothing here takes the focus.
+ * it once. Pressing a mark selects its node. Nothing here takes the focus; closing the pane while it holds the focus
+ * hands it to the plan.
  */
 export function YamlPane() {
   const model = usePaneModel();
@@ -118,12 +121,12 @@ function useEditor(host: RefObject<HTMLDivElement | null>, { files, path, node, 
       ],
     });
   }, [view, docs, path, files.version, text, lines]);
-  useSelectionScroll(view, node, lines.deciding, nearest);
+  useSelectionScroll(view, node, lines.deciding, nearest, files.version);
   useReveal(view, path, reveal);
 }
 
 function PaneFooter({ path }: { path: string | undefined }) {
-  const togglePane = useSession((s) => s.togglePane);
+  const { store } = useApp();
   return (
     <footer className="flex items-center gap-3 border-border border-t bg-chrome px-3 py-1 text-muted text-xs">
       <span className="min-w-0 truncate font-mono">{path}</span>
@@ -132,7 +135,7 @@ function PaneFooter({ path }: { path: string | undefined }) {
         type="button"
         className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-text hover:bg-surface"
         aria-label="Close the workflow source"
-        onClick={() => togglePane('yaml')}
+        onClick={() => togglePaneKeepingFocus(store.getState(), 'yaml')}
       >
         Close
       </button>
@@ -161,7 +164,7 @@ function usePaneLines(
   return useMemo(() => {
     const problems = path === undefined ? [] : problemLines(outline, path);
     if (!plan || !labels || path === undefined) return { marks: [], deciding: undefined, problems };
-    const marks = gutterMarks(plan.plan, outline, path, representative).map((m) => ({
+    const marks = gutterMarks(plan, outline, path, representative, node).map((m) => ({
       line: m.line,
       node: m.node,
       verdict: m.verdict,
@@ -219,33 +222,45 @@ function useEditorView(host: RefObject<HTMLDivElement | null>): EditorView | und
   return view;
 }
 
-/** A new selection brings its deciding line (else its own line) to the middle; a new plan alone moves nothing. */
+/**
+ * A new selection brings its deciding line (else its own line) to the middle, and so does the first plan of new
+ * files, whose states start over; a new plan of the same files moves nothing.
+ */
 function useSelectionScroll(
   view: EditorView | undefined,
   node: NodeId | undefined,
   deciding: DecidingLines | undefined,
   nearest: RefObject<boolean>,
+  version: number,
 ): void {
-  const last = useRef<NodeId | undefined>(undefined);
+  const last = useRef<{ node: NodeId; version: number }>(undefined);
+  const line = deciding?.line ?? deciding?.own;
   useEffect(() => {
-    if (!view || node === undefined || node === last.current) return;
-    last.current = node;
+    if (!view || node === undefined || sameSelection(last.current, node, version)) return;
+    last.current = { node, version };
     const y = nearest.current ? 'nearest' : 'center';
     nearest.current = false;
-    const line = deciding?.line ?? deciding?.own;
-    if (line !== undefined) view.dispatch({ effects: scrollToLine(view.state, line, y) });
-  }, [view, node, deciding, nearest]);
+    if (line !== undefined) scrollOwnTo(view, line, y);
+  }, [view, node, line, nearest, version]);
 }
 
-/** A requested line, once its file is shown: centred and flashed once, without the flash for reduced motion. */
+const sameSelection = (last: { node: NodeId; version: number } | undefined, node: NodeId, version: number) =>
+  last?.node === node && last.version === version;
+
+/**
+ * A requested line, once its file is shown: centred and flashed once, without the flash for reduced motion. The view
+ * takes each request once: one whose file it does not show then (the author chose another since) is dropped, not
+ * played when the file comes up later.
+ */
 function useReveal(view: EditorView | undefined, path: string | undefined, reveal: Reveal | undefined): void {
   const applied = useRef(revealed);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
-    if (!view || !reveal || reveal.seq <= applied.current || reveal.file !== path) return;
+    if (!view || !reveal || reveal.seq <= applied.current) return;
     applied.current = reveal.seq;
     revealed = Math.max(revealed, reveal.seq);
+    if (reveal.file !== path) return;
     const flash = !reducedMotion();
     view.dispatch({
       effects: [

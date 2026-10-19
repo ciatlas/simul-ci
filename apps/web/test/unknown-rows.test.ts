@@ -12,6 +12,7 @@ import {
   formProblems,
   listed,
   outcomeOptions,
+  pinTarget,
   type UnknownRows,
   unitFacts,
   unknownRows,
@@ -283,7 +284,7 @@ describe('the PinEditor’s fields', () => {
     });
   });
 
-  it('say what is wrong before the schema does: a value without a name, a name given twice', () => {
+  it('say what is wrong before the schema does, on the row it is about: a value without a name, a name given twice', () => {
     expect(formProblems(formOf(draft))).toEqual([]);
     const form: EditorForm = {
       outcome: 'none',
@@ -291,6 +292,8 @@ describe('the PinEditor’s fields', () => {
         { id: 0, name: '', value: 'true' },
         { id: 1, name: 'a', value: '1' },
         { id: 2, name: 'a ', value: '2' },
+        { id: 6, name: '', value: '' },
+        { id: 7, name: 'a', value: '3' },
       ],
       env: [
         { id: 3, name: '', value: '', held: 3 },
@@ -299,10 +302,11 @@ describe('the PinEditor’s fields', () => {
       ],
     };
     expect(formProblems(form)).toEqual([
-      'an output value has no name',
-      'two outputs are named a',
-      'an env write value has no name',
-      'two env writes are named B',
+      { field: 'outputs', pair: 0, message: 'output 1 has a value but no name' },
+      { field: 'outputs', pair: 2, message: 'outputs 2 and 3 are both named a' },
+      { field: 'outputs', pair: 7, message: 'outputs 2 and 5 are both named a' },
+      { field: 'env', pair: 3, message: 'env write 1 has a value but no name' },
+      { field: 'env', pair: 5, message: 'env writes 2 and 3 are both named B' },
     ]);
   });
 
@@ -370,6 +374,47 @@ describe('the PinEditor’s fields', () => {
     // An entry that was only a preset has nothing to bring back.
     const preset = formOf({ step: 'build.cache', as: 'miss' });
     expect(withPreset(preset, undefined, preset)).toEqual({ outcome: 'none', outputs: [], env: [] });
+  });
+
+  it('edit the entry that already states what a pin is about, instead of adding one that conflicts (SC103)', () => {
+    const pin = {
+      entry: { step: 'build.detect', outputs: { changed: '' } },
+      about: { field: 'outputs' as const, name: 'changed' },
+      outcomes: ['success' as const, 'failure' as const],
+      candidates: [],
+    };
+    const stated: AssumeEntry = { step: 'build.detect', outputs: { changed: 'true' }, outcome: 'success' };
+    const other: AssumeEntry = { job: 'build', outputs: { changed: 'x' } };
+    const target = pinTarget([other, stated], pin);
+    expect(target.replaces).toBe(stated);
+    expect(target.draft).toEqual({ ...pin, entry: stated });
+    // A preset may state the output: the editor adds the draft's row to it.
+    const preset: AssumeEntry = { step: 'build.detect', as: 'hit' };
+    expect(pinTarget([preset], pin)).toEqual({
+      draft: { ...pin, entry: { step: 'build.detect', as: 'hit', outputs: { changed: '' } } },
+      replaces: preset,
+    });
+    // Another output of the unit, another unit, another workflow: a new entry.
+    const elsewhere: AssumeEntry[] = [
+      { step: 'build.detect', outputs: { other: '1' } },
+      other,
+      { workflow: 'ci.yml', step: 'build.detect', outputs: { changed: 'true' } },
+    ];
+    expect(pinTarget(elsewhere, pin)).toEqual({ draft: pin });
+  });
+
+  it('edit the entry that states the outcome a pin is about, and give a preset entry the draft’s outcome', () => {
+    const pin = {
+      entry: { job: 'build', outcome: 'failure' as const },
+      about: { field: 'outcome' as const },
+      outcomes: ['success' as const, 'failure' as const, 'cancelled' as const],
+      candidates: [],
+    };
+    const cancelled: AssumeEntry = { job: 'build', outcome: 'cancelled' };
+    expect(pinTarget([cancelled], pin)).toEqual({ draft: { ...pin, entry: cancelled }, replaces: cancelled });
+    const preset: AssumeEntry = { job: 'build', as: 'x' };
+    expect(pinTarget([preset], pin).draft.entry).toEqual({ job: 'build', as: 'x', outcome: 'failure' });
+    expect(pinTarget([{ job: 'build', outputs: { a: '1' } }], pin)).toEqual({ draft: pin });
   });
 
   it('offer the unit’s outcomes, the entry’s own and none', () => {

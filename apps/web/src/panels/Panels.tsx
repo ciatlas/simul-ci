@@ -46,23 +46,27 @@ export function Panels() {
           <Count n={problems} />
         </Tabs.Tab>
       </Tabs.List>
-      <Tabs.Panel value="reasons" data-panel="reasons" className={PANEL} tabIndex={-1}>
+      <Tabs.Panel value="reasons" data-panel="reasons" className={PANEL}>
         <Reasons />
       </Tabs.Panel>
-      <Tabs.Panel value="unknowns" data-panel="unknowns" className={PANEL} tabIndex={-1}>
+      <Tabs.Panel value="unknowns" data-panel="unknowns" className={PANEL}>
         <Unknowns />
       </Tabs.Panel>
-      <Tabs.Panel value="node" data-panel="node" className={PANEL} tabIndex={-1}>
+      <Tabs.Panel value="node" data-panel="node" className={PANEL}>
         <NodeDetails />
       </Tabs.Panel>
-      <Tabs.Panel value="problems" data-panel="problems" className={PANEL} tabIndex={-1}>
+      <Tabs.Panel value="problems" data-panel="problems" className={PANEL}>
         <Problems />
       </Tabs.Panel>
     </Tabs.Root>
   );
 }
 
-const PANEL = 'min-h-0 flex-1 overflow-y-auto p-3 outline-none';
+/**
+ * The open panel scrolls, and Base UI makes it a tab stop so a panel with no control inside still scrolls by keyboard.
+ * `relative` makes it the containing block of its `sr-only` text, which would otherwise escape it and scroll the page.
+ */
+const PANEL = 'relative min-h-0 flex-1 overflow-y-auto p-3';
 
 function Count({ n }: { n: number }) {
   if (n === 0) return null;

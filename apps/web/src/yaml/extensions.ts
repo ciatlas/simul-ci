@@ -130,6 +130,52 @@ export function scrollToLine(
   return pos === undefined ? [] : [EditorView.scrollIntoView(pos, { y })];
 }
 
+/** Where a line sits in the editor's scroller, and how much of it shows. */
+export interface LineBox {
+  top: number;
+  height: number;
+  /** The scroller's visible height and its scroll offset. */
+  view: number;
+  scrolled: number;
+}
+
+/** The scroll offset that shows a line: in the middle, or the least move that brings it in (none when it shows). */
+export function scrollTopFor(box: LineBox, y: 'center' | 'nearest'): number | undefined {
+  if (y === 'center') return Math.max(0, box.top - (box.view - box.height) / 2);
+  if (box.top < box.scrolled) return box.top;
+  if (box.top + box.height > box.scrolled + box.view) return box.top + box.height - box.view;
+  return undefined;
+}
+
+/** The key of the pane's own scroll among CodeMirror's measure requests: a newer one replaces one not yet run. */
+export const OWN_SCROLL = 'sc-own-scroll';
+
+/**
+ * Scrolls the editor's own scroller to a line and nothing around it: `EditorView.scrollIntoView` also scrolls every
+ * scrolling ancestor, which below 768 px is the whole page, so a selection made in the tree would carry the page to
+ * the pane. A requested line (`revealLine`) still uses it, since that request is to see the line.
+ */
+export function scrollOwnTo(view: EditorView, line: number, y: 'center' | 'nearest'): void {
+  const pos = lineStart(view.state.doc, line);
+  if (pos === undefined) return;
+  view.requestMeasure({
+    key: OWN_SCROLL,
+    read: (v): LineBox => {
+      const block = v.lineBlockAt(pos);
+      return {
+        top: block.top,
+        height: block.height,
+        view: v.scrollDOM.clientHeight,
+        scrolled: v.scrollDOM.scrollTop,
+      };
+    },
+    write: (box, v) => {
+      const top = scrollTopFor(box, y);
+      if (top !== undefined) v.scrollDOM.scrollTop = top;
+    },
+  });
+}
+
 /**
  * The states of the files of one version, so a file shown again keeps where it was scrolled. A new version of the
  * files drops the states of the old one.

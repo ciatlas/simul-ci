@@ -88,9 +88,25 @@ describe('preferences', () => {
       theme: 'dark' as const,
       collapsed: { left: true, right: true, yaml: false },
       panel: 'unknowns' as const,
+      keys: false,
     };
     writePrefs(prefs, s);
     expect(readPrefs(s)).toEqual(prefs);
+  });
+
+  it('keep the page keys on unless the author turned them off', () => {
+    const s = memory();
+    const keys = (value: unknown) => {
+      s.map.set(PREFS_KEY, JSON.stringify({ v: 1, theme: 'dark', keys: value }));
+      return readPrefs(s).keys;
+    };
+    expect([keys(undefined), keys('off'), keys(0), keys(true), keys(false)]).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
   });
 
   it('read preferences written before the right panel existed with its defaults', () => {
@@ -101,6 +117,7 @@ describe('preferences', () => {
       theme: 'dark',
       collapsed: { left: true, right: false, yaml: false },
       panel: 'reasons',
+      keys: true,
     });
   });
 });
