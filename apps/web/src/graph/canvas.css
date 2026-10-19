@@ -1,0 +1,597 @@
+@import '@xyflow/react/dist/base.css';
+
+/*
+ * The canvas's look: React Flow's base.css (layout only, none of its theme) under the token sheet, mapped through
+ * its --xy-* variables, then the cards' and edges' own rules. Status is told by the border's style as well as its
+ * colour: runs a solid border in the run colour, skipped a thin dimmed one, might run the one dashed mark, in its
+ * own colour. The accent is the selection and its dependency path's edges, never a status; what is off the path
+ * fades, its text to the muted colour rather than by opacity, so every word keeps 4.5:1 on its background. Borders
+ * and outlines, no shadows. index.css turns every transition off under prefers-reduced-motion.
+ */
+
+.sc-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.sc-canvas .react-flow {
+  --xy-background-color: var(--bg);
+  --xy-background-pattern-color: var(--border-strong);
+  --xy-edge-stroke: var(--border-strong);
+  --xy-edge-stroke-width: 1.25;
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-node-color: var(--text);
+  --xy-node-border: 1px solid var(--border);
+  --xy-node-border-selected: 1px solid var(--accent);
+  --xy-handle-background-color: transparent;
+  --xy-selection-background-color: var(--accent-soft);
+  --xy-selection-border: 1px solid var(--accent);
+  --xy-attribution-background-color: transparent;
+  color: var(--text);
+}
+
+.sc-canvas .react-flow__viewport {
+  transition: opacity 150ms ease;
+}
+
+/* The inputs moved on since this picture was drawn. */
+.sc-canvas[data-stale] .react-flow__viewport {
+  opacity: 0.6;
+}
+
+/* Edges meet a card at its handles; nothing connects by hand, so they are never seen. */
+.sc-canvas .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+}
+
+/* Keyboard focus rings the node outside the selection's ring. */
+.sc-canvas .react-flow__node:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
+  border-radius: 8px;
+}
+
+/* Workflows */
+
+.sc-scope {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--chrome) 55%, transparent);
+  font-size: 12.5px;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease;
+}
+
+.sc-scope[data-verdict='yes'] {
+  border-color: color-mix(in oklab, var(--run) 55%, var(--border));
+}
+
+.sc-scope[data-verdict='no'] {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+
+.sc-scope[data-verdict='maybe'] {
+  border: 1.5px dashed var(--might);
+}
+
+.sc-scope[data-collapsed] {
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.sc-scope[data-collapsed][data-verdict='no'] {
+  background: var(--bg);
+}
+
+.sc-scope-bar,
+.sc-scope-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.sc-scope-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.sc-scope-path,
+.sc-scope-clause {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sc-scope-clause {
+  flex: 1 1 auto;
+}
+
+.sc-counts,
+.sc-scope-caller {
+  flex: none;
+  display: inline-flex;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.sc-open {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sc-open:hover {
+  background: var(--chrome);
+}
+
+/* Job cards */
+
+.sc-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.2;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.sc-card[data-verdict='yes'] {
+  border-color: var(--run);
+}
+
+.sc-card[data-verdict='no'] {
+  border-color: var(--border);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.sc-card[data-verdict='maybe'] {
+  border: 1.5px dashed var(--might);
+}
+
+/* The ring stands off the border by a gap, so the status the border tells stays readable inside it. */
+.sc-card[data-selected],
+.sc-scope[data-selected] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * Off the path: the text goes muted (5.1:1 on the background in light, 6.5:1 in dark, 4.5:1 or more on every cell
+ * fill) and the border towards the plain one; its style, the marks and the badges keep the status.
+ */
+.sc-card[data-path='off'],
+.sc-scope[data-path='off'] {
+  color: var(--muted);
+  border-color: var(--border);
+}
+
+.sc-card[data-path='off'] {
+  --cell-text: var(--muted);
+  background: var(--bg);
+}
+
+.sc-card[data-path='off'][data-verdict='yes'] {
+  border-color: color-mix(in oklab, var(--run) 40%, var(--border));
+}
+
+.sc-card[data-path='off'][data-verdict='maybe'] {
+  border-color: color-mix(in oklab, var(--might) 50%, var(--border));
+}
+
+.sc-card-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sc-card-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* The label keeps its room: the badge gives way first, down to a few characters, and the hover card says it whole. */
+.sc-badge {
+  flex: 0 1000 auto;
+  min-width: 3.5em;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--muted);
+  background: var(--chrome);
+}
+
+.sc-badge[data-tone='danger'] {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.sc-badge[data-tone='unknown'] {
+  color: var(--unknown);
+  background: var(--unknown-soft);
+}
+
+.sc-badge[data-tone='skip'] {
+  background: var(--skip-soft);
+}
+
+.sc-toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.sc-toggle:hover {
+  background: var(--chrome);
+  color: var(--text);
+}
+
+.sc-card-sub {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.sc-card-sub > span {
+  flex: none;
+}
+
+.sc-card-sub > .sc-sub-status,
+.sc-card-sub > .sc-sub-check {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The marks drawn inside the grid and the counts: shape and colour per verdict, as graph/Mark.tsx draws them. */
+
+.sc-glyph[data-verdict='yes'] {
+  fill: var(--run);
+}
+
+.sc-glyph[data-verdict='no'],
+.sc-glyph[data-verdict='maybe'] {
+  fill: none;
+  stroke-width: 1.25;
+}
+
+.sc-glyph[data-verdict='no'] {
+  stroke: var(--skip);
+}
+
+.sc-glyph[data-verdict='maybe'] {
+  stroke: var(--might);
+}
+
+.sc-glyph-half {
+  fill: var(--might);
+}
+
+.sc-glyph-text[data-verdict='yes'] {
+  color: var(--run);
+  fill: var(--run);
+}
+
+.sc-glyph-text[data-verdict='no'] {
+  color: var(--skip);
+  fill: var(--skip);
+}
+
+.sc-glyph-text[data-verdict='maybe'] {
+  color: var(--might);
+  fill: var(--might);
+}
+
+/* Legs. The grid, the strip and the list take exactly the height graph/size.ts gives them, so no margins. */
+
+.sc-legs {
+  display: block;
+  flex: none;
+  overflow: visible;
+  font-size: 10px;
+}
+
+.sc-legs text {
+  fill: var(--cell-text, var(--text));
+}
+
+.sc-legs .sc-index {
+  font-size: 8px;
+}
+
+.sc-legs [data-leg] {
+  cursor: pointer;
+}
+
+.sc-cell {
+  fill: var(--surface);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+[data-verdict='yes'] > .sc-cell {
+  fill: var(--run-soft);
+  stroke: var(--run);
+}
+
+[data-verdict='no'] > .sc-cell {
+  fill: var(--skip-soft);
+  stroke: var(--border);
+}
+
+[data-verdict='no'] > text {
+  fill: var(--muted);
+}
+
+[data-verdict='maybe'] > .sc-cell {
+  fill: var(--might-soft);
+  stroke: var(--might);
+  stroke-dasharray: 3 2;
+}
+
+[data-selected] > .sc-cell {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.sc-legs .sc-rep {
+  fill: var(--accent);
+}
+
+/* Steps */
+
+.sc-strip {
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+
+.sc-strip [data-step] {
+  cursor: pointer;
+}
+
+.sc-strip .sc-hit {
+  fill: transparent;
+  stroke: none;
+}
+
+[data-selected] > .sc-hit {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.sc-list {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11.5px;
+}
+
+.sc-list li {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-right: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sc-list li:hover {
+  background: var(--chrome);
+}
+
+.sc-list li[data-selected] {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.sc-list-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-list-outputs {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.sc-list li.sc-list-more {
+  padding-left: 16px;
+  color: var(--muted);
+  cursor: default;
+}
+
+/* Needs. base.css comes first, so a plain class here outranks its edge path rule. */
+
+.sc-edge {
+  stroke: var(--border-strong);
+  stroke-width: 1.25;
+  transition:
+    opacity 150ms ease,
+    stroke 150ms ease;
+}
+
+.sc-edge[data-from='no'] {
+  opacity: 0.4;
+}
+
+.sc-edge[data-from='maybe'] {
+  stroke: var(--might);
+  stroke-dasharray: 5 4;
+}
+
+.sc-edge[data-path='on'] {
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 1;
+}
+
+.sc-edge[data-from='no'][data-path='on'] {
+  opacity: 0.6;
+}
+
+/* After the path: the need that decided its target keeps the danger colour on the path too. */
+.sc-edge[data-deciding] {
+  stroke: var(--danger);
+  stroke-width: 1.75;
+}
+
+.sc-edge[data-path='off'] {
+  opacity: 0.15;
+}
+
+/* Above the cards (a label can fall over a wider card of the same layer), below a selected card and the hover card. */
+.sc-edge-label {
+  position: absolute;
+  z-index: 500;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 10.5px;
+  line-height: 15px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.sc-edge-label[data-path='off'] {
+  background: var(--chrome);
+  color: var(--muted);
+}
+
+/* The hover card */
+
+.sc-hover {
+  max-width: 320px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.sc-hover p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sc-hover .sc-hover-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Controls and attribution */
+
+.sc-canvas .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.sc-canvas .react-flow__controls-button {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sc-canvas .react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+
+.sc-canvas .react-flow__controls-button:hover {
+  background: var(--chrome);
+  color: var(--text);
+}
+
+.sc-canvas .react-flow__controls-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.react-flow__attribution a {
+  color: var(--muted);
+}

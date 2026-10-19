@@ -41,15 +41,21 @@ export interface JobModel {
   verdict: Tri;
   /** The deciding clause, when the job does not plainly run. */
   clause?: string;
-  /** The result when it is not a known success: `failure`, `success | cancelled`, … */
+  /**
+   * What the result adds to the verdict: `failure`, `success | cancelled`, …; never a known success, nor `skipped`
+   * for a job the verdict already calls skipped or might run.
+   */
   result?: string;
   uses?: string;
   /** The check name with the matrix part elided. */
   check?: string;
   needs: NodeId[];
-  /** The matrix size when the job has a matrix (`×count` on the subline), known or not. */
-  count?: number;
-  /** Every leg, as grid cells; absent for a job with one unnamed leg, and for a skipped job. */
+  /** The matrix size when the job has a matrix (`×count` on the subline), known or not: `?` when only the run knows. */
+  count?: number | '?';
+  /**
+   * Every leg, as grid cells; absent for a job with one unnamed leg, and for a skipped job, whose card still keeps
+   * the grid's room and draws it as skipped cells (size.ts `gridCells`).
+   */
   legs?: LegCell[];
   /** The leg whose steps and callee the card shows (the author's pick, else the first). */
   representative?: NodeId;
@@ -68,6 +74,8 @@ export interface LegCell {
   label: string;
   verdict: Tri;
   result?: string;
+  /** For the one `∗` cell of a matrix only the run knows: the matrix reason, as the CLI words it. */
+  reason?: string;
 }
 
 export interface StepMark {
@@ -88,7 +96,10 @@ export interface EdgeModel {
   target: NodeId;
   /** The verdict of the needed job: a skipped source fades the edge, a might-run one dashes it. */
   from: Tri;
-  /** The need decided the target's verdict through its `if:` (implicit `success()` with a result not known success). */
+  /**
+   * The need decided the target's verdict through its `if:`: the condition reads `success()`, implicit or written,
+   * over a status a success of this need could change, and its result is not a known success (model.ts).
+   */
   deciding: boolean;
   /** For a deciding edge: `result: failure`, `result: ?`. */
   label?: string;

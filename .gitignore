@@ -1,6 +1,9 @@
 node_modules/
 coverage/
 dist/
+# Playwright's traces and report from the web app's browser pass.
+test-results/
+playwright-report/
 # The action bundle runs straight from the repository (action.yml), so it is committed.
 !packages/action/dist/
 *.tsbuildinfo

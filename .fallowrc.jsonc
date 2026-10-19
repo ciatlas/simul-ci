@@ -46,7 +46,7 @@
       {
         "files": ["apps/web/src/**/*.tsx"],
         "maxCrap": 100,
-        "reason": "React components are covered by the browser pass (Playwright, M3a PR 5), not by unit tests; CRAP assumes none",
+        "reason": "React components are covered by the browser pass (Playwright, apps/web/e2e), not by unit tests; CRAP assumes none",
       },
       {
         "files": ["scripts/**"],

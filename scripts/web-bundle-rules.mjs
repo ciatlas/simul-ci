@@ -4,16 +4,17 @@
  * tests apply them to small inputs and to what the web app's Vite config builds.
  */
 
-/** What may only appear in the worker chunk. */
-const WORKER_ONLY = [
+/** What only the engine worker may hold: the engine's dependencies. */
+const ENGINE_WORKER_ONLY = [
   /@ciatlas\/core\//,
   /\/@actions\//,
   /\/zod\//,
   /\/yaml\//,
   /picomatch/,
-  /\/elkjs\//,
   /cronstrue/,
 ];
+/** What only the layout worker may hold. */
+const ELKJS = /\/elkjs\//;
 /** Engine sources the page may use: the core-free entries. */
 const PAGE_ENGINE_OK = /packages\/engine\/src\/(plan|render)\//;
 const ENGINE = /packages\/engine\/src\//;
@@ -28,8 +29,8 @@ const BROWSER_EXTERNAL = /(?:^|\/)__vite-browser-external(?::|$)/;
 /** A font face whose source is a data: URI. */
 const DATA_FONT = /@font-face\s*\{[^}]*url\(\s*['"]?data:/;
 
-/** Whether a chunk is the engine worker's. */
-const isWorkerChunk = (file) => file.startsWith('engine.worker-');
+const isEngineWorker = (file) => file.startsWith('engine.worker-');
+const isLayoutWorker = (file) => file.startsWith('layout.worker-');
 
 /**
  * What breaks the contract in one JavaScript chunk.
@@ -46,25 +47,42 @@ export function chunkProblems(file, sources) {
       );
     if (NODE_HOST.test(s)) problems.push(`${file} holds ${s}, which runs only under Node`);
   }
-  problems.push(...(isWorkerChunk(file) ? workerProblems(file, sources) : pageProblems(file, sources)));
+  if (isEngineWorker(file)) problems.push(...engineWorkerProblems(file, sources));
+  else if (isLayoutWorker(file)) problems.push(...layoutWorkerProblems(file, sources));
+  else problems.push(...pageProblems(file, sources));
   return problems;
 }
 
-/** The worker builds from core's browser entry, without its file-system and git modules. */
-function workerProblems(file, sources) {
+/** The engine worker builds from core's browser entry, without its file-system and git modules, and without ELK. */
+function engineWorkerProblems(file, sources) {
   const problems = [];
   if (!sources.some((s) => s.includes('project-browser')))
     problems.push(`${file} was not built from core's browser entry`);
-  for (const s of sources)
+  for (const s of sources) {
     if (/node-fs\.ts|\/git\.ts/.test(s) && s.includes('@ciatlas/core')) problems.push(`${file} holds ${s}`);
+    if (ELKJS.test(s)) problems.push(`${file} holds ${s}, which only the layout worker may`);
+  }
   return problems;
 }
 
-/** The page holds none of the engine but its plan/ and render/ entries, and nothing that only the worker may. */
+/** The layout worker is ELK and the protocol around it: none of the engine, nor what the engine depends on. */
+function layoutWorkerProblems(file, sources) {
+  const problems = [];
+  if (!sources.some((s) => ELKJS.test(s)))
+    problems.push(`${file} holds no elkjs, so nothing lays the graph out`);
+  for (const s of sources)
+    if (ENGINE.test(s) || ENGINE_WORKER_ONLY.some((re) => re.test(s)))
+      problems.push(`${file} holds ${s}, which only the engine worker may`);
+  return problems;
+}
+
+/** The page holds none of the engine but its plan/ and render/ entries, and nothing that only a worker may. */
 function pageProblems(file, sources) {
   const problems = [];
   for (const s of sources) {
-    if (WORKER_ONLY.some((re) => re.test(s))) problems.push(`${file} holds ${s}, which only the worker may`);
+    if (ENGINE_WORKER_ONLY.some((re) => re.test(s)))
+      problems.push(`${file} holds ${s}, which only the engine worker may`);
+    if (ELKJS.test(s)) problems.push(`${file} holds ${s}, which only the layout worker may`);
     if (ENGINE.test(s) && !PAGE_ENGINE_OK.test(s))
       problems.push(`${file} holds ${s}: the page may use only plan/ and render/`);
   }

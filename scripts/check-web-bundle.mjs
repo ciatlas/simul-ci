@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
  * The browser bundle's contract, checked from the source maps and stylesheets of `apps/web/dist`:
- * - the engine (and with it @ciatlas/core, zod, yaml, @actions/*, picomatch) lives only in the worker chunk;
- * - the worker chunk is built from core's browser entry (no node-fs, no git);
+ * - the engine (and with it @ciatlas/core, zod, yaml, @actions/*, picomatch) lives only in the engine worker chunk;
+ * - the engine worker chunk is built from core's browser entry (no node-fs, no git);
+ * - elkjs lives only in the layout worker chunk, which holds none of the engine;
  * - no chunk imports a Node built-in or holds the Node host (packages/node);
  * - no stylesheet inlines a font, which the CSP's font-src 'self' would refuse;
- * - every chunk stays under its gzip budget.
+ * - every chunk has a gzip budget and stays under it.
  * The rules are scripts/web-bundle-rules.mjs. Usage: node scripts/check-web-bundle.mjs [apps/web/dist]
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -16,10 +17,17 @@ import { chunkProblems, stylesheetProblems } from './web-bundle-rules.mjs';
 const dist = process.argv[2] ?? 'apps/web/dist';
 const assets = join(dist, 'assets');
 
-/** Gzip budgets in kB, 15 % above the figures measured when the budget was set; raise them on purpose. */
+/**
+ * Gzip budgets in kB, 15 % above the figures measured when the budget was set (with the run graph), rounded up;
+ * raise them on purpose.
+ */
 const BUDGETS = [
-  { name: 'the engine worker', test: (f) => f.startsWith('engine.worker-'), kB: 170 },
-  { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 130 },
+  // The engine, @ciatlas/core, yaml, zod and @actions/*: 149.1 kB measured.
+  { name: 'the engine worker', test: (f) => f.startsWith('engine.worker-'), kB: 172 },
+  // elkjs: 428.5 kB measured.
+  { name: 'the layout worker', test: (f) => f.startsWith('layout.worker-'), kB: 493 },
+  // React, the router, React Flow and its d3 modules: 177.4 kB measured.
+  { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 205 },
 ];
 
 const problems = [];
@@ -50,7 +58,8 @@ for (const file of files) {
   }
   rows.push({ file, kB: statSync(join(assets, file)).size / 1024, gz, packages: byPackage });
   const budget = BUDGETS.find((b) => b.test(file));
-  if (budget && gz > budget.kB)
+  if (!budget) problems.push(`${file} has no gzip budget: measure it and add one to BUDGETS`);
+  else if (gz > budget.kB)
     problems.push(`${file} is ${gz.toFixed(1)} kB gzipped; the budget for ${budget.name} is ${budget.kB} kB`);
 }
 
