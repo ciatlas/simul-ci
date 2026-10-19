@@ -3,12 +3,20 @@ import { describe, expect, it } from 'vitest';
 import { assembleLayout, createLayoutCache, type LayoutCache } from '../src/graph/layout';
 import { tableMetrics } from '../src/graph/metrics';
 import { cardSize } from '../src/graph/size';
-import { CARD, type GraphLayout, type GraphModel, type JobModel, type ScopeModel } from '../src/graph/types';
+import {
+  CARD,
+  type GraphLayout,
+  type GraphModel,
+  type JobModel,
+  type ScopeLayout,
+  type ScopeModel,
+} from '../src/graph/types';
 import {
   answerLayout,
   ELK_OPTIONS,
   isLayoutRequest,
   type LayoutRequest,
+  WARM_UP,
 } from '../src/worker/layout-protocol';
 
 const elk = new ELK();
@@ -124,6 +132,32 @@ describe('ELK in the layout worker', () => {
     const first = await lay(createLayoutCache(), m);
     const second = await lay(createLayoutCache(), structuredClone(m));
     expect(second.layout).toEqual(first.layout);
+  });
+
+  it('lays every warm-up out, its call card around the chain, and moves no card laid out after it', async () => {
+    const m = new Model().scope(
+      'ci.yml',
+      ['a', 'b', 'c', 'd'],
+      [
+        ['a', 'b'],
+        ['a', 'c'],
+        ['b', 'd'],
+        ['c', 'd'],
+      ],
+    ).model;
+    const before = await lay(createLayoutCache(), m);
+    const warm: Record<string, ScopeLayout> = {};
+    for (const request of WARM_UP) {
+      const r = await answerLayout(elk, request);
+      if (r.type !== 'layout') throw new Error(r.message);
+      Object.assign(warm, r.scopes);
+    }
+    expect(Object.keys(warm)).toEqual(['chain', 'fan', 'call']);
+    // The chain as laid out is the size the call card is given for it.
+    expect(warm.chain).toMatchObject(WARM_UP[2]!.known.chain!);
+    expect(warm.call!.width).toBeGreaterThan(warm.chain!.width);
+    const after = await lay(createLayoutCache(), structuredClone(m));
+    expect(after.layout).toEqual(before.layout);
   });
 
   it("lays a callee out first and sizes its caller's card around it, in one request", async () => {
