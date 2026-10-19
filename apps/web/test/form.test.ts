@@ -194,8 +194,8 @@ describe('the form helpers', () => {
       required: true,
     });
     expect(activityTypes({ ...outline, workflows: [outline.workflows[1]!] }, 'pull_request')).toEqual({
-      allowed: ['opened', 'labeled', 'closed'],
-      rest: [],
+      allowed: ['opened'],
+      rest: ['labeled', 'closed'],
       required: false,
     });
     expect(activityTypes(outline, 'push')).toBeUndefined();

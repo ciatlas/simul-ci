@@ -1,0 +1,58 @@
+import { fieldAria } from '../aria';
+import { changedText, parseChanged, sameChanged } from '../form';
+import { withLine } from '../lines';
+import { Chips, Field, type GroupProps, monoControl, useFieldIds, useRawText } from './kit';
+
+/**
+ * The files the push or pull request changes, one per line, `path (added)` or `path (renamed from old)` for a
+ * status. Always in view for the events whose `paths` the engine reads (a tag push skips them): empty means
+ * unknown, and `paths` filters cannot decide. Each pattern's chip adds a file it selects.
+ */
+export function ChangedFilesField({ f }: GroupProps) {
+  const ids = useFieldIds();
+  const changed = f.scenario.changed;
+  const [text, setText] = useRawText<unknown>(changed, changedText, sameChanged);
+  const write = (next: string): void => {
+    setText(next);
+    if (!sameChanged(next, changed)) f.patch({ changed: parseChanged(next) });
+  };
+  const hint = f.model.hints.changed;
+  const issue = f.issue('changed');
+  const count = Array.isArray(changed) ? changed.length : 0;
+  return (
+    <Field
+      ids={ids}
+      label={
+        <>
+          Changed files{' '}
+          {changed === undefined ? (
+            // Amber as a ground under body text: the might colour as text is under 4.5:1 on the chrome.
+            <>
+              · <span className="rounded-sm bg-might-soft px-1 text-text">unknown</span>
+            </>
+          ) : (
+            <span>
+              · {count} file{count === 1 ? '' : 's'}
+            </span>
+          )}
+        </>
+      }
+      hint={hint?.text}
+      issue={issue}
+    >
+      <textarea
+        className={`${monoControl} min-h-24${changed === undefined ? ' border-might' : ''}`}
+        value={text}
+        onChange={(e) => write(e.target.value)}
+        placeholder={'src/index.ts\ndocs/readme.md (added)'}
+        spellCheck={false}
+        {...fieldAria(ids, { hint: hint?.text, issue })}
+      />
+      <Chips
+        chips={hint?.chips ?? []}
+        label="Add a file the paths filters select"
+        onPick={(v) => write(withLine(text, v))}
+      />
+    </Field>
+  );
+}
