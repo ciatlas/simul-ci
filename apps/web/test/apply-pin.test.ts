@@ -193,20 +193,27 @@ describe('pinControl', () => {
     expect(jobVerdict(simulated(gated, typed.scenario), 'actor')).toBe('yes');
   });
 
-  it('opens the editor for a step output the engine has no pin for', () => {
+  it('opens the editor on the entry the engine pins a step output with, and derives it when there is none', () => {
     const r = simulated(starter, { event: 'push', branch: 'main', changed: ['src/a.ts'] });
-    const control = pinControl(unknownOf(r, `${CI}#build/steps.detect.outputs.changed`), contextOf(r));
+    const output = unknownOf(r, `${CI}#build/steps.detect.outputs.changed`);
+    const control = pinControl(output, contextOf(r));
     expect(control).toMatchObject({
       kind: 'editor',
       label: 'Pin…',
-      draft: { entry: { step: 'build.detect', outputs: { changed: '' } } },
+      draft: {
+        entry: { step: 'build.detect', outputs: { changed: '' } },
+        about: { field: 'outputs', name: 'changed' },
+      },
     });
+    expect(control.kind === 'editor' && control.draft.entry).toEqual(output.pin?.fragment);
+    const { pin: _, ...unpinned } = output;
+    expect(pinControl(unpinned, contextOf(r))).toEqual(control);
   });
 
   it('says what nothing the author writes can pin', () => {
-    const r = simulated(starter, { event: 'push', branch: 'main' });
+    const r = simulated(starter, { event: 'schedule' });
     const ctx = contextOf(r);
-    expect(pinControl(unknownOf(r, 'expression:success()'), ctx)).toEqual({
+    expect(pinControl(unknownOf(r, "expression:deps-${{ hashFiles('package-lock.json') }}"), ctx)).toEqual({
       kind: 'none',
       text: 'only the run decides it',
     });
@@ -354,29 +361,35 @@ describe('pinControl', () => {
     expect(control.kind === 'assume' && control.entry).toBe(race.pin?.fragment);
   });
 
-  // The engine applies a job entry's outcome at the job boundary, whose chain has no leg, so the race's own pin
-  // (`job` with `matrix`) matches nothing (SC102) and the race stays. Flip to `it` when the engine applies it per leg.
-  it.fails('decides the race once its pin is applied', () => {
+  it('decides the race once its pin is applied', () => {
     const assume: AssumeEntry[] = [{ step: 'test[node=22].#1', outcome: 'failure' }];
     const r = simulated(failFast, { event: 'push', branch: 'main' }, assume);
     const control = pinControl(unknownOf(r, `race:fail-fast:${CI}#test[node=24]`), contextOf(r));
     if (control.kind !== 'assume') throw new Error(control.kind);
     const after = simulated(failFast, { event: 'push', branch: 'main' }, withEntry(assume, control.entry));
-    expect(after.plan.diagnostics).toEqual([]);
+    // The entry names the leg (SC102 no more); a job's outcome is applied at its boundary, which SC108 says.
+    expect(after.plan.diagnostics).toEqual([expect.objectContaining({ code: 'SC108', severity: 'info' })]);
     expect(after.plan.unknowns.map((u) => u.id)).not.toContain(`race:fail-fast:${CI}#test[node=24]`);
+    const leg = after.plan.workflows[0]!.jobs.find((j) => j.jobId === 'test')!.legs[1]!;
+    expect(leg.result).toEqual({ known: true, value: 'cancelled' });
   });
 
-  it('words an assume pin by its outcome, and passes over one that names no unit', () => {
+  it("words a race's assume pin by its outcome, opens the editor on a unit field's, and passes over one naming no unit", () => {
     const r = simulated(starter, { event: 'push', branch: 'main' });
     const ctx = contextOf(r);
-    const pin = (fragment: Json) => ({ pin: { layer: 'assume' as const, fragment } });
-    expect(pinControl(synthetic('x', pin({ step: 'a.b', outcome: 'failure' })), ctx)).toMatchObject({
+    const pin = (fragment: Json) => ({ kind: 'race' as const, pin: { layer: 'assume' as const, fragment } });
+    expect(pinControl(synthetic('race:x', pin({ step: 'a.b', outcome: 'failure' })), ctx)).toMatchObject({
       kind: 'assume',
       label: 'Assume failure',
     });
-    expect(pinControl(synthetic('x', pin({ job: 'a', outputs: { v: '1' } })), ctx)).toMatchObject({
+    expect(pinControl(synthetic('race:x', pin({ job: 'a', outputs: { v: '1' } })), ctx)).toMatchObject({
       kind: 'assume',
       label: 'Add the assumption',
+    });
+    const outcome = { ...pin({ step: 'build.detect', outcome: 'failure' }), kind: 'outcome' as const };
+    expect(pinControl(synthetic('x', outcome), ctx)).toMatchObject({
+      kind: 'editor',
+      draft: { entry: { step: 'build.detect', outcome: 'failure' }, about: { field: 'outcome' } },
     });
     expect(pinControl(synthetic('race:x', pin({ uses: 'a/b', outcome: 'failure' })), ctx).kind).toBe('none');
   });
@@ -420,10 +433,12 @@ describe('applyScenarioPin', () => {
     });
   }
 
-  it('merges the triggering run key by key, where the test runner replaces it whole', () => {
+  it('merges the triggering run key by key, as the test runner does', () => {
     const scenario: ScenarioInput = { event: 'workflow_run', workflow_run: { name: 'CI', branch: 'x' } };
-    const { scenario: out, keys } = applyScenarioPin(scenario, { workflow_run: { branch: 'main' } });
+    const fragment = { workflow_run: { branch: 'main' } };
+    const { scenario: out, keys } = applyScenarioPin(scenario, fragment);
     expect(out).toEqual({ event: 'workflow_run', workflow_run: { name: 'CI', branch: 'main' } });
+    expect(out).toEqual(mergeScenario(scenario as never, fragment as never));
     expect(keys).toEqual(['workflow_run']);
     expect(applyScenarioPin({ event: 'workflow_run' }, { workflow_run: { name: 'CI' } }).scenario).toEqual({
       event: 'workflow_run',

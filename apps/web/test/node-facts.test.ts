@@ -75,7 +75,8 @@ describe('nodeFacts', () => {
     expect(titles(test)).toEqual(['Job', 'Matrix', 'Checks']);
     expect(said(test, 'Job')).toEqual({
       'job id': 'test',
-      result: '? one of skipped, success',
+      // The job runs where its workflow does, so needs reads its legs' result whether or not CI is triggered.
+      result: 'success',
       'continue-on-error': 'false',
       check: 'test (…)',
       'check when skipped': 'test',
@@ -118,7 +119,7 @@ describe('nodeFacts', () => {
     expect(said(setupNode, 'Step')).toEqual({
       key: '~actions-setup-node',
       uses: 'actions/setup-node@v4',
-      outcome: '? one of success, skipped',
+      outcome: 'success',
       'continue-on-error': 'false',
     });
     expect(said(setupNode, 'With')).toEqual({ 'node-version': '22' });

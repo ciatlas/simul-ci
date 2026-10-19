@@ -120,8 +120,9 @@ describe('the reasons of a push to main in the starter', () => {
       expr: "github.event_name == 'push' || inputs.deploy",
       evaluated: "success() && (github.event_name == 'push' || inputs.deploy)",
       implicitSuccess: true,
-      status: 'one of skipped, success',
-      value: 'unknown',
+      // test and build run wherever deploy does, so success() is decided.
+      status: 'success',
+      value: 'true',
       reads: [
         { ref: 'github.event_name', value: 'push', unknowns: [] },
         { ref: 'inputs.deploy', value: "''", unknowns: [] },
