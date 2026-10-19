@@ -1,5 +1,5 @@
 import ELK from 'elkjs/lib/elk.bundled.js';
-import { answerLayout, isLayoutRequest } from './layout-protocol';
+import { answerLayout, isLayoutRequest, WARM_UP } from './layout-protocol';
 
 /**
  * The layout worker: ELK off the page's thread and off the engine's queue. It answers each `layout` request with
@@ -23,9 +23,28 @@ function createElk(): InstanceType<typeof ELK> {
 
 const elk = createElk();
 
+/**
+ * ELK's first layouts load its classes and leave V8 to compile its hot paths: cold, a session's first picture took
+ * more than twice what the same request takes warm. So the worker lays `WARM_UP` out while the page has nothing to
+ * place, a few passes over, and stops once a request comes; the request waits for the warm-up layout on hand, so no
+ * throwaway layout runs between a request's own and requests are answered in order. A warm-up that fails answers
+ * with an error like any request, which nothing reads.
+ */
+const WARM_UP_PASSES = 3;
+let asked = false;
+const warm = (async () => {
+  for (let pass = 0; pass < WARM_UP_PASSES; pass++)
+    for (const request of WARM_UP) {
+      if (asked) return;
+      await answerLayout(elk, request);
+    }
+})();
+
 addEventListener('message', (event: MessageEvent<unknown>) => {
   // A dedicated worker only hears from the page that created it: the event carries no origin and no source.
   if (event.origin !== '' || event.source !== null) return;
   if (!isLayoutRequest(event.data)) return;
-  void answerLayout(elk, event.data).then((response) => postMessage(response));
+  const request = event.data;
+  asked = true;
+  void warm.then(() => answerLayout(elk, request)).then((response) => postMessage(response));
 });
