@@ -1,7 +1,6 @@
 import { SKIP_MARKERS as ENGINE_SKIP_MARKERS } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 import {
-  type ActivityTypes,
   activityNotes,
   actorWith,
   advancedSeen,
@@ -193,8 +192,6 @@ describe('the reads the engine makes of a field', () => {
       stray: 'not a type of pull_request',
     });
     expect(activityNotes({ ...table, required: true }, 'pull_request').rest).toBe('not in types:');
-    const custom: ActivityTypes = { allowed: ['deploy'], rest: [], required: true, custom: true };
-    expect(activityNotes(custom, 'repository_dispatch').stray).toBe('not in types:');
   });
 
   it('open Advanced on a key newly set or a refusal not yet shown, and not again on one it showed', () => {

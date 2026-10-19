@@ -169,12 +169,12 @@ export function strayAction(types: ActivityTypes, action: string | undefined): s
   return action;
 }
 
-/** What the select says beside a type no listener runs on, and beside an action that is none of the types. */
+/**
+ * What the select says beside a type no listener runs on, and beside an action that is none of the event's types (a
+ * custom type no listener names shows in a box of its own instead).
+ */
 export function activityNotes(types: ActivityTypes, event: string): { rest: string; stray: string } {
-  return {
-    rest: types.required ? 'not in types:' : 'not a default type',
-    stray: types.custom ? 'not in types:' : `not a type of ${event}`,
-  };
+  return { rest: types.required ? 'not in types:' : 'not a default type', stray: `not a type of ${event}` };
 }
 
 function* eventsOf(

@@ -410,4 +410,15 @@ describe('the activity types over workflows the engine reads', () => {
     const open = loadRepo({ '.github/workflows/a.yml': workflow('  repository_dispatch:') }).outline;
     expect(deriveForm(open, { event: 'repository_dispatch' }, undefined).activity).toBeUndefined();
   });
+
+  it('leaves a custom type no listener names a question worth asking: it skips the narrowed, runs the open', () => {
+    const { outline: o, events } = loadRepo({
+      '.github/workflows/a.yml': workflow('  repository_dispatch:\n    types: [deploy]'),
+      '.github/workflows/b.yml': workflow('  repository_dispatch:'),
+    });
+    const scenario = { event: 'repository_dispatch', action: 'build' };
+    expect(deriveForm(o, scenario, undefined).activity).toMatchObject({ allowed: ['deploy'], custom: true });
+    const verdicts = events.map((e) => matchTrigger(e, parseScenario(scenario)).decision.verdict);
+    expect(verdicts).toEqual(['no', 'yes']);
+  });
 });

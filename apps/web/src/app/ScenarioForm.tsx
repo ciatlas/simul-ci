@@ -14,6 +14,7 @@ import { ReleaseFields } from '../scenario/fields/Release';
 import { WorkflowRunFields } from '../scenario/fields/WorkflowRun';
 import { useKept } from '../scenario/keep';
 import type { Issue } from '../state/store';
+import type { Outline } from '../worker/protocol';
 import { useSession } from './providers';
 
 /**
@@ -39,6 +40,12 @@ const GROUPS: Record<GroupId, (props: GroupProps) => ReactNode> = {
 
 export function ScenarioForm() {
   const outline = useSession((s) => s.project.outline);
+  // The fields go with the project and come back with the next one, so what they keep in view (the Ref under the
+  // caret, Merged, the fork) is decided afresh for it, as on a first mount.
+  return outline ? <Fields outline={outline} /> : null;
+}
+
+function Fields({ outline }: { outline: Outline }) {
   const scenario = useSession((s) => s.scenario);
   const from = useSession((s) => s.scenarioFrom);
   const assumed = useSession((s) => s.assumed);
@@ -48,11 +55,10 @@ export function ScenarioForm() {
   const setScenario = useSession((s) => s.setScenario);
   const keepRef = useKept(scenario.event, showsRef(scenario), from === 'author');
   const model = useMemo(
-    () => (outline ? deriveForm(outline, scenario, focus, { ref: keepRef }) : undefined),
+    () => deriveForm(outline, scenario, focus, { ref: keepRef }),
     [outline, scenario, focus, keepRef],
   );
-  const routed = useMemo(() => model && routeIssues(issues ?? [], model.fields), [issues, model]);
-  if (!outline || !model || !routed) return null;
+  const routed = useMemo(() => routeIssues(issues ?? [], model.fields), [issues, model]);
 
   const f: FieldContext = {
     scenario,

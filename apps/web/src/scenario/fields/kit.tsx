@@ -1,13 +1,14 @@
 import type { ScenarioInput } from '@simulci/engine';
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionState } from '../../state/store';
 import { type FieldIds, fieldAria, fieldIds } from '../aria';
 import type { Chip, FormModel } from '../derive';
+import { clipOf, type NoteSide, noteSide } from '../note';
 
 /**
  * What the field groups share: the context each reads and writes through, the frame of a field (label, control,
- * chips, hint, refusal), the assumed mark with its note, the switch, and the raw text of the fields written one
- * entry per line.
+ * chips, hint, refusal), the assumed mark with its note, other… for a name no option holds, the switch, and the raw
+ * text of the fields written one entry per line.
  */
 
 export interface FieldContext {
@@ -121,22 +122,29 @@ export function Chips({
 
 /**
  * The note on a value the page chose. It is the control's description, so a screen reader hears it with the control,
- * and the dashed border says the same to the eye; the pointer resting on the control, or the focus, draws it above,
- * and Escape puts it away. The wrapper stays when the mark goes, so the control keeps its place in the tree (and the
- * focus) on the first edit. Drawn here, not with Base UI's Tooltip: its floating-ui positioning, about 24 kB gzipped,
- * took the page over its budget for a note that has one place to go.
+ * and the dashed border says the same to the eye; the pointer resting on the control, or the focus, draws it, and
+ * Escape puts it away wherever the focus is. It draws at the control's right end, clear of what sits at the left of
+ * the row above (the label, or the Branch and Tag radios), above the control or below it when the scrolling column
+ * would clip it there. The wrapper stays when the mark goes, so the control keeps its place in the tree (and the
+ * focus) on the first edit. Drawn here, not with Base UI's Tooltip: its floating-ui positioning, about 24 kB
+ * gzipped, took the page over its budget for a note with two places to go.
  */
 export function Assumed({ id, on, children }: { id: string; on: boolean; children: ReactNode }) {
+  const wrapper = useRef<HTMLDivElement>(null);
+  const note = useRef<HTMLSpanElement>(null);
   const tip = useTip();
+  const side = useSide(tip.open, wrapper, note);
   return (
-    <div className="relative flex min-w-0 flex-col" {...tip.handlers}>
+    <div ref={wrapper} className="relative flex min-w-0 flex-col" {...tip.handlers}>
       {children}
       {on && (
         <span
+          ref={note}
           id={id}
           role="tooltip"
           data-open={tip.open || undefined}
-          className={tip.open ? 'absolute bottom-full left-0 z-10 pb-1' : 'sr-only'}
+          data-side={tip.open ? side : undefined}
+          className={tip.open ? NOTE_AT[side] : 'sr-only'}
         >
           <span className="block whitespace-nowrap rounded border border-border-strong bg-surface px-2 py-1 text-text text-xs">
             {ASSUMED}
@@ -147,12 +155,18 @@ export function Assumed({ id, on, children }: { id: string; on: boolean; childre
   );
 }
 
+const NOTE_AT: Record<NoteSide, string> = {
+  above: 'absolute right-0 bottom-full z-10 pb-1',
+  below: 'absolute top-full right-0 z-10 pt-1',
+};
+
 /** How long the pointer rests on a control before its note shows, so passing over the form draws nothing. */
 const REST_MS = 250;
 
 /**
- * Open while the pointer rests on the control or it has focus, until Escape; the next rest or focus opens it again.
- * The note sits inside the wrapper with no gap, so the pointer can move onto it and it stays.
+ * Open while the pointer rests on the control or it has focus, until Escape, which the document hears, so a note
+ * the pointer opened goes away with the focus elsewhere; the next rest or focus opens it again. The note sits inside
+ * the wrapper with no gap, so the pointer can move onto it and it stays.
  */
 function useTip() {
   const [hovered, setHovered] = useState(false);
@@ -161,6 +175,14 @@ function useTip() {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const open = (hovered || focused) && !dismissed;
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setDismissed(true);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
   const handlers = {
     onPointerEnter: () => {
       clearTimeout(timer.current);
@@ -178,11 +200,40 @@ function useTip() {
       setDismissed(false);
     },
     onBlur: () => setFocused(false),
-    onKeyDown: (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open) setDismissed(true);
-    },
   };
   return { open, handlers };
+}
+
+/** The side of the control the open note draws on, measured each time it opens. */
+function useSide(
+  open: boolean,
+  wrapper: RefObject<HTMLElement | null>,
+  note: RefObject<HTMLElement | null>,
+): NoteSide {
+  const [side, setSide] = useState<NoteSide>('above');
+  useLayoutEffect(() => {
+    if (!open || !wrapper.current || !note.current) return;
+    const box = wrapper.current.getBoundingClientRect();
+    setSide(noteSide(box, clipOf(wrapper.current), note.current.getBoundingClientRect().height));
+  }, [open, wrapper, note]);
+  return side;
+}
+
+/** The option of a select that also takes any name, which opens a box to type one in. */
+export const OTHER = '…';
+
+/**
+ * Whether other… is picked: its box stays open while the text in it passes through the listed names, and a scenario
+ * set from outside (the URL, the defaults) closes it.
+ */
+export function useOther(f: FieldContext): [boolean, (on: boolean) => void] {
+  const [other, setOther] = useState(false);
+  const [seen, setSeen] = useState(f.scenario);
+  if (seen !== f.scenario) {
+    setSeen(f.scenario);
+    if (f.from !== 'author') setOther(false);
+  }
+  return [other, setOther];
 }
 
 interface TextFieldProps {

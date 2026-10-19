@@ -1,8 +1,18 @@
-import { useState } from 'react';
+import { type KeyboardEvent, useState } from 'react';
 import { fieldAria } from '../aria';
 import type { EventOption } from '../derive';
 import { withEvent } from '../form';
-import { Assumed, control, Field, type GroupProps, marked, monoControl, useFieldIds } from './kit';
+import {
+  Assumed,
+  control,
+  Field,
+  type GroupProps,
+  marked,
+  monoControl,
+  OTHER,
+  useFieldIds,
+  useOther,
+} from './kit';
 
 /**
  * The event: the focused workflow's events, every other event a workflow listens to with its count, a dispatch,
@@ -12,14 +22,7 @@ import { Assumed, control, Field, type GroupProps, marked, monoControl, useField
 export function EventField({ f }: GroupProps) {
   const ids = useFieldIds();
   const { events } = f.model;
-  // Picking other… keeps the free-text field open while its text passes through the listed names; a scenario
-  // set from outside (the URL, the defaults) closes it.
-  const [other, setOther] = useState(false);
-  const [seen, setSeen] = useState(f.scenario);
-  if (seen !== f.scenario) {
-    setSeen(f.scenario);
-    if (f.from !== 'author') setOther(false);
-  }
+  const [other, setOther] = useOther(f);
   const listed = [...events.focused, ...events.others].some((c) => c.event === f.scenario.event);
   const free = other || !listed;
   const change = (event: string): void => {
@@ -34,10 +37,10 @@ export function EventField({ f }: GroupProps) {
       <Assumed id={ids.assumed} on={assumed}>
         <select
           className={control + marked(assumed)}
-          value={free ? '…' : f.scenario.event}
+          value={free ? OTHER : f.scenario.event}
           onChange={(e) => {
-            setOther(e.target.value === '…');
-            if (e.target.value !== '…') change(e.target.value);
+            setOther(e.target.value === OTHER);
+            if (e.target.value !== OTHER) change(e.target.value);
           }}
           {...fieldAria(ids, { hint, issue, assumed })}
         >
@@ -51,22 +54,53 @@ export function EventField({ f }: GroupProps) {
               <Options options={events.others} />
             </optgroup>
           )}
-          <option value="…">other…</option>
+          <option value={OTHER}>other…</option>
         </select>
       </Assumed>
-      {free && (
-        <input
-          className={monoControl}
-          value={f.scenario.event}
-          onChange={(e) => change(e.target.value)}
-          placeholder="issues, release, …"
-          aria-label="Event name"
-          aria-invalid={issue ? true : undefined}
-          aria-errormessage={issue ? ids.error : undefined}
-          spellCheck={false}
-        />
-      )}
+      {free && <EventName event={f.scenario.event} error={issue ? ids.error : undefined} onCommit={change} />}
     </Field>
+  );
+}
+
+/**
+ * The name of an event no option holds. The name is written when the author is done with it (Enter, or the focus
+ * leaving), not on each keystroke: every new event is a new history entry, and a name half typed is no event.
+ */
+function EventName({
+  event,
+  error,
+  onCommit,
+}: {
+  event: string;
+  error: string | undefined;
+  onCommit: (event: string) => void;
+}) {
+  const [draft, setDraft] = useState<string>();
+  const [shown, setShown] = useState(event);
+  if (shown !== event) {
+    setShown(event);
+    setDraft(undefined);
+  }
+  const commit = (): void => {
+    if (draft === undefined) return;
+    setDraft(undefined);
+    onCommit(draft);
+  };
+  return (
+    <input
+      className={monoControl}
+      value={draft ?? event}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e: KeyboardEvent) => {
+        if (e.key === 'Enter') commit();
+      }}
+      placeholder="issues, release, …"
+      aria-label="Event name"
+      aria-invalid={error ? true : undefined}
+      aria-errormessage={error}
+      spellCheck={false}
+    />
   );
 }
 
