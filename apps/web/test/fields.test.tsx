@@ -610,3 +610,156 @@ describe('the assumed note', () => {
     expect(noteSide({ top: 60, bottom: 86 }, { top: 46, bottom: 90 }, 30)).toBe('above');
   });
 });
+
+type User = ReturnType<typeof userEvent.setup>;
+
+interface PinCase {
+  name: string;
+  scenario: ScenarioInput;
+  pinned: ScenarioInput;
+  /** The top-level key the pin wrote, which the store's assumed list holds. */
+  key: string;
+  focus: { path: string; entry?: string };
+  control: () => HTMLElement;
+  edit: (user: User, el: HTMLElement) => Promise<void>;
+}
+
+const push: ScenarioInput = { event: 'push', branch: 'main' };
+const dispatch: ScenarioInput = { event: 'workflow_dispatch', branch: 'main' };
+const typeX = (user: User, el: HTMLElement) => user.type(el, 'x');
+
+/** A pin of each kind: what the scenario was, what the pin made it, and the field that shows it. */
+const PINS: PinCase[] = [
+  {
+    name: 'the changed files',
+    scenario: push,
+    pinned: { ...push, changed: ['src/a.ts'] },
+    key: 'changed',
+    focus: { path: 'changed' },
+    control: () => screen.getByLabelText(/Changed files/),
+    edit: typeX,
+  },
+  {
+    name: 'a variable',
+    scenario: push,
+    pinned: { ...push, vars: { DEPLOY: '' } },
+    key: 'vars',
+    focus: { path: 'vars', entry: 'DEPLOY' },
+    control: () => screen.getByLabelText('Variables'),
+    edit: typeX,
+  },
+  {
+    name: 'the commit SHA',
+    scenario: push,
+    pinned: { ...push, sha: '' },
+    key: 'sha',
+    focus: { path: 'sha' },
+    control: () => screen.getByLabelText('Commit SHA'),
+    edit: typeX,
+  },
+  {
+    name: "the actor's login",
+    scenario: push,
+    pinned: { ...push, actor: { login: '' } },
+    key: 'actor',
+    focus: { path: 'actor.login' },
+    control: () => screen.getByLabelText('Actor'),
+    edit: typeX,
+  },
+  {
+    name: 'the repository',
+    scenario: push,
+    pinned: { ...push, repository: 'owner/name' },
+    key: 'repository',
+    focus: { path: 'repository' },
+    control: () => screen.getByLabelText('Repository'),
+    edit: typeX,
+  },
+  {
+    name: 'a text input',
+    scenario: dispatch,
+    pinned: { ...dispatch, inputs: { target: '' } },
+    key: 'inputs.target',
+    focus: { path: 'inputs.target' },
+    control: () => screen.getByLabelText('target'),
+    edit: typeX,
+  },
+  {
+    name: 'a choice input',
+    scenario: dispatch,
+    pinned: { ...dispatch, inputs: { level: 'high' } },
+    key: 'inputs.level',
+    focus: { path: 'inputs.level' },
+    control: () => screen.getByLabelText('level'),
+    edit: async (user, el) => user.selectOptions(el, 'low'),
+  },
+  {
+    name: 'a boolean input',
+    scenario: dispatch,
+    pinned: { ...dispatch, inputs: { dry: true } },
+    key: 'inputs.dry',
+    focus: { path: 'inputs.dry' },
+    control: () => screen.getByRole('switch', { name: /dry/ }),
+    edit: async (user, el) => user.click(el),
+  },
+  {
+    name: "the triggering run's branch",
+    scenario: { event: 'workflow_run', workflow_run: { name: 'CI' } },
+    pinned: { event: 'workflow_run', workflow_run: { name: 'CI', branch: 'main' } },
+    key: 'workflow_run',
+    focus: { path: 'workflow_run.branch' },
+    control: () => screen.getByLabelText('Its branch'),
+    edit: typeX,
+  },
+  {
+    name: "a release's tag",
+    scenario: { event: 'release' },
+    pinned: { event: 'release', tag: '' },
+    key: 'tag',
+    focus: { path: 'tag' },
+    control: () => screen.getByLabelText('Tag'),
+    edit: typeX,
+  },
+];
+
+/** The dashed mark: an assumed control's border, or a switch's track. */
+const drawn = (el: HTMLElement): boolean =>
+  el.getAttribute('role') === 'switch'
+    ? el.nextElementSibling!.classList.contains('border-dashed')
+    : el.classList.contains('assumed');
+
+describe('the marks a pin draws', () => {
+  afterEach(cleanup);
+
+  it.each(PINS)('marks $name a pin writes until the author edits it', async (pin) => {
+    const { store, user } = mount(pin.scenario);
+    expect(screen.queryByText('chosen for you; change it')).toBeNull();
+    act(() => store.getState().pinScenario(pin.pinned, [pin.key], pin.focus));
+    expect(drawn(pin.control())).toBe(true);
+    expect(describedBy(pin.control())).toContain('chosen for you; change it');
+    await pin.edit(user, pin.control());
+    expect(store.getState().assumed).not.toContain(pin.key);
+    expect(drawn(pin.control())).toBe(false);
+    expect(describedBy(pin.control())).not.toContain('chosen for you');
+  });
+
+  it('marks the input a pin wrote, not those the author set nor those left to their defaults', () => {
+    const { store } = mount({ ...dispatch, inputs: { level: 'high' } });
+    act(() =>
+      store
+        .getState()
+        .pinScenario({ ...dispatch, inputs: { level: 'high', target: '' } }, ['inputs.target'], {
+          path: 'inputs.target',
+        }),
+    );
+    expect(drawn(screen.getByLabelText('target'))).toBe(true);
+    expect(drawn(screen.getByLabelText('level'))).toBe(false);
+    expect(drawn(screen.getByRole('switch', { name: /dry/ }))).toBe(false);
+  });
+
+  it("leaves the run's branch unmarked when the page chose the workflow alone", () => {
+    mount({ event: 'workflow_run', workflow_run: { name: 'CI' } }, ['workflow_run']);
+    expect(drawn(screen.getByLabelText(/Triggering workflow/))).toBe(true);
+    expect(drawn(screen.getByLabelText('Its branch'))).toBe(false);
+  });
+});

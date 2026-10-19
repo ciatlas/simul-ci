@@ -1,14 +1,17 @@
 import { Collapsible } from '@base-ui/react/collapsible';
 import { useState } from 'react';
 import { fieldAria } from '../aria';
+import { opensFor } from '../focus';
 import { actorWith, advancedSeen, advancedSet, jsonText, PULL_REF_EVENTS, stray, strayFork } from '../form';
 import { useKept } from '../keep';
 import { namesText, parseNames, parseVars, sameNames, sameVars, varsText } from '../lines';
 import {
+  Assumed,
   control,
   Field,
   Flag,
   type GroupProps,
+  marked,
   monoControl,
   TextField,
   useFieldIds,
@@ -18,8 +21,8 @@ import {
 /**
  * The facts most scenarios leave to their defaults: the actor, the ref as written, the commit, the repository, the
  * variables, secrets and environments that exist, and the platform. Collapsed unless one of them is set or refused;
- * a pin or a link that sets one opens it, and so does a refusal of one, even after the author closed it. Closed,
- * its header still says when a row inside is refused.
+ * a pin or a link that sets one opens it, and so do a refusal of one and a request to focus one, even after the
+ * author closed it. Closed, its header still says when a row inside is refused.
  */
 export function AdvancedFields({ f }: GroupProps) {
   const set = advancedSet(f.scenario);
@@ -33,6 +36,12 @@ export function AdvancedFields({ f }: GroupProps) {
   if (next.seen.set !== seen.set || next.seen.refusal !== seen.refusal) {
     setSeen(next.seen);
     if (next.opens) setOpen(true);
+  }
+  const [opened, setOpened] = useState<number>();
+  const asked = opensFor(f.requested, f.model.advanced, opened);
+  if (asked !== undefined) {
+    setOpened(asked);
+    setOpen(true);
   }
   return (
     <Collapsible.Root open={open} onOpenChange={setOpen} className="rounded border border-border">
@@ -72,6 +81,7 @@ export function AdvancedFields({ f }: GroupProps) {
           onChange={(sha) => f.patch({ sha: sha || undefined })}
           placeholder="1a2b3c4"
           hint="7 to 40 lowercase hex digits"
+          assumed={f.assumed('sha')}
         />
         <TextField
           f={f}
@@ -88,6 +98,7 @@ export function AdvancedFields({ f }: GroupProps) {
           value={f.scenario.repository ?? ''}
           onChange={(repository) => f.patch({ repository: repository || undefined })}
           placeholder="owner/name"
+          assumed={f.assumed('repository')}
         />
         <VarsField f={f} />
         <NamesField
@@ -124,6 +135,7 @@ function ActorFields({ f }: GroupProps) {
         value={login === undefined ? '' : jsonText(login)}
         onChange={(v) => f.patch({ actor: actorWith(actor, 'login', v) })}
         placeholder="octocat"
+        assumed={f.assumed('actor')}
       />
       <Flag
         f={f}
@@ -150,20 +162,24 @@ function VarsField({ f }: GroupProps) {
   const { vars } = f.scenario;
   const [text, setText] = useRawText<unknown>(vars, varsText, sameVars);
   const issue = f.issue('vars');
+  const assumed = f.assumed('vars');
   const hint = 'name=value, one per line; any other variable reads as empty';
   return (
     <Field ids={ids} label="Variables" hint={hint} issue={issue}>
-      <textarea
-        className={`${monoControl} min-h-14`}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          if (!sameVars(e.target.value, vars)) f.patch({ vars: parseVars(e.target.value) });
-        }}
-        placeholder="DEPLOY=true"
-        spellCheck={false}
-        {...fieldAria(ids, { hint, issue })}
-      />
+      <Assumed id={ids.assumed} on={assumed}>
+        <textarea
+          className={`${monoControl} min-h-14${marked(assumed)}`}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (!sameVars(e.target.value, vars)) f.patch({ vars: parseVars(e.target.value) });
+          }}
+          placeholder="DEPLOY=true"
+          spellCheck={false}
+          data-field="vars"
+          {...fieldAria(ids, { hint, issue, assumed })}
+        />
+      </Assumed>
     </Field>
   );
 }
@@ -190,6 +206,7 @@ function NamesField({
         }}
         placeholder={placeholder}
         spellCheck={false}
+        data-field={field}
         {...fieldAria(ids, { hint, issue })}
       />
     </Field>
@@ -209,6 +226,7 @@ function PlatformField({ f }: GroupProps) {
       <select
         className={control}
         value={platform ?? 'dotcom'}
+        data-field="platform"
         onChange={(e) =>
           f.patch({ platform: e.target.value === 'dotcom' ? undefined : (e.target.value as 'ghes') })
         }

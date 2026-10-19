@@ -379,7 +379,11 @@ describe('the session over the real client', () => {
     ]);
     workers[1]!.reply(planReply(workers[1]!.sent[1]!.id, 1));
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.getState().plan?.for).toEqual({ files: store.getState().files.version, project: 1 });
+    expect(store.getState().plan?.for).toEqual({
+      files: store.getState().files.version,
+      project: 1,
+      assume: store.getState().assume,
+    });
     expect(store.getState().engine.busy).toBe(false);
   });
 });

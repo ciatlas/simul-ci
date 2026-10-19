@@ -76,6 +76,19 @@ describe('the chunk rules', () => {
     ).toEqual(["engine.worker-abc.js was not built from core's browser entry"]);
   });
 
+  it("keep the yaml package in the worker, and let the YAML pane's CodeMirror grammar on the page", () => {
+    const pane = [
+      '../../src/yaml/YamlPane.tsx',
+      '../../../../node_modules/.pnpm/@lezer+yaml@1.0.3/node_modules/@lezer/yaml/dist/index.js',
+      '../../../../node_modules/.pnpm/@codemirror+lang-yaml@6.1.3/node_modules/@codemirror/lang-yaml/dist/index.js',
+    ];
+    expect(chunkProblems('YamlPane-abc.js', pane)).toEqual([]);
+    const yaml = '../../../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/index.js';
+    expect(chunkProblems('index-abc.js', [...PAGE, yaml])).toEqual([
+      `index-abc.js holds ${yaml}, which only the engine worker may`,
+    ]);
+  });
+
   it('keep elkjs in the layout worker, and the engine and what it depends on out of it', () => {
     expect(chunkProblems('index-abc.js', [...PAGE, ELKJS])).toEqual([
       `index-abc.js holds ${ELKJS}, which only the layout worker may`,

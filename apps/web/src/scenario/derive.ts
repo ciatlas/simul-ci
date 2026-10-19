@@ -97,6 +97,7 @@ export interface FormModel {
 /** What the form keeps in view while the author edits, though the scenario no longer asks for it (see keep.ts). */
 export interface Keep {
   ref?: boolean;
+  changed?: boolean;
 }
 
 export function deriveForm(
@@ -150,7 +151,7 @@ function groupsOf(
   if (keep.ref || showsRef(scenario)) out.push('ref');
   const own = ownGroup(event, dispatch);
   if (own) out.push(own);
-  if (readsChangedFiles(scenario)) out.push('changedFiles');
+  if (keep.changed || showsChanged(scenario)) out.push('changedFiles');
   if (SKIP_EVENTS.has(event)) out.push('message');
   out.push('advanced');
   return out;
@@ -173,6 +174,22 @@ export function showsRef(scenario: ScenarioInput): boolean {
   if (event === 'release' || PULL_REF_EVENTS.has(event)) return false;
   return pushRef(scenario).kind !== undefined;
 }
+
+/**
+ * The changed files show on the events whose `paths` the engine reads (a tag push skips them), and on any other
+ * while the scenario carries some: a model (a paths filter action) reads them on any event, so a pin's example there
+ * can be seen, changed and cleared.
+ */
+export function showsChanged(scenario: ScenarioInput): boolean {
+  return readsChangedFiles(scenario) || scenario.changed !== undefined;
+}
+
+/**
+ * What the changed files are kept in view for (keep.ts): the event, and whether the engine reads them on it, so a
+ * push that turns to a tag still lets them go while files the author clears stay under the caret.
+ */
+export const changedKeepKey = (scenario: ScenarioInput): string =>
+  `${scenario.event}.${readsChangedFiles(scenario)}`;
 
 type Route = readonly [path: string, field: string];
 

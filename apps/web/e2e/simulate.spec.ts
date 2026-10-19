@@ -126,7 +126,7 @@ async function expectMarksMatchNode(page: Page, scenario: ScenarioInput): Promis
   const expected = nodePlan(scenario);
   const shown = await canvasMarks(page);
   await viewButton(page, 'Text').click();
-  const text = await page.getByLabel('The plan').innerText();
+  const text = await page.getByLabel('The plan', { exact: true }).innerText();
   await viewButton(page, 'Graph').click();
   await expect(jobNode(page, 'deploy')).toBeVisible();
   expect(shown).toEqual(textMarks(expected));

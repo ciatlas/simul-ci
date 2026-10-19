@@ -37,6 +37,7 @@ export function ActivityTypeField({ f }: GroupProps) {
         <select
           className={control + marked(assumed)}
           value={free ? OTHER : (action ?? '')}
+          data-field={free ? undefined : 'action'}
           onChange={(e) => {
             setOther(e.target.value === OTHER);
             if (e.target.value !== OTHER) write(e.target.value);
@@ -59,6 +60,7 @@ export function ActivityTypeField({ f }: GroupProps) {
           onChange={(e) => write(e.target.value)}
           placeholder="any name"
           aria-label="Activity type name"
+          data-field="action"
           aria-invalid={issue ? true : undefined}
           aria-errormessage={issue ? ids.error : undefined}
           spellCheck={false}

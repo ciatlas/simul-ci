@@ -1,15 +1,30 @@
+/** The right panel's tabs. */
+export type PanelTab = 'reasons' | 'unknowns' | 'node' | 'problems';
+
+const PANEL_TABS: ReadonlySet<PanelTab> = new Set<PanelTab>(['reasons', 'unknowns', 'node', 'problems']);
+
 /** Layout preferences in localStorage: nothing that decides a result, nothing another viewer needs. */
 export interface Prefs {
   theme: 'system' | 'light' | 'dark';
-  /** Panes the author closed. */
-  collapsed: { left: boolean; yaml: boolean };
+  /** Panes the author closed: the scenario column, the right panel, the YAML pane. */
+  collapsed: { left: boolean; right: boolean; yaml: boolean };
+  /** The right panel's open tab. */
+  panel: PanelTab;
+  /** Whether the page's single-key shortcuts act (app/shortcuts.ts); the author can turn them off (WCAG 2.1.4). */
+  keys: boolean;
   /** `simulci.prefs` is versioned so a later shape can drop an older one. */
   v: 1;
 }
 
 export const PREFS_KEY = 'simulci.prefs';
 
-export const DEFAULT_PREFS: Prefs = { theme: 'system', collapsed: { left: false, yaml: true }, v: 1 };
+export const DEFAULT_PREFS: Prefs = {
+  theme: 'system',
+  collapsed: { left: false, right: false, yaml: true },
+  panel: 'reasons',
+  keys: true,
+  v: 1,
+};
 
 interface StorageLike {
   getItem(key: string): string | null;
@@ -37,16 +52,19 @@ export function readPrefs(store: StorageLike | undefined = storage()): Prefs {
       v: 1,
       theme: THEMES.has(parsed.theme as string) ? (parsed.theme as Prefs['theme']) : DEFAULT_PREFS.theme,
       collapsed: {
-        left:
-          typeof parsed.collapsed?.left === 'boolean' ? parsed.collapsed.left : DEFAULT_PREFS.collapsed.left,
-        yaml:
-          typeof parsed.collapsed?.yaml === 'boolean' ? parsed.collapsed.yaml : DEFAULT_PREFS.collapsed.yaml,
+        left: flag(parsed.collapsed?.left, DEFAULT_PREFS.collapsed.left),
+        right: flag(parsed.collapsed?.right, DEFAULT_PREFS.collapsed.right),
+        yaml: flag(parsed.collapsed?.yaml, DEFAULT_PREFS.collapsed.yaml),
       },
+      panel: PANEL_TABS.has(parsed.panel as PanelTab) ? (parsed.panel as PanelTab) : DEFAULT_PREFS.panel,
+      keys: flag(parsed.keys, DEFAULT_PREFS.keys),
     };
   } catch {
     return DEFAULT_PREFS;
   }
 }
+
+const flag = (value: unknown, fallback: boolean): boolean => (typeof value === 'boolean' ? value : fallback);
 
 /** Writes the preferences; a refusal (quota, private window) is not an error the author can act on. */
 export function writePrefs(prefs: Prefs, store: StorageLike | undefined = storage()): void {

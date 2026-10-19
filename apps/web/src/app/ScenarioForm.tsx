@@ -1,5 +1,12 @@
-import { type ReactNode, useMemo } from 'react';
-import { deriveForm, type GroupId, routeIssues, showsRef } from '../scenario/derive';
+import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from 'react';
+import {
+  changedKeepKey,
+  deriveForm,
+  type GroupId,
+  routeIssues,
+  showsChanged,
+  showsRef,
+} from '../scenario/derive';
 import { ActivityTypeField } from '../scenario/fields/ActivityType';
 import { AdvancedFields } from '../scenario/fields/Advanced';
 import { ChangedFilesField } from '../scenario/fields/ChangedFiles';
@@ -12,16 +19,24 @@ import { PullRequestFields } from '../scenario/fields/PullRequest';
 import { RefField } from '../scenario/fields/Ref';
 import { ReleaseFields } from '../scenario/fields/Release';
 import { WorkflowRunFields } from '../scenario/fields/WorkflowRun';
+import {
+  FOCUS_FRAMES,
+  requestedField,
+  resolveField,
+  retryFrames,
+  selectionFor,
+  textOf,
+} from '../scenario/focus';
 import { useKept } from '../scenario/keep';
-import type { Issue } from '../state/store';
+import type { FieldFocus, Issue } from '../state/store';
 import type { Outline } from '../worker/protocol';
-import { useSession } from './providers';
+import { useApp, useSession } from './providers';
 
 /**
  * The scenario, field by field: `deriveForm` says which groups the event shows and what the filters hint, and each
  * group writes one `ScenarioInputSchema` key per field through the store. The worker validates; its refusal shows
  * on the field it names, and what no field shows is summed up at the top. The page's error banner is what announces
- * a refusal, so neither copy here is a live region.
+ * a refusal, so neither copy here is a live region. A pin, or a reason's Set … button, asks for a field's focus.
  */
 
 const GROUPS: Record<GroupId, (props: GroupProps) => ReactNode> = {
@@ -40,8 +55,8 @@ const GROUPS: Record<GroupId, (props: GroupProps) => ReactNode> = {
 
 export function ScenarioForm() {
   const outline = useSession((s) => s.project.outline);
-  // The fields go with the project and come back with the next one, so what they keep in view (the Ref under the
-  // caret, Merged, the fork) is decided afresh for it, as on a first mount.
+  // The fields go with the project and come back with the next one, so what they keep in view (the Ref or the
+  // changed files under the caret, Merged, the fork) is decided afresh for it, as on a first mount.
   return outline ? <Fields outline={outline} /> : null;
 }
 
@@ -53,12 +68,16 @@ function Fields({ outline }: { outline: Outline }) {
   const issues = useSession((s) => (s.error?.kind === 'scenario' ? s.error.issues : undefined));
   const patch = useSession((s) => s.patchScenario);
   const setScenario = useSession((s) => s.setScenario);
+  const request = useSession((s) => s.fieldFocus);
   const keepRef = useKept(scenario.event, showsRef(scenario), from === 'author');
+  const keepChanged = useKept(changedKeepKey(scenario), showsChanged(scenario), from === 'author');
   const model = useMemo(
-    () => deriveForm(outline, scenario, focus, { ref: keepRef }),
-    [outline, scenario, focus, keepRef],
+    () => deriveForm(outline, scenario, focus, { ref: keepRef, changed: keepChanged }),
+    [outline, scenario, focus, keepRef, keepChanged],
   );
   const routed = useMemo(() => routeIssues(issues ?? [], model.fields), [issues, model]);
+  const form = useRef<HTMLFormElement>(null);
+  useFieldFocus(form, request, model.fields);
 
   const f: FieldContext = {
     scenario,
@@ -66,11 +85,17 @@ function Fields({ outline }: { outline: Outline }) {
     from,
     assumed: (key) => assumed.includes(key),
     issue: (field) => routed.byField.get(field),
+    requested: requestedField(request, model.fields),
     patch,
     setScenario: (next) => setScenario(next),
   };
   return (
-    <form className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()} aria-label="Scenario">
+    <form
+      ref={form}
+      className="flex flex-col gap-3"
+      onSubmit={(e) => e.preventDefault()}
+      aria-label="Scenario"
+    >
       {routed.summary.length > 0 && <Summary issues={routed.summary} />}
       {model.groups.map((id) => {
         const Group = GROUPS[id];
@@ -78,6 +103,49 @@ function Fields({ outline }: { outline: Outline }) {
       })}
     </form>
   );
+}
+
+/**
+ * Takes the store's focus request (`fieldFocus`): opens the scenario column when it is closed, then, once the field
+ * shows (Advanced opens for a request for one of its rows and mounts them after), focuses the control with the
+ * example selected so the author types over it. Each request is taken once, its field found or not, so the form never pulls the focus back.
+ */
+function useFieldFocus(
+  form: RefObject<HTMLFormElement | null>,
+  request: FieldFocus | undefined,
+  fields: Map<string, string>,
+): void {
+  const { store } = useApp();
+  const taken = useRef<number>(undefined);
+  useEffect(() => {
+    if (!request || request.seq === taken.current) return undefined;
+    const take = (): void => {
+      taken.current = request.seq;
+      store.getState().fieldFocused(request.seq);
+    };
+    const field = resolveField(request, fields);
+    if (field === undefined) {
+      take();
+      return undefined;
+    }
+    if (store.getState().ui.prefs.collapsed.left) store.getState().togglePane('left');
+    return retryFrames(() => placeFocus(form.current, field, request.entry), take, FOCUS_FRAMES);
+  }, [request, fields, store, form]);
+}
+
+/** Focuses the control that shows the field, its example selected; false while the field is not shown yet. */
+function placeFocus(form: HTMLFormElement | null, field: string, entry: string | undefined): boolean {
+  const controls = form ? Array.from(form.querySelectorAll<HTMLElement>('[data-field]')) : [];
+  const control = controls.find((el) => el.dataset.field === field);
+  if (!control || control.closest('[hidden]')) return false;
+  control.focus({ preventScroll: true });
+  if (control.ownerDocument.activeElement !== control) return false;
+  if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement) {
+    const range = selectionFor(field, entry, textOf(control));
+    if (range) control.setSelectionRange(...range);
+  }
+  control.scrollIntoView({ block: 'nearest' });
+  return true;
 }
 
 /** What the worker refused that no field shows: a key without a field, or the scenario as a whole. */

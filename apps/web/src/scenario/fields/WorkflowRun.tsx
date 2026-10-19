@@ -63,6 +63,7 @@ function NameField({ f, onChange }: GroupProps & { onChange: (name: string) => v
           className={control + marked(assumed)}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          data-field="workflow_run"
           {...fieldAria(ids, { hint, issue, assumed })}
         >
           <option value="">choose…</option>
@@ -86,16 +87,21 @@ function BranchField({
   const ids = useFieldIds();
   const hint = f.model.hints['workflow_run.branch'];
   const issue = f.issue('workflow_run.branch');
+  // The run the page chose marks its branch only when it names one: the defaults name the workflow alone.
+  const assumed = f.assumed('workflow_run') && f.scenario.workflow_run?.branch !== undefined;
   return (
     <Field ids={ids} label="Its branch" hint={hint?.text} issue={issue}>
-      <input
-        className={monoControl}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={f.scenario.defaultBranch ?? 'main'}
-        spellCheck={false}
-        {...fieldAria(ids, { hint: hint?.text, issue })}
-      />
+      <Assumed id={ids.assumed} on={assumed}>
+        <input
+          className={monoControl + marked(assumed)}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={f.scenario.defaultBranch ?? 'main'}
+          spellCheck={false}
+          data-field="workflow_run.branch"
+          {...fieldAria(ids, { hint: hint?.text, issue, assumed })}
+        />
+      </Assumed>
       <Chips chips={hint?.chips ?? []} label="Branches from the filters" current={value} onPick={onChange} />
     </Field>
   );
@@ -114,6 +120,7 @@ function ConclusionField({
         className={control}
         value={value}
         onChange={(e) => onChange(e.target.value as Conclusion)}
+        data-field="workflow_run.conclusion"
         {...fieldAria(ids, { issue })}
       >
         {CONCLUSIONS.map((c) => (

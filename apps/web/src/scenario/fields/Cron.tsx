@@ -17,6 +17,7 @@ export function CronField({ f }: GroupProps) {
         <select
           className={monoControl + marked(assumed)}
           value={cron ?? ''}
+          data-field="cron"
           onChange={(e) => f.patch({ cron: e.target.value || undefined })}
           {...fieldAria(ids, { hint, issue, assumed })}
         >

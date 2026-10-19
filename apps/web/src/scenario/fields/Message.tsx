@@ -19,6 +19,7 @@ export function MessageField({ f }: GroupProps) {
         onChange={(e) => f.patch({ message: e.target.value || undefined })}
         placeholder="fix: the thing"
         spellCheck={false}
+        data-field="message"
         {...fieldAria(ids, { hint, issue })}
       />
       <Switch

@@ -38,6 +38,7 @@ export function EventField({ f }: GroupProps) {
         <select
           className={control + marked(assumed)}
           value={free ? OTHER : f.scenario.event}
+          data-field="event"
           onChange={(e) => {
             setOther(e.target.value === OTHER);
             if (e.target.value !== OTHER) change(e.target.value);

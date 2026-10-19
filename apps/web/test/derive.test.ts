@@ -9,7 +9,7 @@ import {
 } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 import { fieldAria, fieldIds } from '../src/scenario/aria';
-import { deriveForm, type HintKey, routeIssues } from '../src/scenario/derive';
+import { changedKeepKey, deriveForm, type HintKey, routeIssues } from '../src/scenario/derive';
 import { handle, initialState } from '../src/worker/handle';
 import type { Outline } from '../src/worker/protocol';
 
@@ -155,6 +155,19 @@ describe('the derived form', () => {
       'advanced',
     ]);
     expect(groups({ event: 'issues', ref: 'refs/pull/7/merge' })).toEqual(['event', 'advanced']);
+  });
+
+  it('shows changed files a scenario carries on any event, where a model reads them, so a pin there can be seen', () => {
+    const dispatch = form({ event: 'workflow_dispatch', branch: 'main', changed: ['path/to/file'] });
+    expect(dispatch.groups).toEqual(['event', 'ref', 'dispatch', 'changedFiles', 'advanced']);
+    expect(dispatch.fields.get('changed')).toBe('changed');
+    expect(form({ event: 'push', tag: 'v1', changed: ['a.ts'] }).groups).toContain('changedFiles');
+    expect(form({ event: 'workflow_dispatch', branch: 'main' }).groups).not.toContain('changedFiles');
+    const kept = deriveForm(outline, { event: 'workflow_dispatch', branch: 'main' }, CI, { changed: true });
+    expect(kept.groups).toContain('changedFiles');
+    expect(changedKeepKey({ event: 'push', branch: 'main' })).not.toBe(
+      changedKeepKey({ event: 'push', tag: 'v1' }),
+    );
   });
 
   it('keeps the ref field the author is emptying, and the routes to it', () => {

@@ -36,6 +36,21 @@ const TEXT = [
   ['text', 'danger-soft'],
 ] as const;
 
+/**
+ * Text the right panel and the top bar draw on the surface: a gate's ✓ ✗ ?, a problem's severity glyph, its code and
+ * link, the scenario's `· stale`. Amber text takes `might-text`; `might` stays for marks and outlines.
+ */
+const PANEL_TEXT = [
+  ['text', 'surface'],
+  ['muted', 'surface'],
+  ['run', 'surface'],
+  ['danger', 'surface'],
+  ['might-text', 'surface'],
+  ['might-text', 'bg'],
+  ['might-text', 'chrome'],
+  ['might-text', 'might-soft'],
+] as const;
+
 /** The outlines that identify a control or its state, held to 3:1 against what is next to them. */
 const OUTLINES = [
   // The switch off: its outline on the chrome, its knob on the surface track.
@@ -54,13 +69,18 @@ describe('the contrast of the form', () => {
       expect(contrast(tokens[fg]!, tokens[bg]!), `${fg} on ${bg}`).toBeGreaterThan(4.5);
   });
 
+  it.each(Object.entries(themes))('keeps the panels’ text at 4.5:1 in the %s theme', (_, tokens) => {
+    for (const [fg, bg] of PANEL_TEXT)
+      expect(contrast(tokens[fg]!, tokens[bg]!), `${fg} on ${bg}`).toBeGreaterThan(4.5);
+  });
+
   it.each(Object.entries(themes))('keeps control outlines at 3:1 in the %s theme', (_, tokens) => {
     for (const [fg, bg] of OUTLINES)
       expect(contrast(tokens[fg]!, tokens[bg]!), `${fg} on ${bg}`).toBeGreaterThan(3);
   });
 
   it('reads every token both themes define', () => {
-    expect(Object.keys(light)).toHaveLength(19);
+    expect(Object.keys(light)).toHaveLength(20);
     expect(Object.keys(themes.dark)).toEqual(Object.keys(light));
     expect(themes.dark.chrome).not.toBe(light.chrome);
     expect(contrast(light['might']!, light['chrome']!)).toBeLessThan(4.5);
