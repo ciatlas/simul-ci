@@ -11,6 +11,17 @@ export const PR_EVENTS = new Set([
   'merge_group',
 ]);
 
+/**
+ * The events whose `github.ref` the engine takes from the pull request (its merge ref, or its base), never from a
+ * ref the scenario gives.
+ */
+export const PULL_REF_EVENTS = new Set([
+  'pull_request',
+  'pull_request_target',
+  'pull_request_review',
+  'pull_request_review_comment',
+]);
+
 /** The events whose `paths` filters the engine applies (never to a tag push). */
 const PATH_FILTER_EVENTS = new Set(['push', 'pull_request', 'pull_request_target']);
 
@@ -21,7 +32,7 @@ export const readsChangedFiles = (scenario: ScenarioInput): boolean =>
 /**
  * What survives an event change: the ref and the repository facts; what the event owns is dropped. A pull
  * request runs on a ref of its own, so a tag does not follow into one; a release runs on its tag, so a branch
- * does not follow into one.
+ * does not follow into one. A fork is a pull request's head, so the actor's `fork` stays with pull requests.
  */
 const KEPT_ON_EVENT_CHANGE: (keyof ScenarioInput)[] = [
   'ref',
@@ -51,6 +62,9 @@ export function withEvent(scenario: ScenarioInput, event: string): ScenarioInput
     delete next[unused];
     delete next.ref;
   }
+  const actor = PR_EVENTS.has(event) ? scenario.actor : actorWith(scenario.actor, 'fork', undefined);
+  if (actor === undefined) delete next.actor;
+  else next.actor = actor;
   return next as ScenarioInput;
 }
 
@@ -62,7 +76,8 @@ export type RefKind = 'branch' | 'tag';
 
 /**
  * The branch or tag a scenario's ref names, read the way the engine reads `tag`, `branch` and `ref` (a bare
- * name is a branch); no kind when the scenario gives none.
+ * name is a branch); no kind when the scenario gives none, or gives a `ref` that is neither (`refs/pull/7/merge`),
+ * which only the Ref row under Advanced shows as it is.
  */
 export function pushRef(scenario: ScenarioInput): { kind?: RefKind; name: string } {
   if (scenario.tag !== undefined) return { kind: 'tag', name: scenario.tag };
@@ -70,8 +85,12 @@ export function pushRef(scenario: ScenarioInput): { kind?: RefKind; name: string
   if (scenario.ref === undefined) return { name: '' };
   const ref = scenario.ref.replace(/^refs\//, '');
   if (ref.startsWith('tags/')) return { kind: 'tag', name: ref.slice('tags/'.length) };
-  return { kind: 'branch', name: ref.replace(/^heads\//, '') };
+  if (ref.startsWith('heads/')) return { kind: 'branch', name: ref.slice('heads/'.length) };
+  return isRawRef(scenario.ref) ? { name: '' } : { kind: 'branch', name: ref };
 }
+
+/** A ref the engine keeps as it is, not as a branch: anything under `refs/` but heads and tags, or `pull/…`. */
+const isRawRef = (ref: string): boolean => ref.startsWith('refs/') || ref.startsWith('pull/');
 
 /** The tag a release runs on, given as `tag` or as a `ref` that names one; empty when it gives none. */
 export function releaseTag(scenario: ScenarioInput): string {
@@ -90,33 +109,72 @@ export function refPatch(kind: RefKind, name: string): Partial<ScenarioInput> {
 }
 
 export interface ActivityTypes {
-  /** What the listening workflows allow (or every type, when none narrows). */
+  /** The types some listening workflow runs on: its `types:`, or the event's default types where it names none. */
   allowed: string[];
-  /** The rest of the event's types, selectable as a what-if. */
+  /** The rest of the event's types, selectable as a what-if: no listening workflow runs on them. */
   rest: string[];
   /** Some listener narrows `types:`, so the engine needs one. */
   required: boolean;
+  /** The types are the workflows' own names (`repository_dispatch`), not a table's: any name is one. */
+  custom?: true;
 }
 
-/** The activity types of an event: what listening workflows allow first, the rest selectable as a what-if. */
-export function activityTypes(outline: Outline, event: string): ActivityTypes | undefined {
-  if (!Object.hasOwn(outline.events, event)) return undefined;
-  const table = outline.events[event]!;
-  const allowed = new Set<string>();
-  let required = false;
+/** What the listeners of an event say about its types. */
+export interface NamedTypes {
+  /** The types the narrowing listeners name, in declaration order. */
+  named: string[];
+  /** Some listener narrows `types:`. */
+  narrowed: boolean;
+  /** Some listener names none, so it runs on the event's default types (on any type, for custom ones). */
+  open: boolean;
+}
+
+export function namedTypes(outline: Outline, event: string): NamedTypes {
+  const named = new Set<string>();
+  let narrowed = false;
+  let open = false;
   for (const e of eventsOf(outline, event)) {
-    if (!e.types?.narrowed) continue;
-    required = true;
-    for (const t of e.types.allowed) allowed.add(t);
+    if (!e.types?.narrowed) {
+      open = true;
+      continue;
+    }
+    narrowed = true;
+    for (const t of e.types.allowed) named.add(t);
   }
-  if (!required) return { allowed: table.types, rest: [], required };
-  return { allowed: Array.from(allowed), rest: table.types.filter((t) => !allowed.has(t)), required };
+  return { named: Array.from(named), narrowed, open };
+}
+
+/**
+ * The activity types of an event, as the engine reads them: the types a listening workflow runs on first (its
+ * `types:`, or the defaults where it names none), the rest of the table's types after them as a what-if. An event
+ * with custom types offers what the listeners name, and nothing when none narrows, since then any type runs.
+ */
+export function activityTypes(outline: Outline, event: string): ActivityTypes | undefined {
+  const table = Object.hasOwn(outline.events, event) ? outline.events[event] : undefined;
+  const { named, narrowed, open } = namedTypes(outline, event);
+  if (!table) return narrowed ? { allowed: named, rest: [], required: true, custom: true } : undefined;
+  const allowed = new Set(named);
+  // No listener at all reads like one that names no types.
+  if (open || !narrowed) for (const t of table.default) allowed.add(t);
+  return {
+    allowed: Array.from(allowed),
+    rest: table.types.filter((t) => !allowed.has(t)),
+    required: narrowed,
+  };
 }
 
 /** The scenario's action when it is none of the types offered, so the form can show it as it is. */
 export function strayAction(types: ActivityTypes, action: string | undefined): string | undefined {
   if (action === undefined || types.allowed.includes(action) || types.rest.includes(action)) return undefined;
   return action;
+}
+
+/** What the select says beside a type no listener runs on, and beside an action that is none of the types. */
+export function activityNotes(types: ActivityTypes, event: string): { rest: string; stray: string } {
+  return {
+    rest: types.required ? 'not in types:' : 'not a default type',
+    stray: types.custom ? 'not in types:' : `not a type of ${event}`,
+  };
 }
 
 function* eventsOf(
@@ -140,6 +198,18 @@ export const inputValue = (
   name: string,
 ): string | boolean | number | undefined =>
   inputs !== undefined && Object.hasOwn(inputs, name) ? inputs[name] : undefined;
+
+/** The inputs with one set or cleared; own keys only, so an input named `__proto__` stays an input. */
+export function withInput(
+  inputs: ScenarioInput['inputs'],
+  name: string,
+  value: string | boolean | number | undefined,
+): ScenarioInput['inputs'] {
+  const next = new Map(Object.entries(inputs ?? {}));
+  if (value === undefined) next.delete(name);
+  else next.set(name, value);
+  return next.size ? Object.fromEntries(next) : undefined;
+}
 
 /** A boolean input's value as the engine coerces it: `true` and the string `'true'`, nothing else. */
 export const asBoolean = (value: unknown): boolean => value === true || value === 'true';
@@ -228,3 +298,131 @@ export const sameChanged = (text: string, changed: unknown): boolean =>
 
 export const jsonText = (value: unknown): string =>
   typeof value === 'string' ? value : JSON.stringify(value);
+
+/** A choice input's value as the engine reads it, a boolean or a number as its text; empty when it gives none. */
+export const choiceValue = (value: unknown): string => (value === undefined ? '' : jsonText(value));
+
+/** The scenario's value when it is none of the options offered, so a select can show it as it is. */
+export function stray(options: readonly string[], value: unknown): string | undefined {
+  if (typeof value !== 'string' || value === '' || options.includes(value)) return undefined;
+  return value;
+}
+
+/** The Merged select's value: the scenario's `merged` as text, empty while it is unknown. */
+export const mergedValue = (merged: unknown): string => (typeof merged === 'boolean' ? String(merged) : '');
+
+/** What the Merged select writes: unknown sends no `merged`, which the engine reads as unknown, not as false. */
+export const mergedPatch = (value: string): boolean | undefined =>
+  value === '' ? undefined : value === 'true';
+
+type Actor = NonNullable<ScenarioInput['actor']>;
+
+/**
+ * The actor with one fact changed and the rest kept; a default (`false`, an empty login) drops its key, and an
+ * actor left with no key goes too.
+ */
+export function actorWith(
+  actor: ScenarioInput['actor'],
+  key: keyof Actor,
+  value: string | boolean | undefined,
+): ScenarioInput['actor'] {
+  const next: Record<string, unknown> = { ...actor };
+  if (value === undefined || value === false || value === '') delete next[key];
+  else next[key] = value;
+  return Object.keys(next).length ? next : undefined;
+}
+
+/** The keys under Advanced besides the actor's. */
+const ADVANCED_KEYS = [
+  'ref',
+  'sha',
+  'defaultBranch',
+  'repository',
+  'vars',
+  'secrets',
+  'environments',
+  'platform',
+] as const;
+
+/**
+ * Whether the scenario sets a key the Advanced rows show: an empty record or list sets nothing. The fork is a row
+ * there only for an event that is no pull request, which shows it with its own fields.
+ */
+export function advancedSet(scenario: ScenarioInput): boolean {
+  const { actor } = scenario;
+  if (actor?.login !== undefined || actor?.bot !== undefined) return true;
+  if (strayFork(scenario)) return true;
+  return ADVANCED_KEYS.some((key) => isSet(scenario[key]));
+}
+
+/** A fork on an event that is no pull request: a link can set one, and the engine still reads it. */
+export const strayFork = (scenario: ScenarioInput): boolean =>
+  scenario.actor?.fork !== undefined && !PR_EVENTS.has(scenario.event);
+
+/** What Advanced has seen: whether a key is set, and the last refusal of one of its rows. */
+export interface AdvancedSeen {
+  set: boolean;
+  refusal: string;
+}
+
+/**
+ * What Advanced has seen after a render, and whether the render opens it: a key newly set (a pin, a link), or a
+ * refusal it has not shown yet. A refusal the author already saw does not reopen what they closed; it comes back
+ * after every edit, since an edit clears the refusal until the worker answers.
+ */
+export function advancedSeen(
+  prev: AdvancedSeen,
+  set: boolean,
+  refusal: string,
+): { seen: AdvancedSeen; opens: boolean } {
+  const fresh = refusal !== '' && refusal !== prev.refusal;
+  return { seen: { set, refusal: refusal || prev.refusal }, opens: (set && !prev.set) || fresh };
+}
+
+function isSet(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== 'object' || value === null) return true;
+  return Object.keys(value).length > 0;
+}
+
+/** The triggering run with its branch set, or without one when the branch is emptied. */
+export function withRunBranch(run: WorkflowRun, branch: string): WorkflowRun {
+  const next = { ...run };
+  if (branch === '') delete next.branch;
+  else next.branch = branch;
+  return next;
+}
+
+/** The commit-message markers that skip `push` and `pull_request` runs; a test holds this list to the engine's. */
+export const SKIP_MARKERS = [
+  '[skip ci]',
+  '[ci skip]',
+  '[no ci]',
+  '[skip actions]',
+  '[actions skip]',
+] as const;
+const SKIP_TRAILER = /^skip-checks: ?true$/m;
+const SKIP_TRAILER_LINE = /^skip-checks: ?true$\n?/gm;
+
+/** Whether the engine reads a skip in the message: a marker anywhere, or the `skip-checks` trailer line. */
+export const skipsCi = (message: string | undefined): boolean =>
+  message !== undefined && (SKIP_MARKERS.some((m) => message.includes(m)) || SKIP_TRAILER.test(message));
+
+/**
+ * The message with a skip or without one: on, `[skip ci]` ends the subject line; off, every marker and the trailer
+ * go. A message left empty goes too.
+ */
+export function withSkipCi(message: string | undefined, on: boolean): string | undefined {
+  if (on) return skipsCi(message) ? message : withMarker(message ?? '');
+  if (message === undefined || !skipsCi(message)) return message;
+  let out = message;
+  for (const m of SKIP_MARKERS) out = out.split(` ${m}`).join('').split(m).join('');
+  out = out.replace(SKIP_TRAILER_LINE, '').trimEnd();
+  return out === '' ? undefined : out;
+}
+
+function withMarker(message: string): string {
+  const [subject = '', ...body] = message.split('\n');
+  const head = subject.trimEnd();
+  return [head ? `${head} [skip ci]` : '[skip ci]', ...body].join('\n');
+}

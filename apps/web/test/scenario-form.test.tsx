@@ -203,7 +203,7 @@ describe('the scenario form', () => {
 
   it('sends false for a boolean input whose quoted default is true', async () => {
     const { store, user } = mount({ event: 'workflow_dispatch' });
-    const dry = screen.getByRole<HTMLInputElement>('checkbox', { name: /dry/ });
+    const dry = screen.getByRole<HTMLInputElement>('switch', { name: /dry/ });
     expect(dry.checked).toBe(true);
     await user.click(dry);
     expect(store.getState().scenario.inputs).toEqual({ dry: false });
