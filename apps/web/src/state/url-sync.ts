@@ -113,7 +113,7 @@ type Session = SessionState & SessionActions;
 function applyUrl(store: SessionStore, url: UrlState): void {
   const s = store.getState();
   const focus = applyScenario(s, url);
-  if (s.focus !== focus) s.setFocus(focus);
+  if (s.focus !== focus || s.sel !== url.sel) s.select(focus, url.sel);
   // Entries too long for the URL were never written to it, so a URL without `a` leaves them in the store.
   const assume = url.assume ?? (JSON.stringify(s.assume).length > ASSUME_URL_LIMIT ? s.assume : []);
   if (JSON.stringify(assume) !== JSON.stringify(s.assume)) s.setAssume(assume);
