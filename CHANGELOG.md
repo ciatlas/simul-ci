@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/ciatlas/simulci/compare/v0.1.0...v0.2.0) (2026-10-19)
+
+
+### Features
+
+* **engine:** assume pins and producers for step and job unknowns ([#31](https://github.com/ciatlas/simulci/issues/31)) ([d737c57](https://github.com/ciatlas/simulci/commit/d737c5762080c44ad18d485cf522692f0dc97da8))
+* **web:** reasons, unknowns, pins and the YAML pane ([#30](https://github.com/ciatlas/simulci/issues/30)) ([3eb4434](https://github.com/ciatlas/simulci/commit/3eb44340065bdbf48cd19c2fdf88e805f027ae76))
+* **web:** sources, state and the plan as text ([#23](https://github.com/ciatlas/simulci/issues/23)) ([fdfe7e7](https://github.com/ciatlas/simulci/commit/fdfe7e7716fda183b7ac3141f848d91ead4fe3b7))
+* **web:** the app skeleton, the engine in a Web Worker ([#19](https://github.com/ciatlas/simulci/issues/19)) ([b65cfed](https://github.com/ciatlas/simulci/commit/b65cfedb54f6ce364d83f11766617967b10166fc))
+* **web:** the engine protocol and client ([#22](https://github.com/ciatlas/simulci/issues/22)) ([8af810d](https://github.com/ciatlas/simulci/commit/8af810d538e54b547ef6661bdbb55fcf59bf2344))
+* **web:** the run graph ([#27](https://github.com/ciatlas/simulci/issues/27)) ([42f7175](https://github.com/ciatlas/simulci/commit/42f7175c6dfa56c1611fde84cf53ae50364f6985))
+* **web:** the scenario form with hints ([#26](https://github.com/ciatlas/simulci/issues/26)) ([367c53a](https://github.com/ciatlas/simulci/commit/367c53ab43f693d499d000fed773d8109119d979))
+
+
+### Performance
+
+* **web:** lay out independent graph scopes together ([#28](https://github.com/ciatlas/simulci/issues/28)) ([f767464](https://github.com/ciatlas/simulci/commit/f767464548d332196a516f71c1e94de5c03a5c3b))
+* **web:** warm ELK before the first layout ([#29](https://github.com/ciatlas/simulci/issues/29)) ([8d68909](https://github.com/ciatlas/simulci/commit/8d689099ea2c30afaa027ce59130ce71b796a005))
+
 ## 0.1.0 (2026-10-18)
 
 
