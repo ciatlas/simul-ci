@@ -59,6 +59,60 @@ export const ELK_OPTIONS: Record<string, string> = {
   'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
 };
 
+const WARM_CARD: Size = { width: 200, height: 58 };
+const card = (id: NodeId): LayoutNode => ({ id, ...WARM_CARD });
+
+const warmUp = (scope: LayoutScope, known: Record<NodeId, Size> = {}): LayoutRequest => ({
+  id: 0,
+  type: 'layout',
+  scopes: [scope],
+  known,
+});
+
+/**
+ * Requests the worker lays out before any from the page and throws away (layout.worker.ts says why): a chain, a
+ * fan-out and a card around a callee the page has the size of, the shapes a workflow is made of. One scope each, so
+ * a request from the page that comes during the warm-up waits for one small layout at most.
+ */
+export const WARM_UP: readonly LayoutRequest[] = [
+  warmUp({
+    id: 'chain',
+    nodes: ['a', 'b', 'c'].map(card),
+    edges: [
+      { id: 'a-b', source: 'a', target: 'b' },
+      { id: 'b-c', source: 'b', target: 'c' },
+    ],
+  }),
+  warmUp({
+    id: 'fan',
+    nodes: ['a', 'b', 'c', 'd', 'e'].map(card),
+    edges: [
+      { id: 'a-b', source: 'a', target: 'b' },
+      { id: 'a-c', source: 'a', target: 'c' },
+      { id: 'a-d', source: 'a', target: 'd' },
+      { id: 'b-e', source: 'b', target: 'e' },
+      { id: 'c-e', source: 'c', target: 'e' },
+      { id: 'd-e', source: 'd', target: 'e' },
+    ],
+  }),
+  warmUp(
+    {
+      id: 'call',
+      nodes: [
+        card('a'),
+        { id: 'b', callee: 'chain', extra: { width: 24, height: 70 }, min: WARM_CARD },
+        card('c'),
+      ],
+      edges: [
+        { id: 'a-b', source: 'a', target: 'b' },
+        { id: 'b-c', source: 'b', target: 'c' },
+      ],
+    },
+    // The chain's size: three cards, two gaps between layers, the scope padding.
+    { chain: { width: 728, height: 114 } },
+  ),
+];
+
 /**
  * Lays the scopes out a nesting level at a time: every scope whose callees have sizes together, then the scopes that
  * call them. ELK's bundled build answers each call after two zero-delay timers, and Chromium holds a timer nested more
