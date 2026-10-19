@@ -65,6 +65,7 @@ function BaseField({ f }: GroupProps) {
           onChange={(e) => f.patch({ base: e.target.value || undefined })}
           placeholder={f.scenario.defaultBranch ?? 'main'}
           spellCheck={false}
+          data-field="base"
           {...fieldAria(ids, { hint: hint?.text, issue, assumed })}
         />
       </Assumed>
@@ -90,6 +91,7 @@ function NumberField({ f }: GroupProps) {
         value={f.scenario.number ?? ''}
         onChange={(e) => f.patch({ number: e.target.value === '' ? undefined : Number(e.target.value) })}
         placeholder="1"
+        data-field="number"
         {...fieldAria(ids, { issue })}
       />
     </Field>
@@ -108,6 +110,7 @@ function MergedField({ f }: GroupProps) {
       <select
         className={control}
         value={mergedValue(f.scenario.merged)}
+        data-field="merged"
         onChange={(e) => f.patch({ merged: mergedPatch(e.target.value) })}
         {...fieldAria(ids, { issue })}
       >

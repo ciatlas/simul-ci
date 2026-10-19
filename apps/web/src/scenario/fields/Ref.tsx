@@ -56,6 +56,7 @@ export function RefField({ f }: GroupProps) {
           placeholder={kind === 'tag' ? 'v1.2.3' : (f.scenario.defaultBranch ?? 'main')}
           aria-label={name}
           spellCheck={false}
+          data-field="ref"
           {...fieldAria(ids, { hint: hint?.text, issue, assumed })}
         />
       </Assumed>

@@ -16,9 +16,6 @@ import { Unknowns } from './Unknowns';
 
 const TAB = 'rounded-t px-2.5 py-1.5 text-muted text-xs hover:text-text data-[selected]:text-text';
 
-/** The id of a tab's panel, so a key can move the focus into it. */
-export const panelId = (tab: PanelTab): string => `sc-panel-${tab}`;
-
 export function Panels() {
   const panel = useSession((s) => s.ui.prefs.panel);
   const setPanel = useSession((s) => s.setPanel);
@@ -49,16 +46,16 @@ export function Panels() {
           <Count n={problems} />
         </Tabs.Tab>
       </Tabs.List>
-      <Tabs.Panel value="reasons" id={panelId('reasons')} className={PANEL} tabIndex={-1}>
+      <Tabs.Panel value="reasons" data-panel="reasons" className={PANEL} tabIndex={-1}>
         <Reasons />
       </Tabs.Panel>
-      <Tabs.Panel value="unknowns" id={panelId('unknowns')} className={PANEL} tabIndex={-1}>
+      <Tabs.Panel value="unknowns" data-panel="unknowns" className={PANEL} tabIndex={-1}>
         <Unknowns />
       </Tabs.Panel>
-      <Tabs.Panel value="node" id={panelId('node')} className={PANEL} tabIndex={-1}>
+      <Tabs.Panel value="node" data-panel="node" className={PANEL} tabIndex={-1}>
         <NodeDetails />
       </Tabs.Panel>
-      <Tabs.Panel value="problems" id={panelId('problems')} className={PANEL} tabIndex={-1}>
+      <Tabs.Panel value="problems" data-panel="problems" className={PANEL} tabIndex={-1}>
         <Problems />
       </Tabs.Panel>
     </Tabs.Root>

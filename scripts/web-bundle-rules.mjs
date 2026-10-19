@@ -4,12 +4,15 @@
  * tests apply them to small inputs and to what the web app's Vite config builds.
  */
 
-/** What only the engine worker may hold: the engine's dependencies. */
+/**
+ * What only the engine worker may hold: the engine's dependencies. The `yaml` package is matched as a package, so the
+ * YAML pane's CodeMirror grammar (`@lezer/yaml`, `@codemirror/lang-yaml`) stays allowed on the page.
+ */
 const ENGINE_WORKER_ONLY = [
   /@ciatlas\/core\//,
   /\/@actions\//,
   /\/zod\//,
-  /\/yaml\//,
+  /node_modules\/yaml\//,
   /picomatch/,
   /cronstrue/,
 ];

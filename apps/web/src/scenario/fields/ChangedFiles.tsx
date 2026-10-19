@@ -46,6 +46,7 @@ export function ChangedFilesField({ f }: GroupProps) {
         onChange={(e) => write(e.target.value)}
         placeholder={'src/index.ts\ndocs/readme.md (added)'}
         spellCheck={false}
+        data-field="changed"
         {...fieldAria(ids, { hint: hint?.text, issue })}
       />
       <Chips

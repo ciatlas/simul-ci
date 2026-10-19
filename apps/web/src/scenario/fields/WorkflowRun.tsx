@@ -63,6 +63,7 @@ function NameField({ f, onChange }: GroupProps & { onChange: (name: string) => v
           className={control + marked(assumed)}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          data-field="workflow_run"
           {...fieldAria(ids, { hint, issue, assumed })}
         >
           <option value="">choose…</option>
@@ -94,6 +95,7 @@ function BranchField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={f.scenario.defaultBranch ?? 'main'}
         spellCheck={false}
+        data-field="workflow_run.branch"
         {...fieldAria(ids, { hint: hint?.text, issue })}
       />
       <Chips chips={hint?.chips ?? []} label="Branches from the filters" current={value} onPick={onChange} />
@@ -114,6 +116,7 @@ function ConclusionField({
         className={control}
         value={value}
         onChange={(e) => onChange(e.target.value as Conclusion)}
+        data-field="workflow_run.conclusion"
         {...fieldAria(ids, { issue })}
       >
         {CONCLUSIONS.map((c) => (

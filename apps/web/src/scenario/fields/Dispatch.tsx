@@ -88,7 +88,7 @@ function BooleanInput({ input, value, onChange, issue }: InputProps) {
         }
         checked={value === undefined ? fallback : asBoolean(value)}
         onChange={(on) => onChange(on === fallback ? undefined : on)}
-        aria={{ ...fieldAria(ids, { hint, issue }) }}
+        aria={{ ...fieldAria(ids, { hint, issue }), 'data-field': `inputs.${input.name}` }}
       />
     </Field>
   );
@@ -108,6 +108,7 @@ function ChoiceInput({ input, value, onChange, issue }: InputProps) {
         value={shown}
         onChange={(e) => onChange(e.target.value || undefined)}
         aria-required={required(input) || undefined}
+        data-field={`inputs.${input.name}`}
         {...fieldAria(ids, { hint, issue })}
       >
         <option value="">
@@ -142,6 +143,7 @@ function TextInput({ f, input, value, onChange, issue }: InputProps) {
         }
         list={environments.length ? `${ids.id}-environments` : undefined}
         aria-required={required(input) || undefined}
+        data-field={`inputs.${input.name}`}
         spellCheck={false}
         {...fieldAria(ids, { hint, issue })}
       />

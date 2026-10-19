@@ -162,6 +162,7 @@ function VarsField({ f }: GroupProps) {
         }}
         placeholder="DEPLOY=true"
         spellCheck={false}
+        data-field="vars"
         {...fieldAria(ids, { hint, issue })}
       />
     </Field>
@@ -190,6 +191,7 @@ function NamesField({
         }}
         placeholder={placeholder}
         spellCheck={false}
+        data-field={field}
         {...fieldAria(ids, { hint, issue })}
       />
     </Field>
@@ -209,6 +211,7 @@ function PlatformField({ f }: GroupProps) {
       <select
         className={control}
         value={platform ?? 'dotcom'}
+        data-field="platform"
         onChange={(e) =>
           f.patch({ platform: e.target.value === 'dotcom' ? undefined : (e.target.value as 'ghes') })
         }

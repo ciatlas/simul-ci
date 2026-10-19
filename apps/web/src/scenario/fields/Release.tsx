@@ -19,6 +19,7 @@ export function ReleaseFields({ f }: GroupProps) {
         placeholder="v1.2.3"
         aria-required
         spellCheck={false}
+        data-field="tag"
         {...fieldAria(ids, { hint, issue })}
       />
     </Field>

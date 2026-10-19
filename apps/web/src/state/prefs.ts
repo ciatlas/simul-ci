@@ -1,7 +1,7 @@
 /** The right panel's tabs. */
 export type PanelTab = 'reasons' | 'unknowns' | 'node' | 'problems';
 
-export const PANEL_TABS: readonly PanelTab[] = ['reasons', 'unknowns', 'node', 'problems'];
+const PANEL_TABS: readonly PanelTab[] = ['reasons', 'unknowns', 'node', 'problems'];
 
 /** Layout preferences in localStorage: nothing that decides a result, nothing another viewer needs. */
 export interface Prefs {

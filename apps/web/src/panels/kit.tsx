@@ -26,7 +26,10 @@ export function useSelected(): Selected | undefined {
   return { plan, index, node: resolveSelection(index, focus, sel) };
 }
 
-/** `file:line`, a button that opens the YAML pane on the line. */
+/**
+ * `file:line`, a button that opens the YAML pane on the line. Its name starts with what it shows (WCAG 2.5.3), the
+ * full path after it for a screen reader.
+ */
 export function LocLink({ loc, children }: { loc: Pick<Loc, 'file' | 'line'>; children?: ReactNode }) {
   const { store } = useApp();
   return (
@@ -34,9 +37,13 @@ export function LocLink({ loc, children }: { loc: Pick<Loc, 'file' | 'line'>; ch
       type="button"
       className="rounded px-1 font-mono text-[11px] text-muted underline decoration-dotted underline-offset-2 hover:text-text"
       onClick={() => store.getState().revealLine({ file: loc.file, line: loc.line })}
-      aria-label={`Show ${loc.file} line ${loc.line}`}
+      title={`Show ${loc.file} line ${loc.line}`}
     >
       {children ?? `${basename(loc.file)}:${loc.line}`}
+      <span className="sr-only">
+        {' '}
+        in the YAML pane ({loc.file} line {loc.line})
+      </span>
     </button>
   );
 }

@@ -41,6 +41,16 @@ const page = (key: string, more: Partial<PageKey> = {}) => keyFor({ ...base, key
 describe('the page keys', () => {
   it('takes t, f, . and 0 as the page’s commands, and nothing else', () => {
     expect(['t', 'f', '.', '0'].map((k) => page(k))).toEqual(['view', 'fit', 'centre', 'actualSize']);
+    expect(['r', '1', '2', '3', '4', '[', ']', '\\'].map((k) => page(k))).toEqual([
+      'reasons',
+      'panel:reasons',
+      'panel:unknowns',
+      'panel:node',
+      'panel:problems',
+      'pane:left',
+      'pane:right',
+      'pane:yaml',
+    ]);
     expect(page('T')).toBeUndefined();
     expect(page('x')).toBeUndefined();
     expect(page('constructor')).toBeUndefined();
@@ -160,6 +170,43 @@ describe('the page key listener', () => {
     store.getState().select(CI, 'deploy');
     expect(press('.')).toBe(true);
     expect(calls).toEqual([]);
+  });
+
+  it('opens a tab of the right panel with 1 to 4, opening the panel when it is closed', () => {
+    store.getState().togglePane('right');
+    expect(press('2')).toBe(false);
+    expect(store.getState().ui.prefs.panel).toBe('unknowns');
+    expect(store.getState().ui.prefs.collapsed.right).toBe(false);
+    press('4');
+    expect(store.getState().ui.prefs.panel).toBe('problems');
+  });
+
+  it('closes and opens the scenario column, the right panel and the YAML pane with [, ] and \\', () => {
+    expect([press('['), press(']'), press('\\')]).toEqual([false, false, false]);
+    expect(store.getState().ui.prefs.collapsed).toEqual({ left: true, right: true, yaml: false });
+    press('[');
+    expect(store.getState().ui.prefs.collapsed.left).toBe(false);
+  });
+
+  it('jumps to the Reasons tab with r and puts the focus in it once it has rendered', () => {
+    stop();
+    const frames: FrameRequestCallback[] = [];
+    const full = Object.assign(new EventTarget(), {
+      innerWidth: 1280,
+      document,
+      requestAnimationFrame: (f: FrameRequestCallback) => frames.push(f),
+    });
+    stop = installShortcuts(store, full as unknown as Window);
+    store.getState().setPanel('problems');
+    expect(full.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', cancelable: true }))).toBe(false);
+    expect(store.getState().ui.prefs.panel).toBe('reasons');
+    const panel = document.createElement('div');
+    panel.dataset.panel = 'reasons';
+    panel.tabIndex = -1;
+    document.body.append(panel);
+    for (const f of frames) f(0);
+    expect(document.activeElement).toBe(panel);
+    panel.remove();
   });
 
   it('stops listening once stopped', () => {

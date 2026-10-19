@@ -60,7 +60,7 @@ describe('the screen', () => {
 
   it('puts the outline below the scenario form, and the run graph beside them', () => {
     mount();
-    const column = screen.getByRole('complementary');
+    const column = screen.getByRole('complementary', { name: 'Scenario and outline' });
     const tree = within(column).getByRole('tree', { name: 'Outline' });
     const form = within(column).getAllByRole('combobox')[0]!;
     expect(form.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -69,6 +69,16 @@ describe('the screen', () => {
       'Laying out the graph',
     );
     expect(screen.queryByLabelText('The plan')).toBeNull();
+  });
+
+  it('puts the plan details beside the graph, on the tab the author last opened', () => {
+    const { store } = mount();
+    const details = screen.getByRole('complementary', { name: 'Plan details' });
+    expect(within(details).getByRole('tab', { name: 'Reasons', selected: true })).toBeTruthy();
+    act(() => store.getState().setPanel('problems'));
+    expect(within(details).getByRole('tab', { name: /^Problems/, selected: true })).toBeTruthy();
+    act(() => store.getState().togglePane('right'));
+    expect(screen.queryByRole('complementary', { name: 'Plan details' })).toBeNull();
   });
 
   it('shows the plan as text when the author picks it, and the graph again on the next pick', async () => {

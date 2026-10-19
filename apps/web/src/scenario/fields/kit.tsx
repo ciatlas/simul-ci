@@ -238,7 +238,7 @@ export function useOther(f: FieldContext): [boolean, (on: boolean) => void] {
 
 interface TextFieldProps {
   f: FieldContext;
-  /** The field `deriveForm` routes this key's refusal to. */
+  /** The field `deriveForm` routes this key's refusal to; the control's `data-field`. */
   field: string;
   label: string;
   value: string;
@@ -259,6 +259,7 @@ export function TextField({ f, field, label, value, onChange, placeholder, hint 
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         spellCheck={false}
+        data-field={field}
         {...fieldAria(ids, { hint, issue })}
       />
     </Field>
@@ -283,7 +284,12 @@ export function Flag({
   const issue = f.issue(field);
   return (
     <Field ids={ids} issue={issue}>
-      <Switch label={label} checked={checked} onChange={onChange} aria={{ ...fieldAria(ids, { issue }) }} />
+      <Switch
+        label={label}
+        checked={checked}
+        onChange={onChange}
+        aria={{ ...fieldAria(ids, { issue }), 'data-field': field }}
+      />
     </Field>
   );
 }
