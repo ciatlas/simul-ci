@@ -100,6 +100,7 @@ function EventName({
       aria-label="Event name"
       aria-invalid={error ? true : undefined}
       aria-errormessage={error}
+      aria-describedby={error}
       spellCheck={false}
     />
   );

@@ -1,6 +1,7 @@
 import type { AssumeEntry, ScenarioInput } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 import { sampleByName } from '../src/input/samples';
+import { listed } from '../src/lib/words';
 import {
   affectsText,
   appliedText,
@@ -10,7 +11,6 @@ import {
   focusAfter,
   formOf,
   formProblems,
-  listed,
   outcomeOptions,
   pinTarget,
   type UnknownRows,
@@ -194,8 +194,13 @@ describe('the words of a row', () => {
         { id: 'c', label: 'CI' },
       ]),
     ).toEqual({ text: 'affects 3', names: 'build, deploy and CI' });
+  });
+
+  it('lists words as a sentence does, which the row and the status line both say them with', () => {
     expect(listed([])).toBe('');
+    expect(listed(['a'])).toBe('a');
     expect(listed(['a', 'b'])).toBe('a and b');
+    expect(listed(['a', 'b', 'c', 'd'])).toBe('a, b, c and d');
   });
 
   it('says where an entry applied, the fields it provided grouped', () => {

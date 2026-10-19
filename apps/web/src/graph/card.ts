@@ -102,22 +102,31 @@ export const countsText = (counts: Record<Tri, number>): string =>
     .map((p) => `${p.n} ${MARK_LABEL[p.verdict]}`)
     .join(', ');
 
-/** How a card stands towards the selection, as `flow.ts` works it out. */
+/** How a card stands towards the selection, a hovered unknown and the last pin, as `flow.ts` works it out. */
 export interface CardState {
   /** The card holds the selection: it is the selected node, or the selected leg or step is inside it. */
   selected: boolean;
   /** The selected leg or step inside the card. */
   inner?: NodeId;
-  /** On the selected job's dependency path, or off it and faded; absent while its scope shows no path. */
+  /**
+   * On the selected job's dependency path, or off it and faded; absent while its scope shows no path. While an
+   * unknown's "affects n" is hovered, lit or faded by that instead, on every card.
+   */
   path?: 'on' | 'off';
   hovered: boolean;
+  /** The last pin changed what the card shows: it flashes once, the value following the pin's parity. */
+  flash?: 'a' | 'b';
 }
 
-/** The attributes the canvas styles key on: the verdict picks the border, the rest the outline and the fade. */
+/**
+ * The attributes the canvas styles key on: the verdict picks the border, the rest the outline, the fade and the
+ * flash.
+ */
 export function cardAttrs(verdict: Tri, state: CardState): Record<string, string> {
   const attrs: Record<string, string> = { 'data-verdict': verdict };
   if (state.selected) attrs['data-selected'] = state.inner === undefined ? 'self' : 'inner';
   if (state.path) attrs['data-path'] = state.path;
+  if (state.flash) attrs['data-flash'] = state.flash;
   return attrs;
 }
 

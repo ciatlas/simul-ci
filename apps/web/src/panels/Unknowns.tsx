@@ -1,17 +1,25 @@
 import type { NodeId, RunPlan } from '@simulci/engine';
 import { type ReactNode, type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useSession } from '../app/providers';
+import { useApp, useSession } from '../app/providers';
 import { Assumptions } from './Assumptions';
 import { EmptyNote, type Selected, useSelected } from './kit';
 import { planLabels } from './outline-tree';
 import { UnknownRow } from './UnknownRow';
-import { focusAfter, type UnknownRowModel, unknownRows } from './unknown-rows';
+import {
+  focusAfter,
+  type RowReveal,
+  revealRow,
+  type UnknownRowModel,
+  type UnknownRows,
+  unknownRows,
+} from './unknown-rows';
 
 /**
  * The Unknowns tab (synthesis § 7), the mock-authoring surface: the Assumptions list, then the unknowns, those that
  * decide a verdict first and the rest collapsed, each with its pin control. A toggle keeps the ones that affect the
  * selection. A pin never updates the list itself: the next plan drops the row, and the focus moves to the next one.
- * The Assumptions show before the first plan too, so an entry the worker refuses can be seen and removed.
+ * "Show … in Unknowns" in a reason puts the focus on the unknown's row. The Assumptions show before the first plan
+ * too, so an entry the worker refuses can be seen and removed.
  */
 export function Unknowns() {
   const selected = useSelected();
@@ -25,10 +33,7 @@ export function Unknowns() {
       {selected ? (
         <UnknownList selected={selected} section={section} title={title} />
       ) : (
-        <div className="flex flex-col gap-2">
-          <Heading title={title} />
-          <EmptyNote>The unknowns show with the first plan.</EmptyNote>
-        </div>
+        <NoPlan title={title} />
       )}
     </section>
   );
@@ -53,6 +58,17 @@ function Heading({ title }: { title: Title }) {
   );
 }
 
+/** Before the first plan: a request for a row has none to show, so the heading takes the focus. */
+function NoPlan({ title }: { title: Title }) {
+  useUnknownFocus(undefined, title.ref);
+  return (
+    <div className="flex flex-col gap-2">
+      <Heading title={title} />
+      <EmptyNote>The unknowns show with the first plan.</EmptyNote>
+    </div>
+  );
+}
+
 interface ListProps {
   selected: Selected;
   section: RefObject<HTMLElement | null>;
@@ -73,7 +89,21 @@ function UnknownList({ selected, section, title }: ListProps) {
     [plan, index, filter],
   );
   const shown = [...rows.gating, ...(idleOpen ? rows.idle : [])].map((r) => r.unknown.id);
-  const pins = usePinFocus(plan.plan, shown, section, title.ref);
+  const items = useRowElements();
+  const pins = usePinFocus(plan.plan, shown, items, section, title.ref);
+  useUnknownFocus(
+    {
+      plan: plan.plan,
+      rows,
+      idleOpen,
+      items,
+      show: (reveal) => {
+        if (reveal.unfilter) setAffecting(false);
+        if (reveal.openIdle) setIdleOpen(true);
+      },
+    },
+    title.ref,
+  );
   const label = narrowed === undefined ? '' : (labels.get(narrowed) ?? narrowed);
 
   const row = (r: UnknownRowModel) => (
@@ -82,7 +112,7 @@ function UnknownList({ selected, section, title }: ListProps) {
       row={r}
       plan={plan}
       index={index}
-      register={pins.register(r.unknown.id)}
+      register={items.register(r.unknown.id)}
       onPinned={() => pins.pinned(r.unknown.id)}
     />
   );
@@ -105,25 +135,42 @@ function UnknownList({ selected, section, title }: ListProps) {
   );
 }
 
-interface PinFocus {
+/** The rows' elements by unknown id, which the focus after a pin and a reason's request for a row land on. */
+interface RowElements {
+  get: (id: string) => HTMLElement | undefined;
   /** The ref callback of a row, by unknown id. */
   register: (id: string) => (el: HTMLElement | null) => void;
+}
+
+function useRowElements(): RowElements {
+  const items = useRef(new Map<string, HTMLElement>());
+  return {
+    get: (id) => items.current.get(id),
+    register: (id) => (el) => {
+      if (el) items.current.set(id, el);
+      else items.current.delete(id);
+    },
+  };
+}
+
+interface PinFocus {
   /** A row wrote an assume entry: the next plan should drop it. */
   pinned: (id: string) => void;
 }
 
 /**
  * The focus after a pin: when the next plan drops the pinned row and the focus went with it (or is still in the
- * tab), the next row shown takes it, else the one before, else the tab's heading. A pin the plan did not take leaves
- * the focus where it is; the author's focus elsewhere is never moved.
+ * tab), the next row shown takes it, else the one before, else the tab's heading. The row itself takes it, not its
+ * first control: that is `affects n`, whose focus would dim the canvas over the cards the pin just flashed. A pin the
+ * plan did not take leaves the focus where it is; the author's focus elsewhere is never moved.
  */
 function usePinFocus(
   plan: RunPlan,
   shown: string[],
+  items: RowElements,
   section: RefObject<HTMLElement | null>,
   heading: RefObject<HTMLHeadingElement | null>,
 ): PinFocus {
-  const items = useRef(new Map<string, HTMLElement>());
   const pending = useRef<{ id: string; order: string[] }>(undefined);
 
   // Only a new plan answers a pin: the rows shown change with the toggles too.
@@ -132,19 +179,62 @@ function usePinFocus(
     pending.current = undefined;
     if (!pin || shown.includes(pin.id) || !focusLost(section.current)) return;
     const target = focusAfter(pin.order, pin.id, new Set(shown));
-    const next = target === undefined ? undefined : items.current.get(target)?.querySelector('button');
-    (next ?? heading.current)?.focus();
+    const row = target === undefined ? undefined : items.get(target);
+    if (row) focusRow(row);
+    else heading.current?.focus();
   }, [plan]);
 
   return {
-    register: (id) => (el) => {
-      if (el) items.current.set(id, el);
-      else items.current.delete(id);
-    },
     pinned: (id) => {
       pending.current = { id, order: shown };
     },
   };
+}
+
+/** What the list shows, for a request to focus a row, and how it shows a row it hides. */
+interface ListFocus {
+  plan: RunPlan;
+  rows: UnknownRows;
+  idleOpen: boolean;
+  items: RowElements;
+  /** Turns the toggle off or opens the collapsed rest, as `revealRow` asks. */
+  show: (reveal: RowReveal) => void;
+}
+
+/**
+ * The answer to "Show … in Unknowns" (the store's `unknownFocus`), whether the tab was open when it came or mounted
+ * for it: the row is shown first (the toggle off when it hides the row, the collapsed rest open when it waits there),
+ * then scrolled into view and focused, and the request taken. An unknown the plan does not list, or no plan yet, puts
+ * the focus on the tab's heading, and the request is taken all the same.
+ */
+function useUnknownFocus(list: ListFocus | undefined, heading: RefObject<HTMLHeadingElement | null>): void {
+  const { store } = useApp();
+  const request = useSession((s) => s.unknownFocus);
+  useEffect(() => {
+    if (!request) return;
+    const reveal = revealRow(list, request.id);
+    // The next render shows the row; this effect runs again for it.
+    if (list && (reveal.unfilter || reveal.openIdle)) {
+      list.show(reveal);
+      return;
+    }
+    const row = reveal.target === 'row' ? list?.items.get(request.id) : undefined;
+    if (row) focusRow(row);
+    else heading.current?.focus();
+    store.getState().unknownFocused(request.seq);
+  }, [request, list?.plan, list?.rows, list?.idleOpen]);
+}
+
+/**
+ * The row takes the focus and the panel scrolls only as far as it needs, at once: never smoothly (§ 11). A row is
+ * focusable only while it holds a focus the tab put there, so a click on its text neither focuses nor rings it: it
+ * becomes focusable here and stops being so when the focus leaves it.
+ */
+function focusRow(row: HTMLElement): void {
+  row.tabIndex = -1;
+  row.addEventListener('blur', () => row.removeAttribute('tabindex'), { once: true });
+  row.focus({ preventScroll: true });
+  row.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 }
 
 /** Whether the focus is nowhere (its row went) or still in the tab: then it is the tab's to move. */

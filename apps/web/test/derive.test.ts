@@ -329,9 +329,14 @@ describe('the aria of a field', () => {
     });
     expect(fieldAria(ids, { hint: '', issue: 'refused' })).toEqual({
       id: 'f1',
+      'aria-describedby': 'f1-error',
       'aria-invalid': true,
       'aria-errormessage': 'f1-error',
     });
+    // The refusal reads after the hint and before the assumed note.
+    expect(fieldAria(ids, { hint: 'a hint', issue: 'refused', assumed: true })['aria-describedby']).toBe(
+      'f1-hint f1-error f1-assumed',
+    );
   });
 });
 

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { Tri } from '@simulci/engine';
+import type { ScenarioInput, Tri } from '@simulci/engine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ReactFlow, ReactFlowProvider } from '@xyflow/react';
@@ -11,6 +11,7 @@ import { type CardState, jobLabel, scopeLabel } from '../src/graph/card';
 import { Canvas } from '../src/graph/Canvas';
 import { viewport } from '../src/graph/commands';
 import type { FlowNode, JobFlowNode, WorkflowFlowNode } from '../src/graph/flow';
+import { FLASH_MS } from '../src/graph/highlight';
 import { JobNode } from '../src/graph/nodes/JobNode';
 import { LegGrid } from '../src/graph/nodes/LegGrid';
 import { StepList } from '../src/graph/nodes/StepList';
@@ -24,7 +25,7 @@ import {
   type ScopeModel,
   type StepMark,
 } from '../src/graph/types';
-import { createSessionStore, initialSessionState, type PlanState } from '../src/state/store';
+import { createSessionStore, initialSessionState, type Pin, type PlanState } from '../src/state/store';
 
 /**
  * The plan index and the canvas keys' answers are other modules': a table of unit paths (a leg's id names its job
@@ -229,6 +230,12 @@ describe('a job card', () => {
     mountNodes([jobNode(jobOf(), { selected: true, path: 'on' })]);
     expect(drawn('runs test').getAttribute('data-selected')).toBe('self');
     expect(drawn('runs test').getAttribute('data-path')).toBe('on');
+  });
+
+  it('carries the flash of a pin that changed it, and none otherwise', () => {
+    mountNodes([jobNode(jobOf(), { flash: 'b' }), jobNode(jobOf({ id: BUILD, label: 'build' }))]);
+    expect(drawn('runs test').getAttribute('data-flash')).toBe('b');
+    expect(drawn('runs build').hasAttribute('data-flash')).toBe(false);
   });
 
   it('opens its step list with the toggle, without selecting the job', () => {
@@ -451,6 +458,22 @@ const scaleOf = (t: string): number => Number(/scale\(([\d.]+)\)/.exec(t)![1]);
 /** A few animation frames, for React Flow's queued fit to run. */
 const frames = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 100)));
 
+/** A plan the store holds, with its own `for`, as the session hands one to the store and the graph. */
+const answeredPlan = (): PlanState =>
+  ({ plan: { unknowns: [] }, for: { files: 1, project: 1 } }) as unknown as PlanState;
+
+/** A pin the plan answered, which changed the verdicts of `changed`. */
+const pinOf = (seq: number, plan: PlanState, changed: string[]): Pin => ({
+  seq,
+  scenario: {} as ScenarioInput,
+  assume: [],
+  after: {
+    plan: plan.plan,
+    changes: changed.map((id) => ({ id, kind: 'job', from: 'no', to: 'yes', label: id })),
+    sentence: 'pinned; test now runs',
+  },
+});
+
 function mountCanvas(paths: Record<string, string> = {}) {
   const store = storeOf(paths, { graph: graphOf() });
   render(withApp(store, <Canvas />));
@@ -594,6 +617,88 @@ describe('the canvas', () => {
       const before = scaleOf(transform());
       fireEvent.doubleClick(document.querySelector('.react-flow__pane')!, { clientX: 100, clientY: 80 });
       expect(scaleOf(transform())).toBeCloseTo(Math.min(2, before * 2));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('fades every card but the ones a hovered unknown affects, and the needs with an end it does not', () => {
+    const graph = graphOf();
+    const plan = { plan: { unknowns: [{ id: 'u', affects: [`${TEST}/a`] }] }, for: graph.for };
+    const store = storeOf({}, { graph, plan: plan as unknown as PlanState });
+    render(withApp(store, <Canvas />));
+    const paths = () =>
+      ['runs ci.yml — on: push', 'runs build', 'runs test, needs build'].map((n) =>
+        drawn(n).getAttribute('data-path'),
+      );
+    expect(paths()).toEqual([null, null, null]);
+    act(() => store.getState().hoverUnknown('u'));
+    expect(paths()).toEqual(['on', 'off', 'on']);
+    expect(document.querySelector('.sc-edge')?.getAttribute('data-path')).toBe('off');
+    act(() => store.getState().hoverUnknown(undefined));
+    expect(paths()).toEqual([null, null, null]);
+  });
+
+  it("flashes the cards a pin changed once its plan's picture is on the canvas, and again for the next pin", () => {
+    vi.useFakeTimers();
+    try {
+      const store = storeOf({}, { graph: graphOf() });
+      render(withApp(store, <Canvas />));
+      const flash = () => drawn('runs test, needs build').getAttribute('data-flash');
+      const first = answeredPlan();
+      act(() => store.setState({ plan: first, pin: pinOf(3, first, [TEST]) }));
+      // The picture is still the plan's before the pin: its cards do not flash in their old colours.
+      expect(flash()).toBeNull();
+      act(() => store.getState().graphReady({ ...graphOf(), for: first.for }));
+      expect(flash()).toBe('b');
+      expect(drawn('runs build').hasAttribute('data-flash')).toBe(false);
+      act(() => {
+        vi.advanceTimersByTime(FLASH_MS);
+      });
+      expect(flash()).toBeNull();
+      const next = answeredPlan();
+      act(() => store.setState({ plan: next, pin: pinOf(4, next, [TEST]) }));
+      act(() => store.getState().graphReady({ ...graphOf(), for: next.for }));
+      expect(flash()).toBe('a');
+      // A plan without a pin ends it.
+      act(() => store.setState({ plan: answeredPlan() }));
+      expect(flash()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not play a flash again on a picture mounted again', () => {
+    vi.useFakeTimers();
+    try {
+      const plan = answeredPlan();
+      const store = storeOf(
+        {},
+        { graph: { ...graphOf(), for: plan.for }, plan, pin: pinOf(6, plan, [TEST]) },
+      );
+      const first = render(withApp(store, <Canvas />));
+      expect(drawn('runs test, needs build').getAttribute('data-flash')).toBe('a');
+      act(() => {
+        vi.advanceTimersByTime(FLASH_MS);
+      });
+      first.unmount();
+      render(withApp(store, <Canvas />));
+      expect(drawn('runs test, needs build').hasAttribute('data-flash')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flashes nothing for an author who asked for less motion', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    try {
+      const plan = answeredPlan();
+      const store = storeOf(
+        {},
+        { graph: { ...graphOf(), for: plan.for }, plan, pin: pinOf(5, plan, [TEST]) },
+      );
+      render(withApp(store, <Canvas />));
+      expect(document.querySelector('[data-flash]')).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }

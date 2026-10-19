@@ -1,12 +1,11 @@
-import { AxeBuilder } from '@axe-core/playwright';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
 /**
  * The right panel and the YAML pane in a real browser, over the bundled starter sample: the changed-files unknown
  * pinned from the Unknowns tab puts the focus in the Changed files field with the example selected, the page simulates
  * again, the row goes and the workflow it decided flips, and the author types over the example; a step output pinned
- * through the editor becomes an assumption the plan applies; a reason's line opens the YAML pane on it; and axe finds
- * nothing with every pane and tab open.
+ * through the editor becomes an assumption the plan applies; and a reason's line opens the YAML pane on it. The axe
+ * pass over every pane and tab is in a11y.spec.ts.
  *
  * The synthesis pins a `vars.X` unknown here, but the engine reads a variable the scenario does not name as empty, so
  * `vars.X` is never unknown; `scenario.changed` is the scenario unknown the starter has.
@@ -114,17 +113,4 @@ test('the Reasons tab shows the deciding reason of the job picked, and its line 
   await expect(source.locator('.cm-sc-deciding')).toContainText(
     "if: github.event_name == 'push' || inputs.deploy",
   );
-});
-
-test('axe finds nothing on the page with the right panel, the YAML pane and every tab', async ({ page }) => {
-  await openStarter(page);
-  await page.keyboard.press('\\');
-  await expect(page.getByRole('region', { name: 'Workflow source' }).locator('.cm-editor')).toBeVisible();
-  for (const name of ['Reasons', 'Unknowns', 'Node', 'Problems']) {
-    await tab(page, name).click();
-    const results = await new AxeBuilder({ page }).analyze();
-    expect(
-      results.violations.map((v) => `${name}: ${v.id} ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`),
-    ).toEqual([]);
-  }
 });

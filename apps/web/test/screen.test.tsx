@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { ScenarioInput } from '@simulci/engine';
+import type { AssumeEntry, ScenarioInput } from '@simulci/engine';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
@@ -8,9 +8,11 @@ import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
 import { installShortcuts } from '../src/app/shortcuts';
 import { SimulateView } from '../src/app/SimulateView';
+import { StatusBar } from '../src/app/StatusBar';
 import { sampleByName } from '../src/input/samples';
 import { Gate } from '../src/panels/kit';
-import { createSessionStore } from '../src/state/store';
+import { summarize } from '../src/plan/summary';
+import { createSessionStore, type PlanState } from '../src/state/store';
 import { handle, initialState } from '../src/worker/handle';
 
 const chunk = vi.hoisted(() => ({ fails: false }));
@@ -209,5 +211,137 @@ describe('the screen', () => {
     render(<Gate gate={{ known: false, unknowns: [] }} />);
     const gate = screen.getByRole('img', { name: 'undecided' });
     expect([gate.textContent, classes(gate).includes('text-might-text')]).toEqual(['?', true]);
+  });
+});
+
+describe('the status line', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  const files = sampleByName('starter')!.files;
+  const source: ScenarioInput = { event: 'push', branch: 'main', changed: ['src/a.ts'] };
+  const detect: AssumeEntry = { step: 'build.detect', outputs: { changed: 'true' } };
+
+  /** The starter's plan for exactly these inputs, as the session hands it to the store. */
+  function planOf(scenario: ScenarioInput, assume: AssumeEntry[]): PlanState {
+    const loaded = handle(initialState(), { id: 1, type: 'load', files, repository: 'o/r' });
+    const r = handle(loaded.state, {
+      id: 2,
+      type: 'simulate',
+      project: 1,
+      scenario,
+      assume,
+      detail: 'steps',
+    });
+    if (r.response.type !== 'plan') throw new Error(r.response.type);
+    const { plan, derived, text, ms } = r.response;
+    return { plan, derived, text, ms, for: { files: 1, project: 1, assume, scenario } };
+  }
+
+  /** The store answers the inputs it holds now with their plan. */
+  const answer = (store: ReturnType<typeof createSessionStore>): PlanState => {
+    const s = store.getState();
+    const plan = planOf(s.scenario, s.assume);
+    act(() => s.planReceived(plan));
+    return plan;
+  };
+  const wait = (ms: number): void => {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  };
+
+  it('says what a pin changed for the plan that answers it, half a second behind, and the summary for the next', () => {
+    vi.useFakeTimers();
+    const store = createSessionStore();
+    store.getState().setScenario(source);
+    render(
+      <AppProvider app={{ store } as unknown as App}>
+        <StatusBar />
+      </AppProvider>,
+    );
+    const line = screen.getByRole('contentinfo');
+    expect(line.getAttribute('aria-live')).toBe('polite');
+    const first = answer(store);
+    wait(500);
+    const summary = summarize(first.plan).sentence;
+    expect(line.textContent).toBe(summary);
+
+    act(() => store.getState().pinAssume([detect]));
+    answer(store);
+    wait(499);
+    expect(line.textContent).toBe(summary);
+    wait(1);
+    expect(line.textContent).toBe('pinned; build.#3 now runs');
+
+    // A pin made since says nothing until its own plan comes.
+    act(() => store.getState().pinAssume([]));
+    wait(500);
+    expect(line.textContent).toBe('pinned; build.#3 now runs');
+    answer(store);
+    wait(500);
+    expect(line.textContent).toBe('pinned; build.#3 now might run');
+
+    // Another plan for the same inputs says its own summary: the pin spoke for the plan that answered it.
+    const next = answer(store);
+    wait(500);
+    expect(store.getState().pin?.after).toBeDefined();
+    expect(line.textContent).toBe(summarize(next.plan).sentence);
+  });
+
+  /** The status line over a store that holds the starter's first plan, said. */
+  function said() {
+    vi.useFakeTimers();
+    const store = createSessionStore();
+    store.getState().setScenario(source);
+    render(
+      <AppProvider app={{ store } as unknown as App}>
+        <StatusBar />
+      </AppProvider>,
+    );
+    answer(store);
+    wait(500);
+    return { store, line: screen.getByRole('contentinfo') };
+  }
+
+  it('says a pin’s sentence in an element of its own, so the live region reads it again when the last pin said the same', () => {
+    const { store, line } = said();
+    const summary = line.firstElementChild;
+    // Pinning the list it holds changes no verdict, every time.
+    act(() => store.getState().pinAssume([]));
+    answer(store);
+    wait(500);
+    const first = line.firstElementChild;
+    expect(first?.textContent).toBe('pinned; no verdict changed');
+    expect(first).not.toBe(summary);
+
+    act(() => store.getState().pinAssume([]));
+    answer(store);
+    wait(500);
+    const second = line.firstElementChild;
+    expect(second?.textContent).toBe('pinned; no verdict changed');
+    expect(second).not.toBe(first);
+    expect(first?.isConnected).toBe(false);
+
+    // The summary of every other plan keeps its element, and says only what changed.
+    const again = answer(store);
+    wait(500);
+    const back = line.firstElementChild;
+    expect(back?.textContent).toBe(summarize(again.plan).sentence);
+    answer(store);
+    wait(500);
+    expect(line.firstElementChild).toBe(back);
+  });
+
+  it('sets a stale sentence in italics, at the contrast of the rest of the line', () => {
+    const { store, line } = said();
+    const sentence = line.firstElementChild!;
+    expect(classes(sentence)).not.toContain('italic');
+    act(() => store.getState().patchScenario({ message: 'docs' }));
+    expect(store.getState().stale).toBe(true);
+    expect(classes(sentence)).toContain('italic');
+    expect(sentence.className).not.toMatch(/opacity/);
   });
 });

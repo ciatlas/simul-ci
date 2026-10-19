@@ -103,7 +103,7 @@ describe('the graph session', () => {
     expect(graph.model.jobs['ci.yml#build']!.verdict).toBe('yes');
     expect(graph.layout.scopes['ci.yml']!.positions['ci.yml#build']).toEqual({ x: 16, y: 40 });
     expect(graph.layout.roots['ci.yml']).toEqual({ x: 0, y: 0, width: 400, height: 140 });
-    expect(graph.for).toEqual(store.getState().plan!.for);
+    expect(graph.for).toBe(store.getState().plan!.for);
     expect(graph.ms).toBe(12);
   });
 
