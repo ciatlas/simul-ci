@@ -7,7 +7,7 @@ import { Component, type ReactNode } from 'react';
 
 interface Props {
   children: ReactNode;
-  /** The children are tried again once one of these changes (a new scenario, new files). */
+  /** The children are tried again once one of these changes (a new scenario, new files, a new plan). */
   resetKeys: readonly unknown[];
   /** Puts back the page's own scenario. */
   onReset: () => void;

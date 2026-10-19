@@ -85,13 +85,28 @@ function PlanView() {
   );
 }
 
-/** The boundary tries again on a new scenario or new files, and its button puts back the page's own scenario. */
+/**
+ * The boundary tries again whenever something its children render from changes: the scenario and the files, and what
+ * reaches the store after them (the outline, the focus, the worker's refusal, the plan, the selection, the committed
+ * picture, the canvas's own state and the view), so an error the committed plan caused goes once the next plan
+ * commits. Its button puts back the page's own scenario.
+ */
 function PlanBoundary({ children }: { children: ReactNode }) {
   const { store } = useApp();
   const scenario = useSession((s) => s.scenario);
   const files = useSession((s) => s.files.version);
+  const outline = useSession((s) => s.project.outline);
+  const focus = useSession((s) => s.focus);
+  const error = useSession((s) => s.error);
+  const plan = useSession((s) => s.plan);
+  const sel = useSession((s) => s.sel);
+  const graph = useSession((s) => s.graph);
+  const ui = useSession((s) => s.ui);
   return (
-    <ErrorBoundary resetKeys={[scenario, files]} onReset={() => restoreDefault(store)}>
+    <ErrorBoundary
+      resetKeys={[scenario, files, outline, focus, error, plan, sel, graph, ui]}
+      onReset={() => restoreDefault(store)}
+    >
       {children}
     </ErrorBoundary>
   );

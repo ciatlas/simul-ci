@@ -2,11 +2,13 @@
 import type { ScenarioInput } from '@simulci/engine';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
 import { ErrorBanner } from '../src/app/ErrorBanner';
 import { AppProvider } from '../src/app/providers';
 import { ScenarioForm } from '../src/app/ScenarioForm';
+import { Assumed } from '../src/scenario/fields/kit';
+import { noteSide } from '../src/scenario/note';
 import { createSessionStore, initialSessionState, type Issue } from '../src/state/store';
 import type { Outline } from '../src/worker/protocol';
 
@@ -84,6 +86,10 @@ const describedBy = (el: HTMLElement): string =>
     .split(' ')
     .map((id) => document.getElementById(id)?.textContent)
     .join(' | ');
+
+/** The assumed note a control is described by: the last of its descriptions. */
+const noteOf = (el: HTMLElement): HTMLElement =>
+  document.getElementById(el.getAttribute('aria-describedby')!.split(' ').at(-1)!)!;
 
 describe('the field groups', () => {
   afterEach(cleanup);
@@ -316,6 +322,22 @@ describe('the field groups', () => {
     expect(store.getState().scenario).toEqual({ event: 'merge_group', branch: 'c' });
   });
 
+  it("decides the merge group's ref field afresh for the next project, as a first mount does", async () => {
+    const { store, user } = mount({ event: 'merge_group', branch: 'ab' });
+    await user.clear(screen.getByRole('textbox', { name: 'Branch' }));
+    expect(store.getState().scenario).toEqual({ event: 'merge_group' });
+    expect(screen.getByRole('textbox', { name: 'Branch' })).toBeTruthy();
+    act(() => store.getState().setFiles({ [CI]: 'on: merge_group' }, { kind: 'sample', name: 'starter' }));
+    expect(screen.queryByRole('form', { name: 'Scenario' })).toBeNull();
+    act(() => store.getState().projectReady(2, outline, 2));
+    expect([store.getState().scenarioFrom, store.getState().scenario]).toEqual([
+      'author',
+      { event: 'merge_group' },
+    ]);
+    expect(screen.getByRole('form', { name: 'Scenario' })).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'Branch' })).toBeNull();
+  });
+
   it('shows a ref that is neither a branch nor a tag under Advanced, and writes it there as it is', async () => {
     const { store, user } = mount({ event: 'push', ref: 'refs/pull/7/merge' });
     const branch = screen.getByRole<HTMLInputElement>('textbox', { name: 'Branch' });
@@ -357,6 +379,31 @@ describe('the field groups', () => {
     expect(branch.className).not.toContain('assumed');
     expect(document.activeElement).toBe(branch);
     expect(describedBy(branch)).not.toContain('chosen for you');
+  });
+
+  it('puts away with Escape a note the pointer opened while the focus is elsewhere', async () => {
+    const { user } = mount({ event: 'push', branch: 'main' }, ['branch']);
+    const branch = screen.getByRole<HTMLInputElement>('textbox', { name: 'Branch' });
+    const note = noteOf(branch);
+    await user.hover(branch);
+    await waitFor(() => expect(note.dataset.open).toBe('true'));
+    expect(document.activeElement).toBe(document.body);
+    await user.keyboard('{Escape}');
+    expect(note.dataset.open).toBeUndefined();
+    await user.unhover(branch);
+    await user.hover(branch);
+    await waitFor(() => expect(note.dataset.open).toBe('true'));
+  });
+
+  it('draws the note at the right end of the control, clear of the Branch and Tag radios at the left above it', async () => {
+    const { user } = mount({ event: 'push', branch: 'main' }, ['branch']);
+    const branch = screen.getByRole<HTMLInputElement>('textbox', { name: 'Branch' });
+    await user.click(branch);
+    const note = noteOf(branch);
+    expect([note.dataset.open, note.dataset.side]).toEqual(['true', 'above']);
+    const classes = note.className.split(' ');
+    expect(classes).toEqual(expect.arrayContaining(['absolute', 'right-0', 'bottom-full']));
+    expect(classes).not.toContain('left-0');
   });
 
   it('groups the dispatch inputs by workflow, marks the required ones and sends no default', async () => {
@@ -450,14 +497,116 @@ describe('the activity type', () => {
     ]);
   });
 
-  it('offers the custom types a dispatch listens to, and shows one a pin adds', () => {
-    const custom = listening({
-      event: 'repository_dispatch',
-      types: { allowed: ['deploy'], all: [], narrowed: true },
-    });
-    mount({ event: 'repository_dispatch', action: 'build' }, [], custom);
+  const custom = (): Outline => ({
+    files: [],
+    workflows: [
+      {
+        path: CI,
+        name: 'Deploy',
+        callable: false,
+        events: [{ event: 'repository_dispatch', types: { allowed: ['deploy'], all: [], narrowed: true } }],
+        jobs: [],
+        onLine: 1,
+      },
+      {
+        path: '.github/workflows/any.yml',
+        name: 'Any',
+        callable: false,
+        events: [{ event: 'repository_dispatch' }],
+        jobs: [],
+        onLine: 1,
+      },
+    ],
+    events: {},
+  });
+
+  it('offers the custom types a dispatch listens to, and a box for a type no listener names', async () => {
+    const { store, user } = mount({ event: 'repository_dispatch' }, [], custom());
+    const select = screen.getByLabelText<HTMLSelectElement>('Activity type');
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['choose…', 'deploy', 'other…']);
+    expect(screen.queryByLabelText('Activity type name')).toBeNull();
+    await user.selectOptions(select, '…');
+    const name = screen.getByLabelText<HTMLInputElement>('Activity type name');
+    await user.type(name, 'deploy');
+    expect(store.getState().scenario.action).toBe('deploy');
+    expect(screen.getByLabelText('Activity type name')).toBe(name);
+    await user.clear(name);
+    await user.type(name, 'build');
+    expect(store.getState().scenario).toEqual({ event: 'repository_dispatch', action: 'build' });
+    expect(select.value).toBe('…');
+    await user.selectOptions(select, 'deploy');
+    expect(store.getState().scenario.action).toBe('deploy');
+    expect(screen.queryByLabelText('Activity type name')).toBeNull();
+  });
+
+  it('shows a custom type a pin adds in the box, as the type it is', () => {
+    mount({ event: 'repository_dispatch', action: 'build' }, [], custom());
+    const select = screen.getByLabelText<HTMLSelectElement>('Activity type');
+    expect(select.value).toBe('…');
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['deploy', 'other…']);
+    expect(screen.getByLabelText<HTMLInputElement>('Activity type name').value).toBe('build');
+  });
+
+  it('offers no box beside the types of a table, which name every type there is', () => {
+    mount({ event: 'pull_request' }, [], listening({ event: 'pull_request' }));
     const select = screen.getByLabelText<HTMLSelectElement>(/Activity type/);
-    expect(select.value).toBe('build');
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['build · not in types:', 'deploy']);
+    expect(Array.from(select.options).map((o) => o.value)).not.toContain('…');
+  });
+});
+
+describe('the assumed note', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const box = (top: number, height: number) =>
+    ({
+      top,
+      bottom: top + height,
+      height,
+      left: 0,
+      right: 0,
+      width: 0,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+  it('draws below a control at the top of a scrolling column, where the room above is out of view', () => {
+    render(
+      <div data-testid="column" style={{ overflowY: 'auto' }}>
+        <Assumed id="note" on>
+          <input aria-label="Branch" aria-describedby="note" />
+        </Assumed>
+      </div>,
+    );
+    const column = screen.getByTestId('column');
+    const input = screen.getByLabelText('Branch');
+    const note = document.getElementById('note')!;
+    Object.defineProperty(column, 'clientHeight', { value: 349 });
+    const rects = new Map<Element, DOMRect>([
+      [column, box(46, 349)],
+      [input.parentElement!, box(46, 26)],
+      [note, box(0, 30)],
+    ]);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return rects.get(this) ?? box(0, 0);
+    });
+    act(() => input.focus());
+    expect([note.dataset.open, note.dataset.side]).toEqual(['true', 'below']);
+    expect(note.className.split(' ')).toContain('top-full');
+    act(() => input.blur());
+    rects.set(input.parentElement!, box(200, 26));
+    act(() => input.focus());
+    expect(note.dataset.side).toBe('above');
+  });
+
+  it('keeps the note above while there is room for it there, and takes the roomier side when neither has', () => {
+    const column = { top: 46, bottom: 395 };
+    expect(noteSide({ top: 100, bottom: 126 }, column, 30)).toBe('above');
+    expect(noteSide({ top: 76, bottom: 102 }, column, 30)).toBe('above');
+    expect(noteSide({ top: 60, bottom: 86 }, column, 30)).toBe('below');
+    expect(noteSide({ top: 60, bottom: 86 }, { top: 46, bottom: 90 }, 30)).toBe('above');
   });
 });
