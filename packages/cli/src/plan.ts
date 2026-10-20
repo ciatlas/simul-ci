@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import {
   type AssumeEntry,
   fileFromPlan,
@@ -6,13 +5,19 @@ import {
   type RunPlan,
   renderMermaid,
   renderText,
+  ScenarioError,
   type ScenarioInput,
   simulate,
 } from '@simulci/engine';
-import { defineCommand } from 'citty';
-import { AssumeError, parseAssume, readWorkflowFiles } from '@simulci/node';
+import { type ArgsDef, defineCommand } from 'citty';
+import { AssumeError, readWorkflowFiles } from '@simulci/node';
+import { assumeOf, exitCodeOf, oneOf, readArgs, spoken, values } from './args';
 
-/** The `simulci plan` arguments as citty parses them. */
+const FORMATS = ['text', 'json', 'mermaid'] as const;
+const DETAILS = ['steps', 'legs'] as const;
+const AS_TEST = ['jobs', 'steps'] as const;
+
+/** The `simulci plan` arguments: as citty parses them, by their camelCase names, with each choice checked. */
 export interface PlanArgs {
   dir: string;
   event: string;
@@ -29,12 +34,12 @@ export interface PlanArgs {
   actor?: string;
   fork?: boolean;
   message?: string;
-  format: string;
-  detail: string;
+  format: (typeof FORMATS)[number];
+  detail: (typeof DETAILS)[number];
   assume?: string | string[];
   assumeFile?: string;
-  /** Print the plan as a test case instead: `jobs` or `steps`. */
-  asTest?: string | boolean;
+  /** Print the plan as a test case instead: `jobs` (also a bare `--as-test`) or `steps`. */
+  asTest?: (typeof AS_TEST)[number];
   /** The workflow the test case is about (default: the first triggered one). */
   workflow?: string;
 }
@@ -64,7 +69,7 @@ export function scenarioFromArgs(args: PlanArgs): ScenarioInput {
 }
 
 const list = (v: string | string[] | undefined): string[] =>
-  (v === undefined ? [] : Array.isArray(v) ? v : [v])
+  values(v)
     .flatMap((x) => x.split(','))
     .map((x) => x.trim())
     .filter(Boolean);
@@ -86,80 +91,104 @@ function typed(v: string): string | boolean | number {
   return v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v;
 }
 
-export function render(plan: RunPlan, format: string): string {
+export function render(plan: RunPlan, format: PlanArgs['format']): string {
   if (format === 'json') return `${JSON.stringify(plan, null, 2)}\n`;
   if (format === 'mermaid') return renderMermaid(plan);
   return renderText(plan);
 }
 
+const PLAN_ARGS = {
+  dir: { type: 'string', description: 'The repository checkout', default: '.' },
+  event: {
+    type: 'string',
+    description: 'The event (push, pull_request, workflow_dispatch, …)',
+    default: 'push',
+  },
+  action: { type: 'string', description: 'The activity type (opened, labeled, …)' },
+  ref: { type: 'string', description: 'The git ref (refs/heads/main, or a branch name)' },
+  branch: { type: 'string', description: 'The branch (refs/heads/<branch>)' },
+  tag: { type: 'string', description: 'The tag (refs/tags/<tag>)' },
+  base: { type: 'string', description: 'The base branch of a pull request' },
+  head: { type: 'string', description: 'The head branch of a pull request' },
+  changed: { type: 'string', description: 'Changed files, comma-separated or repeated' },
+  input: { type: 'string', description: 'A workflow_dispatch input, name=value (repeatable)' },
+  var: { type: 'string', description: 'A variable, NAME=value (repeatable)' },
+  secret: { type: 'string', description: 'A secret that exists, by name (repeatable)' },
+  actor: { type: 'string', description: 'The actor login' },
+  fork: { type: 'boolean', description: 'The pull request comes from a fork', default: false },
+  message: { type: 'string', description: 'The head commit message' },
+  format: { type: 'string', description: spoken(FORMATS), default: 'text' },
+  detail: { type: 'string', description: spoken(DETAILS), default: 'steps' },
+  assume: {
+    type: 'string',
+    description: 'A mock: build.unit=failure, build.unit.outputs.sha=abc (repeatable)',
+  },
+  'assume-file': { type: 'string', description: 'A YAML list of mocks' },
+  'as-test': {
+    type: 'string',
+    description: 'Print a test case instead of the plan: jobs (also a bare --as-test) or steps',
+  },
+  workflow: { type: 'string', description: 'With --as-test: the workflow the case is about' },
+} satisfies ArgsDef;
+
 export const planCommand = defineCommand({
   meta: { name: 'plan', description: 'Which jobs and steps run for a scenario, and why' },
-  args: {
-    dir: { type: 'string', description: 'The repository checkout', default: '.' },
-    event: {
-      type: 'string',
-      description: 'The event (push, pull_request, workflow_dispatch, …)',
-      default: 'push',
-    },
-    action: { type: 'string', description: 'The activity type (opened, labeled, …)' },
-    ref: { type: 'string', description: 'The git ref (refs/heads/main, or a branch name)' },
-    branch: { type: 'string', description: 'The branch (refs/heads/<branch>)' },
-    tag: { type: 'string', description: 'The tag (refs/tags/<tag>)' },
-    base: { type: 'string', description: 'The base branch of a pull request' },
-    head: { type: 'string', description: 'The head branch of a pull request' },
-    changed: { type: 'string', description: 'Changed files, comma-separated or repeated' },
-    input: { type: 'string', description: 'A workflow_dispatch input, name=value (repeatable)' },
-    var: { type: 'string', description: 'A variable, NAME=value (repeatable)' },
-    secret: { type: 'string', description: 'A secret that exists, by name (repeatable)' },
-    actor: { type: 'string', description: 'The actor login' },
-    fork: { type: 'boolean', description: 'The pull request comes from a fork', default: false },
-    message: { type: 'string', description: 'The head commit message' },
-    format: { type: 'string', description: 'text, json or mermaid', default: 'text' },
-    detail: { type: 'string', description: 'legs or steps', default: 'steps' },
-    assume: {
-      type: 'string',
-      description: 'A mock: build.unit=failure, build.unit.outputs.sha=abc (repeatable)',
-    },
-    assumeFile: { type: 'string', description: 'A YAML list of mocks' },
-    asTest: { type: 'string', description: 'Print a test case instead of the plan: jobs or steps' },
-    workflow: { type: 'string', description: 'With --as-test: the workflow the case is about' },
-  },
-  run({ args }) {
-    const a = args as unknown as PlanArgs;
-    const out = planOutput(a);
-    process.stdout.write(out.text);
-    if (out.code) process.exitCode = out.code;
+  args: PLAN_ARGS,
+  run({ rawArgs }) {
+    const io = { stderr: (t: string) => process.stderr.write(t), env: process.env };
+    process.exitCode = exitCodeOf(() => {
+      const out = planOutput(planArgs(rawArgs));
+      (out.code ? process.stderr : process.stdout).write(out.text);
+      return out.code;
+    }, io);
   },
 });
 
-/** What `simulci plan` prints, and the exit code when it cannot. */
+/**
+ * The arguments of a `simulci plan` command line: every value of a repeated flag, and `jobs` for a bare `--as-test`.
+ * A `FlagError` when `--format`, `--detail` or `--as-test` is given a value it does not take.
+ */
+export function planArgs(rawArgs: readonly string[]): PlanArgs {
+  const a = readArgs(rawArgs, PLAN_ARGS, {
+    repeated: ['changed', 'input', 'var', 'secret', 'assume'],
+    bare: { 'as-test': 'jobs' },
+  });
+  return {
+    ...(a as unknown as PlanArgs),
+    format: oneOf('format', a.format, FORMATS),
+    detail: oneOf('detail', a.detail, DETAILS),
+    // `--no-as-test` reads false: no test case.
+    asTest: a.asTest === undefined || a.asTest === false ? undefined : oneOf('as-test', a.asTest, AS_TEST),
+  };
+}
+
+/** What `simulci plan` prints, and the exit code: 2, with the message, when it cannot. */
 export function planOutput(a: PlanArgs): { text: string; code: number } {
   const files = readWorkflowFiles(a.dir);
   if (Object.keys(files).length === 0)
     return { text: `no workflows under ${a.dir}/.github/workflows\n`, code: 2 };
-  const assume = assumeOf(a);
+  const assume = mocksOf(a);
   if (typeof assume === 'string') return { text: assume, code: 2 };
   const scenario = scenarioFromArgs(a);
   try {
     const plan = simulate({
       files,
       scenario,
-      detail: a.detail === 'legs' ? 'legs' : 'steps',
+      detail: a.detail,
       mocks: { cli: assume },
     });
-    if (a.asTest === undefined || a.asTest === false) return { text: render(plan, a.format), code: 0 };
+    if (a.asTest === undefined) return { text: render(plan, a.format), code: 0 };
     return asTest(plan, a, scenario, assume);
   } catch (e) {
-    if (!(e instanceof MocksError)) throw e;
+    if (!(e instanceof MocksError || e instanceof ScenarioError)) throw e;
     return { text: `${e.message}\n`, code: 2 };
   }
 }
 
 /** The `--assume` entries, or the message to print when they do not parse. */
-function assumeOf(a: PlanArgs): AssumeEntry[] | string {
+function mocksOf(a: PlanArgs): AssumeEntry[] | string {
   try {
-    const items = a.assume === undefined ? [] : Array.isArray(a.assume) ? a.assume : [a.assume];
-    return parseAssume(items, a.assumeFile === undefined ? undefined : readFileSync(a.assumeFile, 'utf8'));
+    return assumeOf(a.assume, a.assumeFile);
   } catch (e) {
     if (!(e instanceof AssumeError)) throw e;
     return `${e.message}\n`;
@@ -176,6 +205,8 @@ function asTest(
   const first = plan.workflows.find((w) => w.triggered.verdict !== 'no') ?? plan.workflows[0];
   const workflow = a.workflow ?? first?.path;
   if (workflow === undefined) return { text: 'no workflow to write a test for\n', code: 2 };
-  const detail = a.asTest === 'steps' ? 'steps' : 'jobs';
-  return { text: fileFromPlan({ plan, workflow, scenario, assume, detail }), code: 0 };
+  const path = workflow.startsWith('.github/workflows/') ? workflow : `.github/workflows/${workflow}`;
+  if (!plan.workflows.some((w) => w.depth === 0 && w.path === path))
+    return { text: `--workflow ${workflow}: no ${path} in the checkout\n`, code: 2 };
+  return { text: fileFromPlan({ plan, workflow, scenario, assume, detail: a.asTest ?? 'jobs' }), code: 0 };
 }

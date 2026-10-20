@@ -1,4 +1,8 @@
 /* oxlint-disable no-restricted-imports -- the worker is where the engine runs */
+// oxlint-disable-next-line import/no-unassigned-import -- first, so it hears what the CSP refuses below
+import './csp';
+// oxlint-disable-next-line import/no-unassigned-import -- before the engine's schemas are built
+import './jitless';
 import { SCHEMA_VERSIONS, SHIPPED_MODELS, VERSION } from '@simulci/engine';
 import { handle, initialState } from './handle';
 import { type EngineResponse, isEngineRequest, PROTOCOL } from './protocol';

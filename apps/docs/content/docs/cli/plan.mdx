@@ -1,0 +1,79 @@
+---
+title: simulci plan
+description: Which jobs and steps run for a scenario, and why.
+---
+
+```sh
+npx simulci plan [flags]
+```
+
+Reads the checkout's workflows (`.github/workflows/*.yml`), its local actions (`action.yml` under `.github/actions/`
+and at the root) and prints the plan of every workflow for one scenario. See [How verdicts work](/docs/verdicts)
+for reading it.
+
+## The scenario
+
+| Flag        | Sets                                         | Example                         |
+| ----------- | -------------------------------------------- | ------------------------------- |
+| `--event`   | the event; default `push`                    | `--event pull_request`          |
+| `--action`  | the activity type                            | `--action labeled`              |
+| `--ref`     | the git ref, or a branch name                | `--ref refs/tags/v1`            |
+| `--branch`  | the branch (`refs/heads/<branch>`)           | `--branch main`                 |
+| `--tag`     | the tag (`refs/tags/<tag>`)                  | `--tag v1.2.0`                  |
+| `--base`    | a pull request's base branch                 | `--base main`                   |
+| `--head`    | a pull request's head branch                 | `--head feat/x`                 |
+| `--changed` | the changed files                            | `--changed src/a.ts,docs/b.md`  |
+| `--input`   | a `workflow_dispatch` input, `name=value`    | `--input dry-run=true`          |
+| `--var`     | a variable that exists, `NAME=value`         | `--var DEPLOY_ENV=staging`      |
+| `--secret`  | a secret that exists, by name                | `--secret NPM_TOKEN`            |
+| `--actor`   | the actor's login                            | `--actor dependabot[bot]`       |
+| `--fork`    | the pull request comes from a fork           | `--fork`                        |
+| `--message` | the head commit message                      | `--message 'docs: x [skip ci]'` |
+| `--dir`     | the checkout to read; default `.`            | `--dir ../app`                  |
+
+Give at most one of `--ref`, `--branch` and `--tag`. `--changed`, `--input`, `--var` and `--secret` take a
+comma-separated list, or repeat; an input of `true`, `false` or a number is typed as one. Changed files left out
+are unknown, so a `paths` filter cannot decide. The rest of a [scenario](/docs/reference/scenarios) (a pull
+request's number, the default branch, `workflow_run`, …) is written in a test's `when:`.
+
+## Output
+
+| Flag       | Values                                                                      |
+| ---------- | --------------------------------------------------------------------------- |
+| `--format` | `text` (default); `json`, the plan itself; `mermaid`, a flowchart of the jobs |
+| `--detail` | `steps` (default); `legs` stops at the jobs and their matrix legs           |
+
+## Mocks
+
+`--assume` states one entry of what only the run knows, commas and all. Repeat it for more, or give `--assume-file`
+a YAML list of entries:
+
+```sh
+--assume build=failure                       # a job's outcome
+--assume build.test=failure                  # a step's outcome: success, failure or cancelled
+--assume build.version.outputs.tag=v1.2.0    # a step output
+--assume deploy.#1.env.TARGET=prod           # a $GITHUB_ENV write of the first step
+--assume build.cache=as:hit                  # a preset of a shipped model
+--assume '{ uses: actions/cache, as: miss }' # any entry, in YAML
+```
+
+The unit before `=` is a [unit path](/docs/reference/test-files#unit-paths): a bare job id names the job, a path
+with a step names the step. See [Mocks](/docs/reference/mocks) for every field.
+
+## As a test case
+
+`--as-test jobs` (or a bare `--as-test`) prints the plan as a [test case](/docs/reference/test-files) to start
+from: what runs, skips and might run, and the conclusion. `--as-test steps` adds a `units` entry per step.
+`--workflow ci.yml` chooses the workflow; the default is the first one triggered.
+
+```sh
+npx simulci plan --event push --branch main --as-test steps > .github/simulci/tests/push.test.yml
+```
+
+## Exit codes
+
+`0` with the plan, also when a mock cannot apply (its error is printed after the plan). `2`, with the reason on
+stderr, when the checkout has no workflows, two of `--ref`, `--branch` and `--tag` are given, `--format`, `--detail`
+or `--as-test` is given a value not in its list, an `--assume` entry or file is not in an entry's form, the
+`--assume-file` cannot be read, or `--workflow` names no workflow. Any other error also exits `2` with its message;
+`SIMULCI_DEBUG=1` prints its stack as well.

@@ -1,10 +1,23 @@
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { renderUsage } from 'citty';
 import { describe, expect, it } from 'vitest';
+import { FlagError } from '../src/args';
 import { planOutput } from '../src/plan';
 import { snapshotPath } from '@simulci/node';
-import { runTestCommand, type TestIo } from '../src/test';
+import { runTestCommand, type TestIo, testArgs, testCommand } from '../src/test';
+
+const root = join(import.meta.dirname, '../../..');
+
+/** `simulci test --dir <dir>`, run from source outside CI. */
+const simulci = (dir: string, flags: string[], env: Record<string, string> = {}) =>
+  spawnSync(
+    join(root, 'node_modules/.bin/tsx'),
+    ['--conditions=source', join(root, 'packages/cli/src/index.ts'), 'test', '--dir', dir, ...flags],
+    { encoding: 'utf8', env: { ...process.env, CI: '', GITHUB_ACTIONS: '', SIMULCI_DEBUG: '', ...env } },
+  );
 
 const ci = `
 on:
@@ -108,6 +121,9 @@ describe('simulci test', () => {
     });
     expect(runTestCommand({ dir }, io())).toBe(1);
     expect(runTestCommand({ dir, assume: 'build.t=failure' }, io())).toBe(0);
+    const unread = io();
+    expect(runTestCommand({ dir, assumeFile: join(dir, 'nope.yml') }, unread)).toBe(2);
+    expect(unread.err.join('')).toBe(`--assume-file ${join(dir, 'nope.yml')}: no such file\n`);
     const missing = io();
     expect(runTestCommand({ dir, files: [join(dir, '.github/simulci/tests/nope.test.yml')] }, missing)).toBe(
       2,
@@ -116,6 +132,92 @@ describe('simulci test', () => {
     const none = io();
     expect(runTestCommand({ dir: checkout({ '.github/workflows/ci.yml': ci }) }, none)).toBe(2);
     expect(none.out.join('')).toContain('T000 no test files');
+  });
+});
+
+describe('testArgs', () => {
+  it('keeps every --assume whole, and every test file named', () => {
+    expect(
+      testArgs([
+        'a.test.yml',
+        '--assume',
+        'build.t=failure',
+        '-t',
+        'main',
+        '--assume',
+        '{ job: deploy, outcome: success }',
+        'b.test.yml',
+      ]),
+    ).toMatchObject({
+      dir: '.',
+      files: ['a.test.yml', 'b.test.yml'],
+      filter: 'main',
+      assume: ['build.t=failure', '{ job: deploy, outcome: success }'],
+    });
+    expect(testArgs(['-u']).files).toBeUndefined();
+  });
+
+  it('refuses a --snapshot-detail it does not take, and reads the camelCase forms of its flags', async () => {
+    expect(testArgs([]).snapshotDetail).toBe('steps');
+    expect(testArgs(['--snapshot-detail', 'legs', '--assume-file', 'm.yml'])).toMatchObject({
+      snapshotDetail: 'legs',
+      assumeFile: 'm.yml',
+    });
+    expect(testArgs(['--snapshotDetail=legs', '--assumeFile', 'm.yml'])).toMatchObject({
+      snapshotDetail: 'legs',
+      assumeFile: 'm.yml',
+    });
+    expect(() => testArgs(['--snapshot-detail', 'jobs'])).toThrow(
+      new FlagError("--snapshot-detail takes steps or legs, not 'jobs'"),
+    );
+    const help = await renderUsage(testCommand);
+    expect(help).toContain('--snapshot-detail=');
+    expect(help).toContain('--assume-file=');
+    expect(help).not.toMatch(/--[a-z]+[A-Z]/);
+  });
+
+  it('applies every --assume from the command line', () => {
+    const dir = checkout({
+      '.github/workflows/ci.yml': `
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - { id: a, run: ./a }
+      - { id: b, run: ./b }
+      - { id: c, if: "steps.a.outputs.go == 'yes' && steps.b.outputs.go == 'yes'", run: ./c }
+`,
+      '.github/simulci/tests/ci.test.yml':
+        'workflow: ci.yml\ncases:\n  - { name: c, when: { event: push }, then: { units: { build.c: { runs: yes } } } }\n',
+    });
+    const both = simulci(dir, ['--assume', 'build.a.outputs.go=yes', '--assume', 'build.b.outputs.go=yes']);
+    expect(both.status, both.stdout + both.stderr).toBe(0);
+    expect(simulci(dir, ['--assume', 'build.a.outputs.go=yes']).status).toBe(1);
+  });
+
+  it('exits 2 with one line for a value it does not take, or an error it does not expect', () => {
+    const dir = checkout({
+      '.github/workflows/ci.yml': ci,
+      '.github/simulci/tests/ci.test.yml':
+        'workflow: ci.yml\ncases:\n  - { name: x, when: { event: push, branch: main }, then: { run: [build] } }\n',
+    });
+    const bad = simulci(dir, ['--snapshot-detail', 'jobs']);
+    expect([bad.status, bad.stdout, bad.stderr]).toEqual([
+      2,
+      '',
+      "--snapshot-detail takes steps or legs, not 'jobs'\n",
+    ]);
+    // The JUnit report's directory would be under a file.
+    const junit = join(dir, '.github/workflows/ci.yml/out/junit.xml');
+    const crash = simulci(dir, ['--junit', junit]);
+    expect([crash.status, crash.stderr]).toEqual([
+      2,
+      `ENOTDIR: not a directory, mkdir '${join(dir, '.github/workflows/ci.yml/out')}'\n`,
+    ]);
+    expect(crash.stdout).toContain('1 passed · 0 failed');
+    const debug = simulci(dir, ['--junit', junit], { SIMULCI_DEBUG: '1' });
+    expect(debug.stderr).toMatch(/^Error: ENOTDIR: [^\n]*\n {4}at /);
   });
 });
 

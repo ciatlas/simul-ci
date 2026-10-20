@@ -1,0 +1,62 @@
+---
+title: Scenarios
+description: 'The facts about one run that simulci plans: the event, the ref, the changed files, the actor.'
+---
+
+A scenario is what a test case's `when:` (over `given:`) holds, what the [Action](/docs/action)'s `scenario` input
+takes, and what the `simulci plan` flags build. Unknown keys are errors.
+
+JSON schema: [`schemas/scenario/v1.json`](https://ciatlas.github.io/simulci/schemas/scenario/v1.json).
+
+## Fields
+
+| Field           | Is                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------- |
+| `event`         | the event as written under `on:` (`push`, `pull_request`, `workflow_dispatch`, …); required |
+| `action`        | the activity type (`opened`, `labeled`, `completed`, …)                                     |
+| `ref`           | any git ref: `refs/heads/main`, `heads/main`, `tags/v1`, or a bare branch name              |
+| `branch`        | the branch: `refs/heads/<branch>`                                                           |
+| `tag`           | the tag: `refs/tags/<tag>`                                                                  |
+| `base`          | a pull request's base branch; default: the default branch                                   |
+| `head`          | a pull request's head branch                                                                |
+| `number`        | the pull request (or issue) number                                                          |
+| `merged`        | for `pull_request` `closed`: the pull request was merged                                    |
+| `sha`           | the head commit, 7 to 40 lowercase hex digits                                               |
+| `defaultBranch` | default `main`                                                                              |
+| `repository`    | `owner/name`                                                                                |
+| `message`       | the head commit message, where skip markers are read                                        |
+| `actor`         | `{ login, fork, bot }`: `fork` for a pull request from a fork; `bot` (an app or bot) has no effect yet |
+| `changed`       | the changed files: paths, or `{ path, status, from }` with `status` one of `added`, `modified`, `removed`, `renamed` |
+| `inputs`        | `workflow_dispatch` inputs: strings, booleans, numbers                                      |
+| `vars`          | the variables that exist; any other reads as `''`                                           |
+| `secrets`       | the names of the secrets that exist; `GITHUB_TOKEN` always does                             |
+| `environments`  | the deployment environments that exist; no effect on the plan yet                          |
+| `cron`          | for `schedule`: the cron that fired                                                         |
+| `workflow_run`  | for `workflow_run`: `{ name, branch, conclusion }` of the run that triggers this one        |
+| `platform`      | `dotcom` (default) or `ghes`; no effect on the plan yet                                    |
+
+Give at most one of `ref`, `branch` and `tag`. A bare name in `ref` is a branch: write a tag as `tag: v1`, `refs/tags/v1`
+or `tags/v1`. A bare path in `changed` is `modified`.
+Leave `changed` out and it is unknown: a `paths` filter then says `maybe`.
+
+## The ref GitHub uses
+
+simulci sets `github.ref` the way GitHub does for the event:
+
+- `pull_request`, `pull_request_review` and `pull_request_review_comment` run on `refs/pull/<number>/merge`
+  (number `1` when not given), or on the base branch for a `closed` pull request that was `merged`.
+- `pull_request_target` runs on the base branch; `merge_group` on `refs/heads/gh-readonly-queue/<base>` unless a
+  ref is given.
+- `release` runs on its tag; without a tag the ref is unknown.
+- Every other event runs on the ref given, else on the default branch.
+
+## Examples
+
+```yaml
+when: { event: push, branch: main, changed: [src/app.ts] }
+when: { event: pull_request, action: opened, base: main, head: feat/x, actor: { fork: true } }
+when: { event: workflow_dispatch, inputs: { environment: staging, dry-run: true } }
+when: { event: schedule, cron: '0 6 * * 1' }
+when: { event: workflow_run, workflow_run: { name: CI, branch: main, conclusion: failure } }
+when: { event: push, tag: v1.2.0 }
+```

@@ -1,0 +1,63 @@
+---
+title: How verdicts work
+description: Runs, skips, might run; the reasons that decide, the unknowns behind a maybe, and the pins that settle one.
+---
+
+Every workflow, job, matrix leg and step in a plan has a verdict:
+
+| Verdict | In text | Means                                              |
+| ------- | ------- | -------------------------------------------------- |
+| `yes`   | `●`     | it runs                                            |
+| `no`    | `○`     | it skips                                           |
+| `maybe` | `◐`     | it might run: something only the run knows decides |
+
+## Reasons
+
+A verdict carries its chain of reasons, in the order GitHub decides; the first one that says no decides it. A
+workflow's chain lists every trigger gate; a job's or a step's ends at the first no.
+
+- A workflow is decided by its trigger: the `event`, its activity `types`, the `schedule`, each filter (`branches`,
+  `branches-ignore`, `tags`, `tags-ignore`, `paths`, `paths-ignore`, `workflows`) and a `skip-ci` marker in the
+  commit message (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` or a `skip-checks: true`
+  trailer, on a `push` or `pull_request`).
+- A job, leg or step is decided by its `parent` (the workflow or job it belongs to), its `if:` (with the `success()`
+  GitHub adds when the condition has no status function), a `matrix` only the run knows, and a platform `limit`.
+
+An `if:` reason shows the condition as written, its value, and the values it read that are still unknown:
+
+```text
+○ deploy — if: github.ref == 'refs/heads/main' → false
+◐ ~deploy-sh — if: steps.build.outputs.changed == 'true' → ? one of true, false (.github/workflows/ci.yml#deploy/steps.build.outputs.changed) [steps.build.outputs.changed]
+```
+
+The same reason names are what a test's [`because:`](/docs/reference/test-files#because) asserts.
+
+## Unknowns
+
+A `maybe` names the unknowns behind it: values the scenario does not give and no mock pins, such as a step's
+output, a step's outcome, a `$GITHUB_ENV` write, a dispatch input, or the changed files a `paths` filter needs.
+The plan lists them ranked by how many units each one affects.
+
+simulci never runs a script. A step that runs succeeds unless a mock says otherwise; what an inline `run:` script
+writes to `$GITHUB_OUTPUT` or `$GITHUB_ENV` is read when the write is literal (`echo "k=v" >> "$GITHUB_OUTPUT"`),
+and is unknown when it depends on the shell.
+
+## Pins
+
+An unknown that something can settle carries its pin: the scenario field, or the [assume entry](/docs/reference/mocks)
+with the producing step or job already named:
+
+```text
+Unknowns:
+  scenario.action · affects 1 · pin: scenario {"action":"opened"}
+  .github/workflows/ci.yml#deploy/steps.build.outputs.changed · affects 1 · pin: assume {"step":"deploy.build","outputs":{"changed":""}}
+```
+
+Fill in the value: a `scenario` pin goes in a case's `when:` (or the matching `simulci plan` flag), an `assume` pin
+in `--assume` or `when.assume`; the Unknowns panel of the [web app](/docs/web-app) pins both. An unknown without a
+pin is one only the run can know.
+
+## What it does not know
+
+Whether a script succeeds, how long anything takes, races between jobs, approvals and flaky steps. Pin an outcome
+with a mock to plan the run where a step fails.

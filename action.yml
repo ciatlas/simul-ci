@@ -61,7 +61,7 @@ outputs:
   failed:
     description: Cases that failed.
   invalid:
-    description: Cases and files that are invalid (a schema error, a selector that names nothing, a mock conflict).
+    description: Cases that are invalid (a selector that names nothing, a mock conflict). A file with a YAML or schema error counts no case; `exit-code` is 2.
   skipped:
     description: Cases skipped.
   exit-code:

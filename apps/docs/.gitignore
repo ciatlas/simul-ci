@@ -1,0 +1,4 @@
+# Next.js: the build, the static export and the generated route types.
+.next/
+out/
+next-env.d.ts

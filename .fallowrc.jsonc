@@ -11,6 +11,8 @@
     "apps/web/e2e/node-plan.ts",
     // Run in Node by apps/web/e2e/case.spec.ts: the copied case checked against TestFileSchema and run as `simulci test`.
     "apps/web/e2e/node-case.ts",
+    // The docs pages, which apps/docs/lib/source.ts loads by glob (fumadocs-mdx).
+    "apps/docs/content/**/*.mdx",
   ],
   // Vite serves apps/web/public at the site root, where index.html asks for it.
   "ignoreUnresolvedImports": ["/theme.js"],
@@ -36,7 +38,8 @@
       { "from": "cli", "allow": ["engine", "document", "node"] },
       { "from": "action", "allow": ["engine", "node"] },
       // The web app's tests check parity with the Node host (file discovery); the bundle check keeps node out of the page.
-      { "from": "web", "allow": ["engine", "document", "node"] },
+      // The docs' tests run the CLI's commands, so the flags and outputs the docs show are the CLI's.
+      { "from": "web", "allow": ["engine", "document", "node", "cli"] },
       { "from": "ee", "allow": ["engine", "document", "web"] },
     ],
   },
