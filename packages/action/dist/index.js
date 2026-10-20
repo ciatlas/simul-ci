@@ -43925,7 +43925,9 @@ function foldLegs(legs) {
 function checksOf(plan) {
 	return plan.workflows.flatMap(workflowChecks);
 }
+/** An untriggered workflow reports no check, also when its jobs are planned (`planUntriggered`). */
 function workflowChecks(wf) {
+	if (wf.triggered.verdict === "no") return [];
 	return wf.jobs.flatMap(jobChecks);
 }
 function jobChecks(job) {
@@ -44291,11 +44293,14 @@ function addStep(segments, link) {
 /** Whether `[k=v,…]` reads back as these values: no `/`, `,` or `]`, no surrounding space, no `=` in a key. */
 const legInPath = (leg) => Object.entries(leg).every(([k, v]) => plainCell(k) && !k.includes("=") && plainCell(v));
 const plainCell = (s) => s.trim() === s && !/[/,\]]/.test(s);
-/** Whether another workflow of the plan has a job of the same id as the unit's first job. */
+/**
+* Whether another triggered workflow of the plan has a job of the same id as the unit's first job. An untriggered
+* one's jobs (`planUntriggered`) are never planned units, so no entry can name them.
+*/
 function sharesJobId(plan, node, location) {
 	const first = location.chain[0];
 	if (first?.kind !== "job") return false;
-	return plan.workflows.some((w) => w.depth === 0 && !node.startsWith(`${w.id}#`) && w.jobs.some((j) => j.jobId === first.id));
+	return plan.workflows.some((w) => w.depth === 0 && w.triggered.verdict !== "no" && !node.startsWith(`${w.id}#`) && w.jobs.some((j) => j.jobId === first.id));
 }
 //#endregion
 //#region ../engine/src/scenario.ts
@@ -45333,7 +45338,7 @@ function simulate(opts) {
 		if (!parsed.success) throw new MocksError(`invalid ${layer} mocks:\n${prettifyError(parsed.error)}`);
 		layers[layer] = parsed.data;
 	}
-	return new Planner(loaded, scenario, opts.detail ?? "steps", opts.maxDepth ?? 10, new MockResolver(layers), opts.models ?? SHIPPED_MODELS).run();
+	return new Planner(loaded, scenario, opts.detail ?? "steps", opts.maxDepth ?? 10, new MockResolver(layers), opts.models ?? SHIPPED_MODELS, new Set(opts.planUntriggered)).run();
 }
 var Planner = class {
 	loaded;
@@ -45342,6 +45347,7 @@ var Planner = class {
 	maxDepth;
 	mocks;
 	shipped;
+	untriggered;
 	unknowns = /* @__PURE__ */ new Map();
 	diagnostics = [];
 	applied = [];
@@ -45349,13 +45355,14 @@ var Planner = class {
 	/** Every planned step and leg by id, with the location an assume entry is matched against. */
 	units = /* @__PURE__ */ new Map();
 	index;
-	constructor(loaded, scenario, detail, maxDepth, mocks, shipped) {
+	constructor(loaded, scenario, detail, maxDepth, mocks, shipped, untriggered) {
 		this.loaded = loaded;
 		this.scenario = scenario;
 		this.detail = detail;
 		this.maxDepth = maxDepth;
 		this.mocks = mocks;
 		this.shipped = shipped;
+		this.untriggered = untriggered;
 		this.index = loaded.index;
 	}
 	run() {
@@ -45396,9 +45403,31 @@ var Planner = class {
 		return out;
 	}
 	planWorkflow(wf, ctx) {
-		const { id, settings, scenario, triggered, inputs, wfName } = this.setupWorkflow(wf, ctx);
-		const plan = workflowShell(wf, id, settings, triggered, inputs, ctx);
-		if (triggered.verdict === "no") return plan;
+		const setup = this.setupWorkflow(wf, ctx);
+		const plan = workflowShell(wf, setup.id, setup.settings, setup.triggered, setup.inputs, ctx);
+		if (setup.triggered.verdict === "no") {
+			if (ctx.depth === 0 && this.untriggered.has(wf.path)) plan.jobs = this.untriggeredJobs(wf, setup, ctx);
+			return plan;
+		}
+		const { jobs, state } = this.planJobs(wf, setup, ctx);
+		plan.jobs = jobs;
+		plan.conclusion = runConclusion(jobs.map((j) => j.result));
+		plan.outputs = this.callOutputs(wf, plan, state);
+		return plan;
+	}
+	/**
+	* The jobs of an untriggered workflow, asked for by `planUntriggered`: each is skipped under the workflow. The values
+	* they read are no part of the run, so the unknowns they note are dropped.
+	*/
+	untriggeredJobs(wf, setup, ctx) {
+		const before = new Set(this.unknowns.keys());
+		const { jobs } = this.planJobs(wf, setup, ctx);
+		for (const id of this.unknowns.keys()) if (!before.has(id)) this.unknowns.delete(id);
+		return jobs;
+	}
+	/** The jobs in `needs` order, listed as written, and the workflow's context for its outputs. */
+	planJobs(wf, setup, ctx) {
+		const { id, settings, scenario, triggered, inputs, wfName } = setup;
 		const base = {
 			scenario,
 			workflow: wfName,
@@ -45430,13 +45459,13 @@ var Planner = class {
 				settings: settingsOfJob
 			}));
 		}
-		plan.jobs = Object.keys(wf.jobs).map((k) => planned.get(k));
-		plan.conclusion = runConclusion(plan.jobs.map((j) => j.result));
-		plan.outputs = this.callOutputs(wf, plan, {
-			...base,
-			env: wfEnv
-		});
-		return plan;
+		return {
+			jobs: Object.keys(wf.jobs).map((k) => planned.get(k)),
+			state: {
+				...base,
+				env: wfEnv
+			}
+		};
 	}
 	/** The workflow's settings, node id, scenario (a callee sees the secrets it is given), trigger decision and inputs. */
 	setupWorkflow(wf, ctx) {
