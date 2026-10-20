@@ -118,11 +118,18 @@ const legInPath = (leg: Record<string, string>): boolean =>
 
 const plainCell = (s: string): boolean => s.trim() === s && !/[/,\]]/.test(s);
 
-/** Whether another workflow of the plan has a job of the same id as the unit's first job. */
+/**
+ * Whether another triggered workflow of the plan has a job of the same id as the unit's first job. An untriggered
+ * one's jobs (`planUntriggered`) are never planned units, so no entry can name them.
+ */
 function sharesJobId(plan: RunPlan, node: NodeId, location: Location): boolean {
   const first = location.chain[0];
   if (first?.kind !== 'job') return false;
   return plan.workflows.some(
-    (w) => w.depth === 0 && !node.startsWith(`${w.id}#`) && w.jobs.some((j) => j.jobId === first.id),
+    (w) =>
+      w.depth === 0 &&
+      w.triggered.verdict !== 'no' &&
+      !node.startsWith(`${w.id}#`) &&
+      w.jobs.some((j) => j.jobId === first.id),
   );
 }
