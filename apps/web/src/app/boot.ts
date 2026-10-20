@@ -1,3 +1,4 @@
+import { installEditPrefetch } from '../edit/load';
 import { createSession, type Session } from '../engine/session';
 import { loadedMetrics } from '../graph/metrics';
 import { createGraphSession, type GraphSession } from '../graph/session';
@@ -67,6 +68,7 @@ export function bootApp(): App {
   });
   installShortcuts(store);
   installStaleClock({ store });
+  installEditPrefetch(store);
   void sources.restore();
   return { store, client, session, layout, graph, sources, buffers, keeper, prompt };
 }

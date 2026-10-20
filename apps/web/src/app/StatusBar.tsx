@@ -1,5 +1,5 @@
 import type { RunPlan } from '@simulci/engine';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { heldSentence } from '../engine/hold';
 import { summarize } from '../plan/summary';
 import type { Pin } from '../state/store';
@@ -18,12 +18,15 @@ interface Line {
 /** The key of every sentence but a pin's and the hold's. */
 const SUMMARY = 'summary';
 
+/** A refused edit's sentence and fixes: the edit runtime refused it, so its chunk is in by then. */
+const RefusalLine = lazy(() => import('../edit/edit').then((m) => ({ default: m.RefusalLine })));
+
 /**
  * One sentence per plan, for the eye and the screen reader, half a second behind so bursts read once. The plan that
  * answers a pin says what the pin changed ("pinned; deploy now runs"); every other plan says its summary. While an
  * edit broke the YAML, the line says what the plan waits for instead (synthesis § 7.2). While the inputs or the texts
  * have changed since the plan, the sentence is set in italics: the top bar says "· stale" in words, and the sentence
- * keeps the contrast of the rest of the line.
+ * keeps the contrast of the rest of the line. A refused edit adds its sentence and its fixes (edit/Refusal.tsx).
  */
 export function StatusBar() {
   const plan = useSession((s) => s.plan?.plan);
@@ -31,6 +34,7 @@ export function StatusBar() {
   const project = useSession((s) => s.project.status);
   const waits = useSession((s) => (s.project.held ? heldSentence(s.project.held) : undefined));
   const stale = useSession((s) => s.staleShown);
+  const refused = useSession((s) => s.edit.refused !== undefined);
   const [line, setLine] = useState<Line>({ text: '', key: SUMMARY });
 
   // Keyed on the plan, not the pin: a pin is answered together with its plan, and one made since says nothing until
@@ -53,6 +57,11 @@ export function StatusBar() {
       <span key={line.key} className={stale && line.key !== 'held' ? 'italic' : undefined}>
         {line.text}
       </span>
+      {refused && (
+        <Suspense fallback={null}>
+          <RefusalLine />
+        </Suspense>
+      )}
     </footer>
   );
 }

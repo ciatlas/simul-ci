@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * The browser bundle's contract, checked from the source maps and stylesheets of `apps/web/dist`:
- * - the engine (and with it @ciatlas/core, zod, yaml, @actions/*, picomatch) lives only in the engine worker chunk;
+ * - the engine (and with it @ciatlas/core, zod, @actions/*, picomatch) lives only in the engine worker chunk;
+ * - yaml lives only in the engine worker and the edit runtime, and the document model, but for its text edits, only in
+ *   the edit runtime;
  * - the engine worker chunk is built from core's browser entry (no node-fs, no git);
  * - elkjs lives only in the layout worker chunk, which holds none of the engine;
  * - no chunk imports a Node built-in or holds the Node host (packages/node);
@@ -27,11 +29,14 @@ const BUDGETS = [
   // elkjs: 428.5 kB measured.
   { name: 'the layout worker', test: (f) => f.startsWith('layout.worker-'), kB: 493 },
   // React, the router, React Flow and its d3 modules, Base UI, the scenario form, the panels and the edit history,
-  // with the crash snapshot, the replace prompt and edit mode: 230.3 kB measured.
+  // with the crash snapshot, the replace prompt, edit mode and the edit runtime's loader: 231.8 kB measured.
   { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 251 },
   // CodeMirror's view, state, language and commands with the YAML grammar, and the pane's edit mode, fetched when the
   // pane first opens: 107.1 kB measured (95.4 before edit mode).
   { name: 'the YAML pane', test: (f) => f.startsWith('YamlPane-'), kB: 124 },
+  // The edit runtime: yaml with its composer, the document model and the op dispatch, fetched for editing: 60.0 kB
+  // measured.
+  { name: 'the edit runtime', test: (f) => f.startsWith('edit-'), kB: 69 },
 ];
 
 const problems = [];

@@ -1,6 +1,7 @@
 import type { AssumeEntry, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { regionEdit, type TextEdit, touched } from '@simulci/document/edits';
+import type { PendingSel, Refused } from '../edit/types';
 import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
 import { fileLabel } from '../lib/file-label';
@@ -237,6 +238,10 @@ export interface EditState extends history.History {
   on: boolean;
   /** Generated files the author chose to edit this session. */
   unlocked: string[];
+  /** Where the selection goes once the plan of the texts an op or an undo left is in (§ 4.10). */
+  pendingSel?: PendingSel;
+  /** The last refused edit, for the status line and the gesture's callout, until an edit commits or it is dismissed. */
+  refused?: Refused;
 }
 
 export interface Replacing {
@@ -327,6 +332,8 @@ export interface SessionActions {
   /** Undoes the last entry; false when there is none or the hash guard stopped it. */
   undo: () => boolean;
   redo: () => boolean;
+  /** Keeps a refused edit for the status line, or clears it (`undefined`); returns its `seq`. */
+  refused: (refused: Omit<Refused, 'seq'> | undefined) => number;
   /** Restore conflicts for the author to settle; the snapshot writer waits until none is left. */
   offerRestore: (offer: RestoreOffer) => void;
   /** Settles a restore conflict: the snapshot's text (`mine`, one undoable entry) or the file as it is (`disk`). */
@@ -488,18 +495,29 @@ const UNLOADED = {
 export function createSessionStore(initial: SessionState = initialSessionState()): SessionStore {
   return createStore<SessionState & SessionActions>((set, get) => {
     /** Commits a step of the history in one `set()` with the texts it changes (`committed`). */
-    const commit = (step: (s: SessionState) => StepOutcome, verb?: 'undo' | 'redo'): EditOutcome => {
+    const commit = (
+      step: (s: SessionState) => StepOutcome,
+      verb?: 'undo' | 'redo',
+      after?: history.SelectionRef,
+    ): EditOutcome => {
       let outcome: EditOutcome = { ok: false };
       set((s) => {
-        const result = committed(s, step(s), verb && { verb, id: ++noticeId });
+        const result = committed(s, step(s), verb && { verb, id: ++noticeId }, after);
         outcome = result.outcome;
         return result.patch;
       });
       return outcome;
     };
-    /** After an undo or a redo, the pane shows the file and the line it changed (§ 6); it is not opened for it. */
-    const revealed = (outcome: EditOutcome): boolean => {
-      if (outcome.ok) set((s) => revealPatch(s) ?? s);
+    /**
+     * After an undo or a redo, the pane shows the file and the line it changed (§ 6), without being opened for it, and
+     * the selection goes back to where the entry was made (or to where a redone op left it) once its plan is in.
+     */
+    const revealed = (outcome: EditOutcome, verb: 'undo' | 'redo'): boolean => {
+      if (outcome.ok)
+        set((s) => {
+          const patch = { ...revealPatch(s), ...restoredSelection(s, verb) };
+          return Object.keys(patch).length > 0 ? patch : s;
+        });
       return outcome.ok;
     };
     return {
@@ -564,9 +582,17 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       setDetail: (detail) => set((s) => ({ detail, stale: inputsStale(s) })),
       setFocus: (focus) => set({ focus }),
       // Returning `s` skips the update: a held selection keeps the tab the author picked.
+      // The author's own choice wins over the one an edit left waiting for its plan.
       select: (focus, sel) =>
         set((s) =>
-          s.focus === focus && s.sel === sel ? s : { focus, sel, ui: withYamlFile(s.ui, undefined) },
+          s.focus === focus && s.sel === sel
+            ? s
+            : {
+                focus,
+                sel,
+                ui: withYamlFile(s.ui, undefined),
+                ...(s.edit.pendingSel ? { edit: { ...s.edit, pendingSel: undefined } } : {}),
+              },
         ),
       toggleExpanded: (job) => set((s) => ({ ui: { ...s.ui, expanded: toggled(s.ui.expanded, job) } })),
       setRepresentative: (job, leg) =>
@@ -604,7 +630,12 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           },
         })),
       unknownFocused: (seq) => set((s) => (s.unknownFocus?.seq === seq ? { unknownFocus: undefined } : {})),
-      transact: (input) => commit((s) => history.transact(s.edit, s.files.byPath, input, contextOf(s))),
+      transact: (input) =>
+        commit(
+          (s) => history.transact(s.edit, s.files.byPath, input, contextOf(s)),
+          undefined,
+          input.selectionAfter,
+        ),
       typed: (path, splices, alone) =>
         commit((s) => history.typed(s.edit, s.files.byPath, path, splices, contextOf(s), alone)),
       closeGroup: () => set((s) => (s.edit.group ? { edit: { ...s.edit, ...history.close(s.edit) } } : s)),
@@ -621,14 +652,39 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         set((s) =>
           s.edit.on === on
             ? s
-            : { edit: { ...history.close(s.edit), restore: s.edit.restore, on, unlocked: s.edit.unlocked } },
+            : {
+                edit: {
+                  ...history.close(s.edit),
+                  restore: s.edit.restore,
+                  on,
+                  unlocked: s.edit.unlocked,
+                  refused: on ? s.edit.refused : undefined,
+                },
+              },
         ),
       unlock: (path) =>
         set((s) =>
           s.edit.unlocked.includes(path) ? s : { edit: { ...s.edit, unlocked: [...s.edit.unlocked, path] } },
         ),
-      undo: () => revealed(commit((s) => history.undo(s.edit, s.files.byPath), 'undo')),
-      redo: () => revealed(commit((s) => history.redo(s.edit, s.files.byPath), 'redo')),
+      undo: () =>
+        revealed(
+          commit((s) => history.undo(s.edit, s.files.byPath), 'undo'),
+          'undo',
+        ),
+      redo: () =>
+        revealed(
+          commit((s) => history.redo(s.edit, s.files.byPath), 'redo'),
+          'redo',
+        ),
+      refused: (refused) => {
+        if (!refused) {
+          set((s) => (s.edit.refused ? { edit: { ...s.edit, refused: undefined } } : s));
+          return 0;
+        }
+        const seq = ++requestSeq;
+        set((s) => ({ edit: { ...s.edit, refused: { ...refused, seq } } }));
+        return seq;
+      },
       projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
       // A new project of the newest texts: whatever was held is released.
       projectReady: (version, outline, files) =>
@@ -658,6 +714,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           stale: plan.for.files < s.files.version ? 'edit' : false,
           error: replaceError(s.error, undefined),
           pin: answered(s.pin, plan),
+          ...pendingSelection(s, plan),
         })),
       rejected: (error) => set((s) => ({ error: replaceError(s.error, error) })),
       clearError: () => set((s) => ({ error: replaceError(s.error, undefined) })),
@@ -682,6 +739,7 @@ function committed(
   s: SessionState,
   outcome: StepOutcome,
   stopped?: { verb: string; id: number },
+  after?: history.SelectionRef,
 ): { patch: Partial<SessionState>; outcome: EditOutcome } {
   if (outcome === undefined) return { patch: s, outcome: { ok: false } };
   if ('refused' in outcome) {
@@ -706,7 +764,41 @@ function committed(
     };
   if (!texts.files) return { patch, outcome: { ok: false } };
   patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
+  // An edit that commits answers the last refusal; an op leaves the selection waiting for its plan.
+  patch.edit = { ...patch.edit!, refused: undefined, ...pending(s, after, texts.files.version) };
   return { patch, outcome: { ok: true } };
+}
+
+/**
+ * The selection to apply once the plan of `files` is in. One already shown needs no plan, and drops a selection an
+ * earlier edit left waiting: the newest edit says where the author is. No selection keeps the one waiting.
+ */
+function pending(
+  s: Pick<SessionState, 'focus' | 'sel' | 'edit'>,
+  to: history.SelectionRef | undefined,
+  files: number,
+): { pendingSel?: PendingSel } {
+  if (!to) return {};
+  if (to.focus === s.focus && to.sel === s.sel) return s.edit.pendingSel ? { pendingSel: undefined } : {};
+  return { pendingSel: { ...to, files } };
+}
+
+/** An undone entry's selection from before it, a redone one's from after it, for the plan of the texts now. */
+function restoredSelection(s: SessionState, verb: 'undo' | 'redo'): Partial<SessionState> {
+  const tx = verb === 'undo' ? s.edit.future.at(-1) : s.edit.past.at(-1);
+  const to = verb === 'undo' ? tx?.selection.before : tx?.selection.after;
+  const next = pending(s, to, s.files.version);
+  return 'pendingSel' in next ? { edit: { ...s.edit, ...next } } : {};
+}
+
+/**
+ * The selection an edit left waiting, applied by the first plan of its texts or newer ones: an older plan would
+ * resolve its unit path against the old text, and so perhaps to another node (§ 4.10).
+ */
+function pendingSelection(s: SessionState, plan: PlanState): Partial<SessionState> {
+  const waiting = s.edit.pendingSel;
+  if (!waiting || plan.for.epoch !== s.files.epoch || plan.for.files < waiting.files) return {};
+  return { focus: waiting.focus, sel: waiting.sel, edit: { ...s.edit, pendingSel: undefined } };
 }
 
 /**

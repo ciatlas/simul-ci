@@ -53,6 +53,23 @@
           }
         ]
       }
+    },
+    {
+      "files": ["apps/web/src/edit/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@simulci/engine",
+                "message": "only src/worker/** runs the engine; the page imports types, or values from @simulci/engine/plan and @simulci/engine/render",
+                "allowTypeImports": true
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "options": {
