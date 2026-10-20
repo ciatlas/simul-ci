@@ -14,7 +14,9 @@ export function checksOf(plan: RunPlan): CheckVerdict[] {
   return plan.workflows.flatMap(workflowChecks);
 }
 
+/** An untriggered workflow reports no check, also when its jobs are planned (`planUntriggered`). */
 function workflowChecks(wf: WorkflowPlan): CheckVerdict[] {
+  if (wf.triggered.verdict === 'no') return [];
   return wf.jobs.flatMap(jobChecks);
 }
 
