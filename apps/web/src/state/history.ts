@@ -225,6 +225,40 @@ function tryApply(text: string, edits: readonly TextEdit[]): ReturnType<typeof a
   }
 }
 
+/**
+ * A commit of a Properties field's focus session (synthesis § 4.4), applied at once as `transact` applies it, and
+ * grouped with the session's earlier commits under `key` (`field:<file>:<path>`): the session is one entry when its
+ * group closes, on blur or at any other edit. A commit under another key closes the open group first; one that changes
+ * nothing leaves the history as it is. A file to create or remove is never grouped: that commit is a transaction.
+ */
+export function grouped(h: History, texts: Texts, key: string, input: TxInput, ctx: Context): Step | Refusal {
+  if (input.files.some((f) => f.create || f.remove)) return transact(h, texts, input, ctx);
+  const changes: Record<string, string> = {};
+  const edits: Record<string, readonly TextEdit[]> = {};
+  for (const file of input.files) {
+    const planned = planFile(texts, file);
+    if (planned === undefined) continue;
+    if ('refused' in planned) return planned;
+    changes[file.path] = planned.text!;
+    edits[file.path] = planned.change.edits;
+  }
+  if (Object.keys(changes).length === 0) return { history: h, changes: {}, edits: {} };
+  const joined = h.group?.key === key ? h.group : undefined;
+  const before = { ...joined?.before };
+  for (const path of Object.keys(changes)) before[path] ??= texts[path]!;
+  const group: OpenGroup = {
+    key,
+    label: joined?.label ?? input.label,
+    origin: input.origin,
+    before,
+    now: { ...joined?.now, ...changes },
+    selection: joined?.selection ?? ctx.selection,
+    last: ctx.at,
+  };
+  const open = joined ? h : close(h);
+  return { history: { ...open, future: [], group, lastOrigin: input.origin }, changes, edits };
+}
+
 /** A typed edit that is not a key: a paste, a cut or a drop is an entry of its own. */
 export type Alone = 'paste' | 'cut' | 'drop';
 

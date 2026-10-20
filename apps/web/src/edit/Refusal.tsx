@@ -21,7 +21,7 @@ export function RefusalNote({ seq }: { seq: number | undefined }) {
   if (!refused || refused.seq !== seq) return null;
   return (
     <div className="flex flex-col gap-1.5 rounded border border-might bg-might-soft px-2 py-1.5 text-xs">
-      <Body refused={refused} />
+      <RefusalView refused={refused} />
     </div>
   );
 }
@@ -32,12 +32,16 @@ export function RefusalLine() {
   if (!refused) return null;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-text">
-      <Body refused={refused} />
+      <RefusalView refused={refused} />
     </div>
   );
 }
 
-function Body({ refused }: { refused: Refused }) {
+/**
+ * A refusal's sentence and its fixes. Taking a fix runs it against the texts the refusal was made on; Dismiss takes
+ * the store's refusal away (one shown before any edit, a field's read-only reason, has none to dismiss).
+ */
+export function RefusalView({ refused, dismiss = true }: { refused: Refused; dismiss?: boolean }) {
   const { store } = useApp();
   const take = (fix: Fix): void => {
     applyFix(store, refused, fix);
@@ -50,23 +54,25 @@ function Body({ refused }: { refused: Refused }) {
       <div className="flex flex-wrap items-center gap-1.5">
         {refused.refusal.fixes.map((fix) => (
           <button key={`${fix.kind}:${fix.label}`} type="button" className={BUTTON} onClick={() => take(fix)}>
-            {fix.label}
+            <Sentence text={fix.label} />
           </button>
         ))}
-        <button
-          type="button"
-          className="rounded px-1.5 text-muted hover:text-text"
-          aria-label="Dismiss"
-          onClick={() => store.getState().refused(undefined)}
-        >
-          ×
-        </button>
+        {dismiss && (
+          <button
+            type="button"
+            className="rounded px-1.5 text-muted hover:text-text"
+            aria-label="Dismiss"
+            onClick={() => store.getState().refused(undefined)}
+          >
+            ×
+          </button>
+        )}
       </div>
     </>
   );
 }
 
-/** A refusal's sentence, its `quoted` parts set as code. */
+/** A refusal's sentence or a fix's label, its `quoted` parts set as code. */
 function Sentence({ text }: { text: string }) {
   const parts = text.split('`');
   // An odd backtick count leaves the last part plain.
