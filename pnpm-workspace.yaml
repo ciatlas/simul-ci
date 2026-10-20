@@ -9,3 +9,10 @@ virtualStoreDirMaxLength: 120
 # esbuild (behind vitest, vite and tsx) installs its platform binary in a build script.
 allowBuilds:
   esbuild: true
+# style-mod (CodeMirror's styles) puts its rules in a constructed style sheet only in a shadow root, and in a document
+# writes a <style> element, which the web app's CSP (style-src 'self', apps/web/vercel.json) refuses. Patched to use
+# the constructed sheet in a document too. Upstream left that in 2021 because an adopted sheet outranks the page's
+# own on a tie (codemirror/codemirror.next#360); the web app styles the editor through its theme only, so nothing
+# ties. pnpm refuses to install while the patch matches no installed version, so a new style-mod comes back here.
+patchedDependencies:
+  style-mod@4.1.4: patches/style-mod@4.1.4.patch

@@ -162,6 +162,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  style-mod@4.1.4: 8bfa7fdb5e9d125048bbcd8c51523f0ccacff1115ab4f2ba40b9afa04d52002f
+
 importers:
 
   .:
@@ -3607,7 +3610,7 @@ snapshots:
       '@lezer/common': 1.5.3
       '@lezer/highlight': 1.2.5
       '@lezer/lr': 1.4.11
-      style-mod: 4.1.4
+      style-mod: 4.1.4(patch_hash=8bfa7fdb5e9d125048bbcd8c51523f0ccacff1115ab4f2ba40b9afa04d52002f)
 
   '@codemirror/state@6.7.6':
     dependencies:
@@ -3619,7 +3622,7 @@ snapshots:
     dependencies:
       '@codemirror/state': 6.7.6
       crelt: 1.0.7
-      style-mod: 4.1.4
+      style-mod: 4.1.4(patch_hash=8bfa7fdb5e9d125048bbcd8c51523f0ccacff1115ab4f2ba40b9afa04d52002f)
       w3c-keyname: 2.2.8
 
   '@emnapi/runtime@1.11.3':
@@ -6067,7 +6070,7 @@ snapshots:
       character-entities-html4: 2.1.0
       character-entities-legacy: 3.0.0
 
-  style-mod@4.1.4: {}
+  style-mod@4.1.4(patch_hash=8bfa7fdb5e9d125048bbcd8c51523f0ccacff1115ab4f2ba40b9afa04d52002f): {}
 
   style-to-js@1.1.21:
     dependencies:
