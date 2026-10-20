@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
 /**
- * Editing the YAML in the pane, in a real browser under the deployment's CSP (synthesis § 9.2 A5, § 9.5): in edit
- * mode a key typed into a file re-simulates and the card follows; undoing everything gives back the file's bytes; a
+ * Editing the YAML in the pane, in a real browser under the deployment's CSP (synthesis § 9.2 A5, C2, § 9.5): in edit
+ * mode a key typed into a file re-simulates and the card follows; undoing everything gives back the file's bytes; an
+ * edit that stops the workflow from being triggered keeps its jobs on the canvas, dimmed under a banner; a
  * CRLF file with a BOM edited by one character downloads with exactly that character changed, its BOM and its CRLF
  * kept; a generated file refuses edits until the author unlocks it; an edit survives a reload; and opening another
  * source while a file has unsaved edits asks first.
@@ -115,6 +116,43 @@ test('typing if: false turns the deploy card skipped, and undoing everything giv
     'aria-label',
     'Undo Typing in ci.yml',
   );
+});
+
+test('filtering the push to release branches keeps the jobs on the canvas, dimmed under a banner whose button simulates another event', async ({
+  page,
+}) => {
+  await openStarter(page);
+  await editMode(page);
+  // Line 4 of the starter's CI: `branches: [main]` under its push, which the scenario simulates.
+  await endOfLine(page, 4);
+  await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 'main'.length; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await page.keyboard.type('release/**');
+
+  const banner = page.getByRole('status').filter({ hasText: 'Not triggered by' });
+  await expect(banner.locator('p')).toHaveText(
+    'Not triggered by push to main (branches [release/**] ← main: false). Showing its jobs as they would be planned.',
+  );
+  await expect(page.locator(`.react-flow__node-workflow[data-id="${CI}"] .sc-scope`)).toHaveAttribute(
+    'data-dimmed',
+    'true',
+  );
+  for (const job of ['test', 'build', 'deploy', 'preview'])
+    await expect(jobNode(page, job)).toHaveAttribute('aria-label', /^skipped .* — parent no/);
+  // The Reasons tab says why a job of it is skipped, and the canvas still selects it.
+  await jobNode(page, 'deploy').locator('.sc-card-label').click();
+  await page
+    .getByRole('tablist', { name: 'Plan details' })
+    .getByRole('tab', { name: /^Reasons/ })
+    .click();
+  await expect(page.getByRole('tabpanel', { name: 'Reasons' })).toContainText(
+    'Its workflow is not triggered',
+  );
+
+  await banner.getByRole('button', { name: 'Simulate pull_request instead' }).click();
+  await expect(page.locator('[data-field="event"]')).toHaveValue('pull_request');
+  await expect(banner).toHaveCount(0);
+  await expect(jobNode(page, 'test')).not.toHaveAttribute('aria-label', /^skipped/);
 });
 
 test('a CRLF file with a BOM edited by one character downloads with that character changed and nothing else', async ({

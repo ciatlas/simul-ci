@@ -59,7 +59,9 @@ interface Build {
  * list a scope before its jobs and a job before its callee, in plan order.
  */
 function scopeOf(b: Build, wf: WorkflowPlan, caller: NodeId | undefined): NodeId {
-  const collapsed = wf.depth === 0 ? wf.triggered.verdict === 'no' : wf.depth > 2 && !b.opened.has(wf.id);
+  const dimmed = drawnUntriggered(b, wf);
+  const collapsed =
+    wf.depth === 0 ? wf.triggered.verdict === 'no' && !dimmed : wf.depth > 2 && !b.opened.has(wf.id);
   const scope: ScopeModel = compact({
     id: wf.id,
     path: wf.path,
@@ -70,6 +72,7 @@ function scopeOf(b: Build, wf: WorkflowPlan, caller: NodeId | undefined): NodeId
     depth: wf.depth,
     caller,
     collapsed,
+    dimmed: dimmed || undefined,
     jobs: [],
     edges: [],
     shape: '',
@@ -83,6 +86,13 @@ function scopeOf(b: Build, wf: WorkflowPlan, caller: NodeId | undefined): NodeId
   b.shapes[wf.id] = scope.shape;
   return wf.id;
 }
+
+/**
+ * The workflow being edited, untriggered, with the jobs the session had the engine plan for it anyway (synthesis
+ * § 4.12): it is laid out, dimmed, so an edit that stops it from running leaves something to edit.
+ */
+const drawnUntriggered = (b: Build, wf: WorkflowPlan): boolean =>
+  wf.depth === 0 && wf.triggered.verdict === 'no' && wf.path === b.ui.only && wf.jobs.length > 0;
 
 function countsOf(jobs: readonly JobPlan[]): Record<Tri, number> {
   const counts: Record<Tri, number> = { yes: 0, no: 0, maybe: 0 };

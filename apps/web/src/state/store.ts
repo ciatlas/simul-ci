@@ -48,9 +48,17 @@ export interface PlanState {
    * The files version the plan was simulated from, which may be older than the store's while an edit is answered,
    * the epoch of those files, the project version it answers, and the case layer it was simulated with: the plan
    * names the assume entries by position, so it speaks of the list it was given and of no other. The scenario is the
-   * store's object it was simulated from, so a pin can tell the plan that answers it.
+   * store's object it was simulated from, so a pin can tell the plan that answers it. `untriggered` is the
+   * `planUntriggered` it was simulated with (edit mode's focus): two plans compare job by job only when it is the same.
    */
-  for: { files: number; epoch: number; project: number; assume?: AssumeEntry[]; scenario?: ScenarioInput };
+  for: {
+    files: number;
+    epoch: number;
+    project: number;
+    assume?: AssumeEntry[];
+    scenario?: ScenarioInput;
+    untriggered?: string[];
+  };
 }
 
 /**

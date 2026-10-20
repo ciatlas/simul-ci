@@ -17,9 +17,10 @@ import { newlyBroken } from './hold';
  * source) gives the scenario its defaults; a load of texts edited within the epoch keeps the scenario, the selection
  * and the plan on screen, which says it is stale until the next one comes. A load that breaks the YAML of a file that
  * parsed on the plan shown is held (§ 7.2): the plan stays, nothing simulates, and the next load without new YAML
- * errors releases it. Each plan is labelled with the files version it was simulated from, so a plan of older texts
- * never passes for one of the texts on screen. The engine reads busy while any request of the session is unanswered,
- * and failed once the client gives up on it.
+ * errors releases it. In edit mode the focused workflow is planned even when nothing triggers it, so its jobs stay
+ * on the canvas; edit mode or the focus moving re-simulates when that changes the plan. Each plan is labelled with
+ * the files version it was simulated from, so a plan of older texts never passes for one of the texts on screen.
+ * The engine reads busy while any request of the session is unanswered, and failed once the client gives up on it.
  */
 
 export interface SessionOptions {
@@ -49,6 +50,27 @@ const hasProjectFiles = (s: SessionState): boolean => Object.keys(s.files.byPath
 
 const inputsChanged = (s: SessionState, prev: SessionState): boolean =>
   s.scenario !== prev.scenario || s.assume !== prev.assume || s.detail !== prev.detail;
+
+/**
+ * The workflows the engine plans although nothing triggers them: in edit mode the focused one, so a filter edit that
+ * stops it from running leaves its jobs on the canvas to edit (synthesis § 4.12).
+ */
+const untriggeredOf = (s: SessionState): string[] | undefined =>
+  s.edit.on && s.focus ? [s.focus] : undefined;
+
+/**
+ * Edit mode or the focus moved the workflow planned untriggered, and the plan shown leaves that workflow, or the one
+ * before it, untriggered: only then does a new plan differ, since the option leaves a triggered workflow as it is.
+ */
+function untriggeredMoved(s: SessionState, prev: SessionState): boolean {
+  const now = untriggeredOf(s)?.[0];
+  const before = untriggeredOf(prev)?.[0];
+  if (now === before) return false;
+  const untriggered = (path: string | undefined): boolean =>
+    s.plan?.plan.workflows.some((w) => w.depth === 0 && w.path === path && w.triggered.verdict === 'no') ??
+    false;
+  return untriggered(now) || untriggered(before);
+}
 
 export interface Session {
   /** Simulates now, skipping the quiet period. */
@@ -168,12 +190,19 @@ export function createSession({
     const id = ++request;
     const { epoch } = s.files;
     const { assume, scenario } = s;
+    const untriggered = untriggeredOf(s);
     busy(1);
-    const r = await client.simulate({ project, scenario, assume, detail: s.detail });
+    const r = await client.simulate({
+      project,
+      scenario,
+      assume,
+      detail: s.detail,
+      planUntriggered: untriggered,
+    });
     busy(-1);
     if (id !== request) return;
     // The files the project was loaded from, not the store's newest: an edit since is not in this plan.
-    await settle(r, { files, epoch, project, assume, scenario });
+    await settle(r, { files, epoch, project, assume, scenario, ...(untriggered ? { untriggered } : {}) });
   };
 
   const settle = async (
@@ -227,7 +256,8 @@ export function createSession({
       edits.schedule(s.edit.lastOrigin === 'pane' ? Math.max(typingMs, lastCycle) : 0);
       return;
     }
-    if (s.project.status === 'ready' && !s.project.held && inputsChanged(s, prev)) simulate.call();
+    if (s.project.status !== 'ready' || s.project.held) return;
+    if (inputsChanged(s, prev) || untriggeredMoved(s, prev)) simulate.call();
   });
 
   if (hasProjectFiles(store.getState())) void load('source');
