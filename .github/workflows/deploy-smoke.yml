@@ -1,0 +1,45 @@
+name: Deployment smoke
+# Each Vercel deployment of the web app (apps/web), in Chromium as Vercel serves it (apps/web/e2e/deploy.spec.ts): the
+# headers vercel.json sets (the CSP, the worker scripts included, and the cache rules), a deep link and a missing
+# chunk, and the starter sample's plan with both workers running under the CSP. Vercel's Git integration posts a
+# deployment status for every preview and production deployment; with more than one Vercel project on this
+# repository it names the environment after the project ("Preview – simulci", "Production – simulci"), which keeps
+# the docs site's deployments out. Deployments are public (no Deployment Protection), so no secret is needed.
+on: deployment_status
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Deployment smoke
+    # A finished deployment of the web app's project by Vercel itself. GitHub runs the workflow and the spec of the
+    # deployed commit, so a pull request's preview is checked by that pull request's own spec.
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.creator.login == 'vercel[bot]' &&
+      endsWith(github.event.deployment.environment, ' – simulci')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The Chromium build the pinned @playwright/test drives, and the system libraries it needs.
+      - run: pnpm --filter @simulci/web exec playwright install --with-deps chromium
+      - name: The deployment as Vercel serves it
+        env:
+          BASE_URL: ${{ github.event.deployment_status.environment_url }}
+        run: pnpm --filter @simulci/web e2e
+      - id: traces
+        # A failed test keeps its trace (apps/web/playwright.config.ts); `pnpm exec playwright show-trace` replays it.
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deployment-smoke-traces
+          path: apps/web/test-results/

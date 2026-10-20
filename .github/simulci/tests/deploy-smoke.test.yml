@@ -1,0 +1,20 @@
+# Route tests for deploy-smoke.yml: a deployment status starts it, and the smoke job's if reads the status (its state,
+# its creator, the environment's name), which a scenario does not hold.
+workflow: deploy-smoke.yml
+cases:
+  - name: a deployment status may run the smoke, as its state, creator and environment decide
+    when: { event: deployment_status }
+    then:
+      maybe: [smoke]
+      checks: [Deployment smoke]
+      # What the if reads, all in the event's payload.
+      unknowns:
+        - github.event.deployment_status.state
+        - github.event.deployment.creator.login
+        - github.event.deployment.environment
+  - name: a push does not start it
+    when: { event: push, branch: main }
+    then: { because: event }
+  - name: a pull request does not either
+    when: { event: pull_request, base: main, head: feat/x }
+    then: { because: event }

@@ -1,11 +1,13 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defaultClientConditions, defineConfig } from 'vite';
+import { vercelHeaders } from './vercel-headers.ts';
 
 const FONT = /\.(?:woff2?|ttf|otf|eot)$/;
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  // `vite preview` (the browser pass) serves vercel.json's headers, the CSP among them.
+  plugins: [react(), tailwindcss(), vercelHeaders()],
   resolve: {
     // The engine and @ciatlas/core ship TypeScript source under the `source` export condition; core's `browser`
     // condition (one of the defaults) picks its entry without node:fs, node:path or git.

@@ -1,3 +1,5 @@
+// oxlint-disable-next-line import/no-unassigned-import -- first, so it hears what the CSP refuses below
+import './csp';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { answerLayout, isLayoutRequest, WARM_UP } from './layout-protocol';
 

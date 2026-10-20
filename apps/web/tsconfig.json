@@ -3,7 +3,9 @@
   "compilerOptions": {
     "lib": ["es2023", "dom", "dom.iterable"],
     "types": ["vite/client"],
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // vite.config.ts names vercel-headers.ts with its extension, as Vite's native config loader wants.
+    "allowImportingTsExtensions": true
   },
-  "include": ["src", "test", "e2e", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "test", "e2e", "vite.config.ts", "vercel-headers.ts", "playwright.config.ts"]
 }
