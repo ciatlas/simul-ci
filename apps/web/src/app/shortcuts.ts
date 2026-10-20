@@ -4,6 +4,7 @@ import { cardOf } from '../graph/navigate';
 import { planIndex, resolveSelection } from '../plan/index';
 import type { PanelTab, Prefs } from '../state/prefs';
 import type { SessionActions, SessionState, SessionStore } from '../state/store';
+import { historyCommand } from '../lib/history-keys';
 import { caseAvailability } from '../testcase/case';
 
 /**
@@ -62,6 +63,13 @@ const COMMANDS = new Map<string, PageCommand>([
   ['\\', 'pane:yaml'],
 ]);
 
+/**
+ * Where an undo key is not the page's: a field or an editable region keeps its own undo until it commits, and an open
+ * dialog keeps the keys. A read-only YAML pane is none of these: Mod+Z there undoes the page's last edit.
+ */
+const HISTORY_OWNERS =
+  'input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog, [role="dialog"]';
+
 /** Where a key is not the page's: form fields, editable regions, the YAML pane even read-only, an open dialog. */
 const OWNERS =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor, dialog, [role="dialog"]';
@@ -87,10 +95,10 @@ function held(event: PageKey): boolean {
   return event.altKey || event.ctrlKey;
 }
 
-function ownedElsewhere(target: EventTarget | null): boolean {
+function ownedElsewhere(target: EventTarget | null, owners = OWNERS): boolean {
   const el = target as Partial<HTMLElement> | null;
   if (!el || typeof el.closest !== 'function') return false;
-  return el.isContentEditable === true || el.closest(OWNERS) !== null;
+  return el.isContentEditable === true || el.closest(owners) !== null;
 }
 
 /** Listens for the page keys on the window; the returned function stops. */
@@ -114,22 +122,14 @@ export function installShortcuts(store: SessionStore, win: Window = window): () 
  * browser's own (an input's undo, nothing at all on the page) does not run too.
  */
 export function historyKey(event: HistoryKey, s: SessionState & SessionActions): boolean {
-  const command = s.edit.on && !ownedElsewhere(event.target) ? historyCommand(event) : undefined;
+  const command =
+    s.edit.on && !ownedElsewhere(event.target, HISTORY_OWNERS) ? historyCommand(event) : undefined;
   if (command === 'redo') s.redo();
   else if (command === 'undo') s.undo();
   return command !== undefined;
 }
 
-type HistoryKey = PageKey & { shiftKey?: boolean };
-
-/** Mod+Z undoes, Mod+Shift+Z and Mod+Y redo; Alt makes them someone else's, and so does a key already handled. */
-function historyCommand(event: HistoryKey): 'undo' | 'redo' | undefined {
-  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.defaultPrevented) return undefined;
-  const key = event.key.toLowerCase();
-  if (key === 'y') return 'redo';
-  if (key === 'z') return event.shiftKey ? 'redo' : 'undo';
-  return undefined;
-}
+type HistoryKey = PageKey & { shiftKey?: boolean; code?: string };
 
 /** Runs a command; false when it has nothing to act on, so the key goes on as if unheard. */
 function run(command: PageCommand, s: SessionState & SessionActions, win: Window): boolean {

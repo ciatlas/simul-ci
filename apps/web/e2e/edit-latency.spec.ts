@@ -5,7 +5,8 @@ import { expect, type Page, test } from '@playwright/test';
 /**
  * The latency gate (synthesis § 7.5, § 9.5) over flowpact's nine workflows (MIT, `fixtures/flowpact`, 1.6k lines):
  * a key typed into the pane reaches the plan in the store (`edit:plan`) and the canvas's next frame (`edit:painted`)
- * within twice the targets at the 95th percentile, and a burst of 40 keys runs no task over 50 ms on the main thread.
+ * within twice the targets at the 95th percentile, a burst of 40 keys runs no task over 50 ms on the main thread, and
+ * no plan that comes while the author types moves the cursor.
  * The marks are the page's own (`src/lib/marks.ts`). The figures go to the run's step summary.
  */
 
@@ -90,6 +91,10 @@ test('a key reaches the plan on screen within twice the target, and a burst of k
   const from = await page.evaluate(() => performance.now());
   await page.keyboard.type('y'.repeat(40), { delay: 50 });
   const to = await page.evaluate(() => performance.now());
+  // Twenty plans came while the author typed: the cursor never moved, so every key landed where the last one ended.
+  await expect(editor.locator('.cm-line').first()).toHaveText(
+    `name: Release #${'x'.repeat(SAMPLES)}${'y'.repeat(40)}`,
+  );
   const long = await page.evaluate(
     ([a, b]) =>
       (window as unknown as { longTasks: { start: number; ms: number }[] }).longTasks.filter(

@@ -17,7 +17,12 @@ export function SourceMenu() {
   return (
     <nav aria-label="Source" className="flex flex-wrap items-center gap-2">
       <SourceStatus source={source} fileCount={fileCount} />
-      {unsaved > 0 && <span className="text-text text-xs">● {unsaved} unsaved</span>}
+      {unsaved > 0 && (
+        <span className="text-text text-xs">
+          <span aria-hidden="true">● </span>
+          {unsaved} unsaved
+        </span>
+      )}
       {sources.canPickFolder && (
         <button type="button" className={button} onClick={() => void sources.openFolder()}>
           Open folder

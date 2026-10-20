@@ -16,7 +16,7 @@ const THEME_LABEL = { system: 'Theme: system', light: 'Theme: light', dark: 'The
 const KEYS_HINT = 'The single keys t, f, ., 0, r, c, e, 1 to 4, [, ] and \\ act on the page while this is on';
 
 const button =
-  'rounded border border-border bg-surface px-2 py-1 text-text hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-50';
+  'rounded border border-border bg-surface px-2 py-1 text-text hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
 
 /** The page's chrome: the ways in, the scenario id, the engine, the view, the page keys and the theme. */
 export function TopBar() {
@@ -121,7 +121,7 @@ function EditControls() {
           <HistoryButton
             verb="Redo"
             entry={redo}
-            keys="Control+Shift+Z Meta+Shift+Z Control+Y"
+            keys="Control+Shift+Z Meta+Shift+Z Control+Y Meta+Y"
             act={doRedo}
           />
         </>
@@ -143,15 +143,18 @@ function HistoryButton({
   act: () => boolean;
 }) {
   const name = entry === undefined ? verb : `${verb} ${entry}`;
+  // aria-disabled rather than disabled: a button that empties its history keeps the focus.
   return (
     <button
       type="button"
       className={button}
-      disabled={entry === undefined}
+      aria-disabled={entry === undefined}
       aria-label={name}
       title={entry === undefined ? `Nothing to ${verb.toLowerCase()}` : name}
       aria-keyshortcuts={keys}
-      onClick={() => act()}
+      onClick={() => {
+        if (entry !== undefined) act();
+      }}
     >
       {verb}
     </button>

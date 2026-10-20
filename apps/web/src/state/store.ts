@@ -1,6 +1,6 @@
 import type { AssumeEntry, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { regionEdit, type TextEdit } from '@simulci/document/edits';
+import { regionEdit, type TextEdit, touched } from '@simulci/document/edits';
 import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
 import { fileLabel } from '../lib/file-label';
@@ -131,7 +131,13 @@ export interface SessionState {
      * The edits of the last commit of the history, per file, with each file's rev before it: a view that shows the
      * text of that rev maps the edits instead of comparing texts (`yaml/bridge.ts`).
      */
-    edited?: { version: number; revs: Record<string, number>; edits: Record<string, readonly TextEdit[]> };
+    edited?: {
+      version: number;
+      revs: Record<string, number>;
+      edits: Record<string, readonly TextEdit[]>;
+      /** Each file's line endings before the commit: the text the edits' offsets are in. */
+      eols: Record<string, FileMeta['eol']>;
+    };
   };
   project: {
     status: 'idle' | 'loading' | 'ready' | 'error';
@@ -203,6 +209,11 @@ export interface SessionState {
   edit: EditState;
   /** A new source asked to replace files with unsaved edits; the replace prompt answers it (`app/replace.ts`). */
   replacing?: Replacing;
+  /**
+   * Core's generated marker of each file that has one, from the last Outline committed or held, kept through a load
+   * that failed; absent until the epoch's first Outline, when no file is known not to be generated.
+   */
+  generated?: Record<string, string>;
 }
 
 /** A file of the crash snapshot that did not come back by itself (synthesis § 5.6): the author settles it. */
@@ -371,12 +382,43 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
   };
 }
 
-/** The edit state of a new epoch: no history, no restore offer; entry ids go on, so none is ever reused. */
+/**
+ * The edit state of a new epoch: no history, no restore offer, nothing unlocked (another repository's file at the same
+ * path is another file); entry ids go on, so none is ever reused.
+ */
 const freshEdit = (edit: EditState): EditState => ({
   ...history.emptyHistory(edit.next),
   on: edit.on,
-  unlocked: edit.unlocked,
+  unlocked: [],
 });
+
+/** Where the last commit changed the files first: its file and the line of its first edit, in the new text. */
+function revealPatch(s: SessionState): Partial<SessionState> | undefined {
+  const edited = s.files.edited;
+  if (!edited) return undefined;
+  const path = Object.keys(edited.edits).find((p) => s.files.byPath[p] !== undefined);
+  const splices = path === undefined ? undefined : edited.edits[path];
+  if (path === undefined || !splices?.length) return undefined;
+  const text = s.files.byPath[path]!;
+  const at = Math.min(text.length, touched(splices)[0]!.from);
+  const line = text.slice(0, at).split(/\r\n?|\n/).length;
+  return { reveal: { file: path, line, seq: ++requestSeq }, ui: withYamlFile(s.ui, path) };
+}
+
+/** The edit state with its history gone and the rest (the mode, the unlocks, a restore offer) kept. */
+const clearedHistory = (edit: EditState): EditState => ({
+  ...edit,
+  ...history.emptyHistory(edit.next),
+  group: undefined,
+  lastOrigin: undefined,
+});
+
+/** Each generated file's marker, by path. */
+function markersOf(outline: Outline): Record<string, string> {
+  const markers: Record<string, string> = {};
+  for (const f of outline.files) if (f.generated !== undefined) markers[f.path] = f.generated;
+  return markers;
+}
 
 const withoutConflict = (edit: EditState, path: string): EditState => {
   const conflicts = edit.restore?.conflicts.filter((c) => c.path !== path) ?? [];
@@ -427,6 +469,7 @@ const UNLOADED = {
   project: { status: 'idle' },
   plan: undefined,
   graph: undefined,
+  generated: undefined,
   stale: false,
   ...UNPINNED,
 } as const;
@@ -442,6 +485,11 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         return result.patch;
       });
       return outcome;
+    };
+    /** After an undo or a redo, the pane shows the file and the line it changed (§ 6); it is not opened for it. */
+    const revealed = (outcome: EditOutcome): boolean => {
+      if (outcome.ok) set((s) => revealPatch(s) ?? s);
+      return outcome.ok;
     };
     return {
       ...initial,
@@ -568,16 +616,18 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         set((s) =>
           s.edit.unlocked.includes(path) ? s : { edit: { ...s.edit, unlocked: [...s.edit.unlocked, path] } },
         ),
-      undo: () => commit((s) => history.undo(s.edit, s.files.byPath), 'undo').ok,
-      redo: () => commit((s) => history.redo(s.edit, s.files.byPath), 'redo').ok,
+      undo: () => revealed(commit((s) => history.undo(s.edit, s.files.byPath), 'undo')),
+      redo: () => revealed(commit((s) => history.redo(s.edit, s.files.byPath), 'redo')),
       projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
       // A new project of the newest texts: whatever was held is released.
       projectReady: (version, outline, files) =>
         set((s) => ({
           project: { status: 'ready', version, outline, files },
+          generated: markersOf(outline),
           error: replaceError(s.error, undefined),
         })),
-      projectHeld: (held) => set((s) => ({ project: { ...s.project, held } })),
+      projectHeld: (held) =>
+        set((s) => ({ project: { ...s.project, held }, generated: markersOf(held.outline) })),
       projectFailed: (error) =>
         set((s) => ({ project: { status: 'error' }, error: replaceError(s.error, error) })),
       engineReady: ({ version, models }) =>
@@ -628,7 +678,7 @@ function committed(
       return { patch: s, outcome: { ok: false, refusal: outcome } };
     const text = `${stopped.verb} stopped: ${fileLabel(outcome.path)} changed outside the history`;
     return {
-      patch: { edit: freshEdit(s.edit), notices: [...s.notices, { id: stopped.id, text }] },
+      patch: { edit: clearedHistory(s.edit), notices: [...s.notices, { id: stopped.id, text }] },
       outcome: { ok: false, refusal: outcome },
     };
   }
@@ -637,7 +687,12 @@ function committed(
   if (!texts.files && outcome.history === s.edit) return { patch: s, outcome: { ok: false } };
   const patch: Partial<SessionState> = { ...texts, edit: { ...s.edit, ...outcome.history } };
   if (texts.files)
-    texts.files.edited = { version: texts.files.version, revs: s.files.revs, edits: outcome.edits };
+    texts.files.edited = {
+      version: texts.files.version,
+      revs: s.files.revs,
+      edits: outcome.edits,
+      eols: Object.fromEntries(Object.keys(outcome.edits).map((p) => [p, s.files.meta[p]?.eol ?? 'none'])),
+    };
   if (!texts.files) return { patch, outcome: { ok: false } };
   patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
   return { patch, outcome: { ok: true } };
@@ -814,23 +869,26 @@ function answered(pin: Pin | undefined, plan: PlanState): Pin | undefined {
 /** Why the pane may not edit a file, or that it may. */
 export type Writable =
   | { ok: true }
-  | { ok: false; reason: 'off' | 'missing' | 'encoding' | 'mixed' }
+  | { ok: false; reason: 'off' | 'missing' | 'encoding' | 'loading' | 'mixed' }
   | { ok: false; reason: 'generated'; marker: string };
 
 /**
- * Whether the pane may edit a file (synthesis § 4.3): in edit mode, a file read as valid UTF-8, with one kind of line
- * ending, and not generated unless the author unlocked it this session. Invalid YAML stays writable: the pane is
- * where it gets fixed.
+ * Whether the pane may edit a file (synthesis § 4.3): in edit mode, a file read as valid UTF-8, known not to be
+ * generated (an Outline of the epoch has come) unless the author unlocked it in this epoch or has edited it already
+ * (a marker typed into it does not lock it under the cursor), with one kind of line ending. Generated is said before
+ * mixed, so a locked file never offers Convert. Invalid YAML stays writable: the pane is where it gets fixed.
  */
-export function writable(s: Pick<SessionState, 'edit' | 'files' | 'project'>, path: string): Writable {
+export function writable(s: Pick<SessionState, 'edit' | 'files' | 'generated'>, path: string): Writable {
   if (!s.edit.on) return { ok: false, reason: 'off' };
   const meta = s.files.meta[path];
-  if (s.files.byPath[path] === undefined || !meta) return { ok: false, reason: 'missing' };
+  const text = s.files.byPath[path];
+  if (text === undefined || !meta) return { ok: false, reason: 'missing' };
   if (!meta.utf8) return { ok: false, reason: 'encoding' };
+  if (s.generated === undefined) return { ok: false, reason: 'loading' };
+  const marker = s.generated[path];
+  const kept = s.edit.unlocked.includes(path) || text !== s.files.base[path];
+  if (marker !== undefined && !kept) return { ok: false, reason: 'generated', marker };
   if (meta.eol === 'mixed') return { ok: false, reason: 'mixed' };
-  const marker = newestOutline(s)?.files.find((f) => f.path === path)?.generated;
-  if (marker !== undefined && !s.edit.unlocked.includes(path))
-    return { ok: false, reason: 'generated', marker };
   return { ok: true };
 }
 

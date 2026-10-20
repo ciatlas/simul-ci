@@ -439,6 +439,18 @@ describe('the graph model', () => {
   });
 });
 
+describe('the graph model in edit mode', () => {
+  it('draws the focused workflow alone, untriggered too, and every workflow for a focus the plan does not hold', () => {
+    expect(modelOf(starter, push, { only: ci }).roots).toEqual([ci]);
+    // Release does not run on a push to main: hidden as untriggered, but not while it is the one being edited.
+    expect(modelOf(starter, push, { hideUntriggered: true }).roots).not.toContain(release);
+    expect(modelOf(starter, push, { hideUntriggered: true, only: release }).roots).toEqual([release]);
+    expect(modelOf(starter, push, { only: '.github/workflows/nope.yml' }).roots).toEqual(
+      modelOf(starter, push).roots,
+    );
+  });
+});
+
 describe('the shape of a scope', () => {
   it('stays when only the scenario changes: same jobs, other verdicts', () => {
     const before = modelOf(starter, push);

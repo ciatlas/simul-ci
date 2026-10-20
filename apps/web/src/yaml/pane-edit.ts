@@ -7,7 +7,7 @@ import { fileLabel } from '../lib/file-label';
 import { markEdit } from '../lib/marks';
 import { stampOf } from '../state/history';
 import { type SessionStore, writable } from '../state/store';
-import { type Eol, eolOf, toTextEdits } from './bridge';
+import { agrees, type Eol, eolOf, toTextEdits } from './bridge';
 import { aloneOf, type EditHandlers, indentOf, writableExtensions } from './editing';
 import { type PaneDocs, readOnlyExtensions } from './extensions';
 
@@ -37,9 +37,19 @@ export function paneEditing(
       blurred: () => store.getState().closeGroup(),
     };
   };
+  /** Each file's indent, read once per epoch: typing a file's first indented line does not change its Tab. */
+  const indents = new Map<string, { epoch: number; indent: number }>();
+  const indentFor = (path: string): number => {
+    const { epoch, byPath } = store.getState().files;
+    const known = indents.get(path);
+    if (known?.epoch === epoch) return known.indent;
+    const indent = indentOf(byPath[path] ?? '');
+    indents.set(path, { epoch, indent });
+    return indent;
+  };
   return (path) => {
     const s = store.getState();
-    const indent = indentOf(s.files.byPath[path] ?? '');
+    const indent = indentFor(path);
     const ok = writable(s, path).ok;
     // One object per file and kind, so a state that holds it already is not reconfigured on every key.
     const key = `${ok ? `w${indent}` : 'r'}\0${path}`;
@@ -59,13 +69,16 @@ export function paneEditing(
 function forward(store: SessionStore, docs: PaneDocs | undefined, path: string, tr: Transaction): boolean {
   const s = store.getState();
   const text = s.files.byPath[path];
-  if (text === undefined) return false;
+  // A view that does not show the store's text would map the key elsewhere: refused, and the view is given it again.
+  if (text === undefined || !agrees(tr.startState.doc, text)) return false;
   const edits = toTextEdits(tr.startState.doc, tr.changes, text, eolOf(s.files.meta[path]));
   const outcome = s.typed(path, edits, aloneOf(tr));
   const rev = store.getState().files.revs[path];
   if (outcome.ok && rev !== undefined) {
     docs?.typed(path, rev);
     markEdit('edit:tx', rev);
+    // The file typed in stays shown, whichever file the selection's next plan decides in.
+    if (store.getState().ui.yamlFile !== path) store.getState().setYamlFile(path);
   }
   return outcome.ok || outcome.refusal === undefined;
 }
@@ -93,10 +106,13 @@ function verify(
   queueMicrotask(() => docs?.rebuild(view, path, text, rev));
 }
 
-/** The line of a generated file's marker, among the first lines where core looks for it. */
-export function markerLine(text: string, marker: string): number {
+/**
+ * The line of a generated file's marker, among the first lines where core looks for it; none for a marker that is
+ * no text of the file (`.lock.yml`, the name).
+ */
+export function markerLine(text: string, marker: string): number | undefined {
   const index = text.split(/\r\n?|\n/, 10).findIndex((line) => line.includes(marker));
-  return index < 0 ? 1 : index + 1;
+  return index < 0 ? undefined : index + 1;
 }
 
 /** Converts a file's line endings to one kind, as one undoable entry: what makes a mixed file writable. */

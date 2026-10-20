@@ -148,7 +148,7 @@ function useEditor(host: RefObject<HTMLDivElement | null>, { files, path, node, 
     view.dispatch({
       effects: [
         // A state made earlier may hold the other theme, or be read-only where the file is writable now.
-        themeCompartment.reconfigure(themeFor(pageIsDark())),
+        ...themed(view),
         ...configured(view, editing(path)),
         ...lineEffects(lines),
         ...scroll,
@@ -164,11 +164,18 @@ function editsFor(files: SessionState['files'], path: string): PaneEdits | undef
   const { edited } = files;
   const edits = edited?.edits[path];
   const from = edited?.revs[path];
-  const meta = files.meta[path];
-  if (!edited || !edits || from === undefined || edited.version !== files.revs[path] || meta?.eol === 'mixed')
+  // The edits' offsets are in the text before the commit: its line endings, which a convert or a restore may change.
+  const eol = edited?.eols[path];
+  if (!edited || !edits || from === undefined || edited.version !== files.revs[path] || eol === 'mixed')
     return undefined;
-  return { from, edits, eol: eolOf(meta) };
+  return { from, edits, eol: eolOf({ eol: eol ?? 'none' }) };
 }
+
+/** The effect that puts the page's theme in the view, unless it holds it already. */
+const themed = (view: EditorView): StateEffect<unknown>[] => {
+  const theme = themeFor(pageIsDark());
+  return themeCompartment.get(view.state) === theme ? [] : [themeCompartment.reconfigure(theme)];
+};
 
 /** The effect that puts a file's edit extension in the view, unless it holds that one already. */
 const configured = (view: EditorView, extension: Extension): StateEffect<unknown>[] =>

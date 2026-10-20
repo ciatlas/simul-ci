@@ -98,7 +98,7 @@ test('typing if: false turns the deploy card skipped, and undoing everything giv
   // Mod+Z in the editor goes to the page's history, as the Undo button does; the canvas follows.
   await page.keyboard.press('ControlOrMeta+z');
   const undo = page.getByRole('button', { name: /^Undo/ });
-  while (await undo.isEnabled()) await undo.click();
+  while ((await undo.getAttribute('aria-disabled')) !== 'true') await undo.click();
   await expect(jobNode(page, 'deploy')).not.toHaveAttribute('aria-label', /^skipped/);
   await expect(footer(page)).not.toContainText('● unsaved');
   await expect(page).toHaveTitle('simulci');

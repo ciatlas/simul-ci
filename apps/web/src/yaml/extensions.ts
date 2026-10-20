@@ -24,7 +24,7 @@ import {
 } from '@codemirror/view';
 import type { TextEdit } from '@simulci/document/edits';
 import type { NodeId, Tri } from '@simulci/engine';
-import { type Eol, toChanges } from './bridge';
+import { agrees, type Eol, toChanges } from './bridge';
 import type { DecidingLines, ProblemLine } from './locs';
 
 /**
@@ -212,6 +212,12 @@ function changesTo(doc: Text, text: string): { from: number; to: number; insert:
   return { from: start, to: before.length - end, insert: after.slice(start, after.length - end) };
 }
 
+/** A transaction that brings the store's text in: nothing hands it back to the store. */
+const fromStoreChange = (changes: ChangeSpec) => ({
+  changes,
+  annotations: [fromStore.of(true), Transaction.addToHistory.of(false)],
+});
+
 /** Which text of a file a state holds: the files' epoch, and the file's rev within it. */
 export interface PaneText {
   epoch: number;
@@ -275,7 +281,7 @@ export class PaneDocs {
       this.#shown = undefined;
     }
     if (this.#shown === path) {
-      if (this.#rev !== at.rev) view.dispatch(this.#bringIn(view, text, edits));
+      if (this.#rev !== at.rev) this.#bringIn(view, text, edits);
       this.#rev = at.rev;
       return [];
     }
@@ -302,26 +308,27 @@ export class PaneDocs {
     if (this.#shown === path) this.#rev = rev;
   }
 
-  /** The shown file's state made again from the store's text, when the view and the store disagree. */
+  /**
+   * The shown file brought to the store's text again, when the view and the store disagree: one change of the state
+   * it has, so its cursor, its scroll and its marks map through it.
+   */
   rebuild(view: EditorView, path: string, text: string, rev: number): void {
     if (this.#shown !== path || this.#view !== view) return;
-    const state = this.#create(path, text);
-    this.#docs.set(path, { state, rev });
-    view.setState(state);
+    view.dispatch(fromStoreChange(changesTo(view.state.doc, text)));
     this.#rev = rev;
   }
 
-  /** The change that brings the shown state to the store's text: the store's own edits when they apply. */
-  #bringIn(view: EditorView, text: string, edits: PaneEdits | undefined) {
+  /**
+   * Brings the shown state to the store's text: the store's own edits when they apply to the text it holds, else
+   * one change between the two texts; and that one change too if the edits left the view out of step.
+   */
+  #bringIn(view: EditorView, text: string, edits: PaneEdits | undefined): void {
     const doc = view.state.doc;
-    const changes: ChangeSpec =
-      edits && edits.from === this.#rev
-        ? toChanges(doc, doc.sliceString(0, doc.length, edits.eol), edits.edits)
-        : changesTo(doc, text);
-    return {
-      changes,
-      annotations: [fromStore.of(true), Transaction.addToHistory.of(false)],
-    };
+    if (edits && edits.from === this.#rev) {
+      view.dispatch(fromStoreChange(toChanges(doc, doc.sliceString(0, doc.length, edits.eol), edits.edits)));
+      if (agrees(view.state.doc, text)) return;
+    }
+    view.dispatch(fromStoreChange(changesTo(view.state.doc, text)));
   }
 
   /** The state put aside for a file, brought to the text when the file's rev moved since. */

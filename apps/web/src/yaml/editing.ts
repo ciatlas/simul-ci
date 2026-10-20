@@ -2,6 +2,7 @@ import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { indentUnit } from '@codemirror/language';
 import { EditorState, type Extension, type Transaction } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
+import { historyCommand } from '../lib/history-keys';
 import type { Alone } from '../state/history';
 import { fromStore } from './extensions';
 
@@ -37,11 +38,6 @@ export function aloneOf(tr: Transaction): Alone | undefined {
   return undefined;
 }
 
-const taken = (act: () => boolean): boolean => {
-  act();
-  return true;
-};
-
 /** The extensions of a writable file: editable, keyed, indented, and listened to. */
 export function writableExtensions(path: string, indent: number, on: EditHandlers): Extension[] {
   return [
@@ -49,15 +45,18 @@ export function writableExtensions(path: string, indent: number, on: EditHandler
     EditorView.editable.of(true),
     EditorView.contentAttributes.of({ 'aria-label': path }),
     indentUnit.of(' '.repeat(indent)),
-    keymap.of([
-      // Taken whether or not there is anything to undo: the browser's own undo has nothing to do here.
-      { key: 'Mod-z', run: () => taken(on.undo), preventDefault: true },
-      { key: 'Mod-Shift-z', run: () => taken(on.redo), preventDefault: true },
-      { key: 'Mod-y', run: () => taken(on.redo), preventDefault: true },
-      ...defaultKeymap,
-      indentWithTab,
-    ]),
+    keymap.of([...defaultKeymap, indentWithTab]),
     EditorView.domEventHandlers({
+      // Before the keymap, which would take Mod+Shift+Z reported as a lowercase `z` for Mod+Z. Taken whether or not
+      // there is anything to undo: the browser's own undo has nothing to do here.
+      keydown: (event) => {
+        const command = historyCommand(event);
+        if (!command) return false;
+        event.preventDefault();
+        if (command === 'redo') on.redo();
+        else on.undo();
+        return true;
+      },
       beforeinput: (event) => {
         if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') return false;
         event.preventDefault();

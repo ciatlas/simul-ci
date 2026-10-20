@@ -420,13 +420,11 @@ describe('the history keys in edit mode', () => {
   it('undo with Mod+Z and redo with Mod+Shift+Z or Mod+Y, in edit mode only, where no field keeps its own undo', () => {
     const store = createSessionStore();
     store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'sample', name: 'x' });
-    store
-      .getState()
-      .transact({
-        label: 'Op',
-        origin: 'op',
-        files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '#' }] }],
-      });
+    store.getState().transact({
+      label: 'Op',
+      origin: 'op',
+      files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '#' }] }],
+    });
     const s = () => store.getState();
     expect(historyKey(key('z', { ctrlKey: true }), s())).toBe(false);
     s().setEdit(true);
@@ -440,5 +438,14 @@ describe('the history keys in edit mode', () => {
     expect(historyKey(key('z'), s())).toBe(false);
     expect(historyKey(key('z', { ctrlKey: true, altKey: true }), s())).toBe(false);
     expect(historyKey(key('z', { ctrlKey: true }, document.createElement('input')), s())).toBe(false);
+    // A read-only YAML pane keeps no undo of its own: the page's history takes the key there.
+    const pane = document.createElement('div');
+    pane.className = 'cm-editor';
+    const content = document.createElement('div');
+    content.contentEditable = 'false';
+    pane.append(content);
+    expect(historyKey(key('z', { ctrlKey: true }, content), s())).toBe(true);
+    // A layout that types no Latin letter there: the physical key says Z.
+    expect(historyKey({ ...key('я', { ctrlKey: true }), code: 'KeyZ' }, s())).toBe(true);
   });
 });

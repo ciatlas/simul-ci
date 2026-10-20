@@ -75,3 +75,18 @@ export function toChanges(doc: Text, text: string, edits: readonly TextEdit[]): 
     insert: e.insert,
   }));
 }
+
+/**
+ * Whether a CodeMirror document holds as many lines and characters as the store's text it should show, each CRLF
+ * one position: a check cheap enough to run on every change, before a key is mapped and after a change comes in.
+ */
+export function agrees(doc: Text, text: string): boolean {
+  const starts = lineStarts(text);
+  if (doc.lines !== starts.length) return false;
+  let crlf = 0;
+  for (let i = 1; i < starts.length; i++) {
+    const at = starts[i]!;
+    if (text.charCodeAt(at - 1) === 10 && text.charCodeAt(at - 2) === 13) crlf++;
+  }
+  return doc.length === text.length - crlf;
+}

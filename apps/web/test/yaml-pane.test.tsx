@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { EditorView, runScopeHandlers } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import type { ScenarioInput } from '@simulci/engine';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { StrictMode } from 'react';
@@ -694,7 +694,6 @@ describe('the YAML pane in edit mode', () => {
           ...Object.fromEntries(Object.entries(meta).map(([p, m]) => [p, { ...s.files.meta[p]!, ...m }])),
         },
       },
-      project: { status: 'ready', version: 1, outline, files: s.files.version },
       focus: CI,
       edit: { ...s.edit, on: true },
       ui: {
@@ -703,6 +702,8 @@ describe('the YAML pane in edit mode', () => {
         prefs: { ...s.ui.prefs, collapsed: { left: false, right: false, yaml: false } },
       },
     }));
+    // The Outline of these texts: until one comes, no file is known not to be generated.
+    store.getState().projectReady(1, outline, store.getState().files.version);
     const result = render(
       <AppProvider app={{ store } as unknown as App}>
         <YamlPane />
@@ -746,7 +747,7 @@ describe('the YAML pane in edit mode', () => {
     expect(v.state.doc.toString()).toBe(store.getState().files.byPath[CRLF]!.replaceAll('\r\n', '\n'));
     expect(v.state.selection.main.head).toBe(v.state.doc.line(3).to);
     expect(screen.getByRole('tab', { name: 'crlf.yml, unsaved' })).toBeTruthy();
-    expect(screen.getByText(/● unsaved/)).toBeTruthy();
+    expect(document.querySelector('footer')?.textContent).toContain('● unsaved ·');
   });
 
   it('brings an undo back as a change of the document, the cursor mapped through it', () => {
@@ -772,9 +773,28 @@ describe('the YAML pane in edit mode', () => {
     const v = view();
     typeAt(v, 0, 'x');
     act(() => {
-      // Mod is Meta on a Mac, Ctrl elsewhere, as CodeMirror reads the platform.
-      const mac = /Mac/.test(navigator.platform);
-      runScopeHandlers(v, new KeyboardEvent('keydown', { key: 'z', ctrlKey: !mac, metaKey: mac }), 'editor');
+      v.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+    });
+    expect(store.getState().files.byPath[CRLF]).toBe(crlfText);
+    // Mod+Shift+Z redoes, also when the browser reports the letter in lowercase.
+    act(() => {
+      v.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          metaKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(store.getState().files.byPath[CRLF]).toBe(`x${crlfText}`);
+    act(() => {
+      v.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
     });
     expect(store.getState().files.byPath[CRLF]).toBe(crlfText);
     act(() => {
@@ -791,6 +811,14 @@ describe('the YAML pane in edit mode', () => {
     expect(store.getState().files.byPath[CRLF]).toBe(crlfText);
   });
 
+  it('hands the focus to the editor once Edit (E) has made the file writable', async () => {
+    const { store, view } = editing();
+    act(() => store.getState().setEdit(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit (E)' }));
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    expect(document.activeElement).toBe(view().contentDOM);
+  });
+
   it('refuses a generated file until the author unlocks it', () => {
     const generated = {
       ...main.outline,
@@ -801,7 +829,8 @@ describe('the YAML pane in edit mode', () => {
     };
     const { view } = editing({}, generated);
     expect(view().contentDOM.contentEditable).toBe('false');
-    expect(screen.getByText(/Generated \(line 1: DO NOT EDIT\)/)).toBeTruthy();
+    // The marker is the Outline's; this text does not hold it, so no line is named.
+    expect(document.querySelector('footer')?.textContent).toContain('Generated (DO NOT EDIT)');
     fireEvent.click(screen.getByRole('button', { name: 'Edit anyway' }));
     expect(view().contentDOM.contentEditable).toBe('true');
   });
@@ -820,6 +849,33 @@ describe('the YAML pane in edit mode', () => {
     const latin = editing({ [CRLF]: { utf8: false } });
     expect(latin.view().contentDOM.contentEditable).toBe('false');
     expect(screen.getByText('Not UTF-8: read-only')).toBeTruthy();
+  });
+
+  it('shows a converted file as the store holds it, the cursor kept, and keys land where the author sees them', () => {
+    const mixedText = 'on: push\njobs:\n  a:\r\n    runs-on: x\r\n    steps: [{ run: echo }]\r\n';
+    const { store, view } = editing({ [CRLF]: { eol: 'mixed' } });
+    act(() => store.setState((s) => withTexts(s, { [CRLF]: mixedText })));
+    act(() => store.getState().setYamlFile(CRLF));
+    fireEvent.click(screen.getByRole('button', { name: 'Convert to CRLF' }));
+    const v = view();
+    const want = mixedText.replace(/\r?\n/g, '\r\n');
+    expect(store.getState().files.byPath[CRLF]).toBe(want);
+    expect(v.state.doc.sliceString(0, v.state.doc.length, '\r\n')).toBe(want);
+    typeAt(v, v.state.doc.line(3).to, '!');
+    expect(store.getState().files.byPath[CRLF]).toBe(want.replace('  a:', '  a:!'));
+    act(() => {
+      store.getState().undo();
+      store.getState().undo();
+    });
+    expect(v.state.doc.toString()).toBe(mixedText.replaceAll('\r\n', '\n'));
+  });
+
+  it('keeps the file typed in shown, whichever file the selection follows', () => {
+    const { store, view } = editing();
+    act(() => store.getState().setYamlFile(undefined));
+    act(() => store.getState().select(CI, undefined));
+    typeAt(view(), 0, 'x');
+    expect(store.getState().ui.yamlFile).toBe(CI);
   });
 
   it('closes the typing group when the editor loses the focus', () => {
