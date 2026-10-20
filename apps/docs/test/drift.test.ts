@@ -22,7 +22,7 @@ import { parseAssume } from '@simulci/node';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { renderModels } from '../../../packages/cli/src/models';
-import { type PlanArgs, planCommand, planOutput } from '../../../packages/cli/src/plan';
+import { planArgs, planCommand, planOutput } from '../../../packages/cli/src/plan';
 import { runTestCommand, testCommand } from '../../../packages/cli/src/test';
 import { APP_URL } from '../lib/site';
 
@@ -214,7 +214,8 @@ describe('the getting-started example', () => {
       return command ? [{ args: command[1]!, shown: all[i + 1]!.text }] : [];
     });
     expect(runs).toHaveLength(3);
-    for (const run of runs) expect(planOutput(planArgs(dir, run.args)).text, run.args).toBe(run.shown);
+    for (const run of runs)
+      expect(planOutput(planArgs(['--dir', dir, ...run.args.split(' ')])).text, run.args).toBe(run.shown);
   });
 
   it('passes the test the page writes, as the page shows', () => {
@@ -239,14 +240,3 @@ describe('the getting-started example', () => {
     expect(out).toContain(all.at(-1)!.text);
   });
 });
-
-/** `--event push --branch main` as `simulci plan` parses it (the examples use flags with one value each). */
-function planArgs(dir: string, line: string): PlanArgs {
-  const args: PlanArgs = { dir, event: 'push', format: 'text', detail: 'steps' };
-  const words = line.split(' ');
-  for (let i = 0; i < words.length; i += 2) {
-    const name = words[i]!.replace(/^--/, '').replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-    (args as unknown as Record<string, string>)[name] = words[i + 1]!;
-  }
-  return args;
-}

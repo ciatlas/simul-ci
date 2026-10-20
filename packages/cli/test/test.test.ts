@@ -1,10 +1,13 @@
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { planOutput } from '../src/plan';
 import { snapshotPath } from '@simulci/node';
-import { runTestCommand, type TestIo } from '../src/test';
+import { runTestCommand, type TestIo, testArgs } from '../src/test';
+
+const root = join(import.meta.dirname, '../../..');
 
 const ci = `
 on:
@@ -108,6 +111,9 @@ describe('simulci test', () => {
     });
     expect(runTestCommand({ dir }, io())).toBe(1);
     expect(runTestCommand({ dir, assume: 'build.t=failure' }, io())).toBe(0);
+    const unread = io();
+    expect(runTestCommand({ dir, assumeFile: join(dir, 'nope.yml') }, unread)).toBe(2);
+    expect(unread.err.join('')).toBe(`--assume-file ${join(dir, 'nope.yml')}: no such file\n`);
     const missing = io();
     expect(runTestCommand({ dir, files: [join(dir, '.github/simulci/tests/nope.test.yml')] }, missing)).toBe(
       2,
@@ -116,6 +122,55 @@ describe('simulci test', () => {
     const none = io();
     expect(runTestCommand({ dir: checkout({ '.github/workflows/ci.yml': ci }) }, none)).toBe(2);
     expect(none.out.join('')).toContain('T000 no test files');
+  });
+});
+
+describe('testArgs', () => {
+  it('keeps every --assume whole, and every test file named', () => {
+    expect(
+      testArgs([
+        'a.test.yml',
+        '--assume',
+        'build.t=failure',
+        '-t',
+        'main',
+        '--assume',
+        '{ job: deploy, outcome: success }',
+        'b.test.yml',
+      ]),
+    ).toMatchObject({
+      dir: '.',
+      files: ['a.test.yml', 'b.test.yml'],
+      filter: 'main',
+      assume: ['build.t=failure', '{ job: deploy, outcome: success }'],
+    });
+    expect(testArgs(['-u']).files).toBeUndefined();
+  });
+
+  it('applies every --assume from the command line', () => {
+    const dir = checkout({
+      '.github/workflows/ci.yml': `
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - { id: a, run: ./a }
+      - { id: b, run: ./b }
+      - { id: c, if: "steps.a.outputs.go == 'yes' && steps.b.outputs.go == 'yes'", run: ./c }
+`,
+      '.github/simulci/tests/ci.test.yml':
+        'workflow: ci.yml\ncases:\n  - { name: c, when: { event: push }, then: { units: { build.c: { runs: yes } } } }\n',
+    });
+    const run = (...flags: string[]) =>
+      spawnSync(
+        join(root, 'node_modules/.bin/tsx'),
+        ['--conditions=source', join(root, 'packages/cli/src/index.ts'), 'test', '--dir', dir, ...flags],
+        { encoding: 'utf8', env: { ...process.env, CI: '', GITHUB_ACTIONS: '' } },
+      );
+    const both = run('--assume', 'build.a.outputs.go=yes', '--assume', 'build.b.outputs.go=yes');
+    expect(both.status, both.stdout + both.stderr).toBe(0);
+    expect(run('--assume', 'build.a.outputs.go=yes').status).toBe(1);
   });
 });
 

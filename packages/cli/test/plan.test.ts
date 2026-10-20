@@ -3,10 +3,12 @@ import { join } from 'node:path';
 import { renderMermaid, renderText, simulate } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 import { readWorkflowFiles } from '@simulci/node';
-import { render, scenarioFromArgs } from '../src/plan';
+import { planArgs, planOutput, render, scenarioFromArgs } from '../src/plan';
 
 const root = join(import.meta.dirname, '../../..');
 const lab = join(root, 'fixtures/routes-lab/repo');
+const tsx = join(root, 'node_modules/.bin/tsx');
+const cli = join(root, 'packages/cli/src/index.ts');
 
 describe('scenarioFromArgs', () => {
   it('maps flags and key=value lists onto the scenario, typing dispatch inputs', () => {
@@ -36,6 +38,93 @@ describe('scenarioFromArgs', () => {
     expect(
       scenarioFromArgs({ dir: '.', event: 'push', format: 'text', detail: 'steps', fork: false }),
     ).toEqual({ event: 'push' });
+  });
+});
+
+describe('planArgs', () => {
+  it('keeps every value of a repeated flag, and splits only the lists on commas', () => {
+    const a = planArgs([
+      '--changed',
+      'a.md',
+      '--changed=b.ts,c.ts',
+      '--input',
+      'dry=true',
+      '--input',
+      'count=3',
+      '--var',
+      'A=1',
+      '--var',
+      'B=2',
+      '--secret',
+      'NPM_TOKEN',
+      '--secret',
+      'OTHER',
+      '--assume',
+      'build=failure',
+      '--assume',
+      '{ uses: actions/cache, as: miss }',
+      '--branch',
+      'main',
+      '--fork',
+    ]);
+    expect(a.assume).toEqual(['build=failure', '{ uses: actions/cache, as: miss }']);
+    expect(scenarioFromArgs(a)).toEqual({
+      event: 'push',
+      branch: 'main',
+      changed: ['a.md', 'b.ts', 'c.ts'],
+      inputs: { dry: true, count: 3 },
+      vars: { A: '1', B: '2' },
+      secrets: ['NPM_TOKEN', 'OTHER'],
+      actor: { fork: true },
+    });
+    expect(planArgs(['--secret', 'ONE'])).toMatchObject({
+      dir: '.',
+      event: 'push',
+      secret: ['ONE'],
+      format: 'text',
+      detail: 'steps',
+    });
+  });
+
+  it('reads a bare --as-test as jobs, without taking the next flag as its value', () => {
+    expect(planArgs(['--as-test', '--event', 'pull_request'])).toMatchObject({
+      asTest: 'jobs',
+      event: 'pull_request',
+    });
+    expect(planArgs(['--event', 'pull_request', '--as-test']).asTest).toBe('jobs');
+    expect(planArgs(['--as-test', '--no-fork'])).toMatchObject({ asTest: 'jobs', fork: false });
+    expect(planArgs(['--as-test', 'steps']).asTest).toBe('steps');
+    expect(planArgs(['--asTest=steps']).asTest).toBe('steps');
+    expect(planArgs(['--message', '--as-test', '--as-test', '--workflow', 'ci.yml'])).toMatchObject({
+      message: '--as-test',
+      asTest: 'jobs',
+      workflow: 'ci.yml',
+    });
+    expect(planArgs([]).asTest).toBeUndefined();
+  });
+});
+
+describe('planOutput', () => {
+  const plan = (...flags: string[]) => planOutput(planArgs(['--dir', lab, ...flags]));
+
+  it('exits 2 with a line saying what is wrong with the input', () => {
+    expect(plan('--branch', 'a', '--tag', 'b')).toEqual({
+      text: 'give one of ref, branch or tag\n',
+      code: 2,
+    });
+    expect(plan('--as-test', '--workflow', 'nope.yml')).toEqual({
+      text: '--workflow nope.yml: no .github/workflows/nope.yml in the checkout\n',
+      code: 2,
+    });
+    expect(plan('--assume-file', 'nope.yml')).toEqual({
+      text: '--assume-file nope.yml: no such file\n',
+      code: 2,
+    });
+    expect(plan('--assume-file', lab).text).toMatch(/^--assume-file .*: EISDIR: [^\n]*\n$/);
+    expect(plan('--as-test', '--workflow', '.github/workflows/case-filter-paths.yml')).toMatchObject({
+      text: expect.stringMatching(/^workflow: case-filter-paths.yml\n/) as string,
+      code: 0,
+    });
   });
 });
 
@@ -73,13 +162,12 @@ describe('render', () => {
 });
 
 describe('simulci plan', () => {
-  it('runs from source and prints the plan', () => {
-    const tsx = join(root, 'node_modules/.bin/tsx');
+  it('runs from source and prints the plan, with every value of a repeated flag', () => {
     const result = spawnSync(
       tsx,
       [
         '--conditions=source',
-        join(root, 'packages/cli/src/index.ts'),
+        cli,
         'plan',
         '--dir',
         lab,
@@ -89,22 +177,29 @@ describe('simulci plan', () => {
         'main',
         '--changed',
         'src/main.txt',
+        '--changed',
+        'docs/x.md',
       ],
       { encoding: 'utf8' },
     );
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain('● .github/workflows/case-filter-paths.yml');
-    const empty = spawnSync(
+    const empty = spawnSync(tsx, ['--conditions=source', cli, 'plan', '--dir', join(root, 'packages')], {
+      encoding: 'utf8',
+    });
+    expect(empty.status).toBe(2);
+  });
+
+  it('prints what is wrong with the input on stderr, and exits 2', () => {
+    const result = spawnSync(
       tsx,
-      [
-        '--conditions=source',
-        join(root, 'packages/cli/src/index.ts'),
-        'plan',
-        '--dir',
-        join(root, 'packages'),
-      ],
+      ['--conditions=source', cli, 'plan', '--dir', lab, '--branch', 'a', '--tag', 'b'],
       { encoding: 'utf8' },
     );
-    expect(empty.status).toBe(2);
+    expect([result.status, result.stdout, result.stderr]).toEqual([
+      2,
+      '',
+      'give one of ref, branch or tag\n',
+    ]);
   });
 });
