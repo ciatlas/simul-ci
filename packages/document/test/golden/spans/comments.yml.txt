@@ -1,0 +1,131 @@
+── name (line 2)
+name: comments # inline after a scalar
+
+── on (line 4)
+on: # inline after a key
+  push:
+    branches: [main] # protected
+  pull_request:
+
+── on.push (line 5)
+  push:
+    branches: [main] # protected
+
+── on.push.branches (line 6)
+    branches: [main] # protected
+
+── on.push.branches.0 (line 6)
+main
+── on.pull_request (line 7)
+  pull_request:
+
+── jobs (line 9)
+jobs:
+  # Leading comment of build, at its column.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Leading comment of the first step.
+      - name: First
+        run: echo first
+        # Trailing comment of the first step, deeper than its dash.
+
+      - uses: actions/checkout@v4 # pinned
+      # Leading comment of the third step.
+      - run: |
+          echo third
+          # not a comment: inside the block scalar
+    # Trailing comment of build, at its keys' column.
+
+    # After a blank line: nobody's.
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo test
+  # Dangling at the end of jobs, at the jobs' column: nobody's.
+
+── jobs.build (line 11)
+  # Leading comment of build, at its column.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Leading comment of the first step.
+      - name: First
+        run: echo first
+        # Trailing comment of the first step, deeper than its dash.
+
+      - uses: actions/checkout@v4 # pinned
+      # Leading comment of the third step.
+      - run: |
+          echo third
+          # not a comment: inside the block scalar
+    # Trailing comment of build, at its keys' column.
+
+── jobs.build.runs-on (line 12)
+    runs-on: ubuntu-latest
+
+── jobs.build.steps (line 13)
+    steps:
+      # Leading comment of the first step.
+      - name: First
+        run: echo first
+        # Trailing comment of the first step, deeper than its dash.
+
+      - uses: actions/checkout@v4 # pinned
+      # Leading comment of the third step.
+      - run: |
+          echo third
+          # not a comment: inside the block scalar
+
+── jobs.build.steps.0 (line 15)
+      # Leading comment of the first step.
+      - name: First
+        run: echo first
+        # Trailing comment of the first step, deeper than its dash.
+
+── jobs.build.steps.0.name (line 15)
+name: First
+
+── jobs.build.steps.0.run (line 16)
+        run: echo first
+
+── jobs.build.steps.1 (line 19)
+      - uses: actions/checkout@v4 # pinned
+
+── jobs.build.steps.1.uses (line 19)
+uses: actions/checkout@v4 # pinned
+
+── jobs.build.steps.2 (line 21)
+      # Leading comment of the third step.
+      - run: |
+          echo third
+          # not a comment: inside the block scalar
+
+── jobs.build.steps.2.run (line 21)
+run: |
+          echo third
+          # not a comment: inside the block scalar
+
+── jobs.test (line 27)
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo test
+
+── jobs.test.needs (line 28)
+    needs: build
+
+── jobs.test.runs-on (line 29)
+    runs-on: ubuntu-latest
+
+── jobs.test.steps (line 30)
+    steps:
+      - run: echo test
+
+── jobs.test.steps.0 (line 31)
+      - run: echo test
+
+── jobs.test.steps.0.run (line 31)
+run: echo test

@@ -1,0 +1,1036 @@
+{
+  "anchors.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "comments.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": true
+    },
+    "commentGap": 1
+  },
+  "families.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": false,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "flush.yml": {
+    "indent": 2,
+    "indentSeq": false,
+    "quote": "'",
+    "flowPadding": true,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "wrapped",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "indent4.yml": {
+    "indent": 4,
+    "indentSeq": true,
+    "quote": "\"",
+    "flowPadding": false,
+    "flow": {
+      "needs": false,
+      "filters": false,
+      "types": false,
+      "matrix": false,
+      "runs-on": false,
+      "other": false
+    },
+    "ifStyle": "wrapped",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": true,
+      "steps": true
+    },
+    "commentGap": 2
+  },
+  "markers.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "no-lists.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "on-scalar.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "on-seq.yml": {
+    "indent": 2,
+    "indentSeq": false,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "packed-no-final-newline.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": false,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "shapes.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "apps/web/src/samples/monorepo/ci.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": true,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "apps/web/src/samples/monorepo/package.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "apps/web/src/samples/starter/ci.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": true,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "apps/web/src/samples/starter/release.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": true,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "apps/web/src/samples/starter/setup-action.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/actions/comp/action.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/callee-echo.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/callee-skipped.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-composite-action-status.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-continue-on-error-job.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-continue-on-error-step.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-fail-fast-cancelled.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-filter-branches-and-paths.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-filter-branches-tags.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-filter-paths-ignore.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-filter-paths.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-filter-tags.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-grandparent-outputs.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-if-boolean-literal-empty.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-if-boolean-literal-zero.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-if-boolean-literal.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-matrix-aggregate.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-matrix-one-failed.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-matrix-outputs.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-output-last-write.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-reusable-all-skipped.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-reusable-skipped-call.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-skip-ci.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-skipped-job-outputs.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-skipped-need.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-skipped-step-outputs.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-step-timeout.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-types-default.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-types-labeled.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "fixtures/routes-lab/repo/.github/workflows/case-unknown-or-true.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "wrapped",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "packages/engine/test/fixtures/flowpact-release.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": true,
+      "steps": false
+    },
+    "commentGap": 1
+  }
+}

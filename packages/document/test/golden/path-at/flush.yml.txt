@@ -1,0 +1,18 @@
+  1 on
+  2 on.pull_request
+  3 on.pull_request.types
+  4 on.pull_request.paths
+  5 jobs
+  6 jobs.build
+  7 jobs.build.runs-on
+  8 jobs.build.needs
+  9 jobs.build.if
+ 10 jobs.build.steps
+ 11 jobs.build.steps.0  →  jobs.build.steps.0.run
+ 12 jobs.build.steps.1  →  jobs.build.steps.1.run
+ 13 jobs.lint
+ 14 jobs.lint.runs-on
+ 15 jobs.lint.if
+ 16 jobs.lint.steps
+ 17 jobs.lint.steps.0  →  jobs.lint.steps.0.run
+ 18 ·

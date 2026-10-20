@@ -1,0 +1,35 @@
+  1 name
+  2 on
+  3 env
+  4 env
+  5 env.RUNNER
+  6 env.EARLY
+  7 env.MISSING
+  8 defaults
+  9 defaults.run
+ 10 defaults.run.shell
+ 11 jobs
+ 12 jobs.build
+ 13 jobs.build.runs-on
+ 14 jobs.build.defaults
+ 15 jobs.build.steps
+ 16 jobs.build.steps.0
+ 17 jobs.build.steps.0.uses
+ 18 jobs.build.steps.1  →  jobs.build.steps.1.run
+ 19 jobs.test
+ 20 jobs.test.runs-on
+ 21 jobs.test.steps
+ 22 jobs.test.steps.0
+ 23 jobs.test.steps.1  →  jobs.test.steps.1.run
+ 24 jobs.again
+ 25 jobs.merged
+ 26 jobs.merged.<<
+ 27 jobs.merged.name
+ 28 jobs.redefined
+ 29 jobs.redefined.runs-on
+ 30 jobs.redefined.env
+ 31 jobs.redefined.env.AFTER
+ 32 jobs.redefined.env.LATER
+ 33 jobs.quoted
+ 34 jobs.quoted.<<
+ 35 ·

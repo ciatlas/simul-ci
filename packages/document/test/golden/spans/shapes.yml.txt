@@ -1,0 +1,215 @@
+── on (line 1)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+── on.workflow_dispatch (line 2)
+  workflow_dispatch:
+
+── on.schedule (line 3)
+  schedule:
+    - cron: '0 0 * * *'
+
+── on.schedule.0 (line 4)
+    - cron: '0 0 * * *'
+
+── on.schedule.0.cron (line 4)
+cron: '0 0 * * *'
+
+── jobs (line 5)
+jobs:
+  flow-steps:
+    runs-on: [self-hosted, linux]
+    steps:
+      - {uses: actions/checkout@v4}
+      - { run: echo, shell: bash }
+  expanded:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Expanded
+        run: echo expanded
+      - name: Compact
+        run: echo compact
+  blocks:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    steps:
+      - run: |+
+          keep
+
+      - run: |
+          	a tab inside the block
+          last
+      - name: after
+        run: echo
+  empty:
+    runs-on: ubuntu-latest
+    steps:
+      -
+      - run: echo
+
+── jobs.flow-steps (line 6)
+  flow-steps:
+    runs-on: [self-hosted, linux]
+    steps:
+      - {uses: actions/checkout@v4}
+      - { run: echo, shell: bash }
+
+── jobs.flow-steps.runs-on (line 7)
+    runs-on: [self-hosted, linux]
+
+── jobs.flow-steps.runs-on.0 (line 7)
+self-hosted
+── jobs.flow-steps.runs-on.1 (line 7)
+linux
+── jobs.flow-steps.steps (line 8)
+    steps:
+      - {uses: actions/checkout@v4}
+      - { run: echo, shell: bash }
+
+── jobs.flow-steps.steps.0 (line 9)
+      - {uses: actions/checkout@v4}
+
+── jobs.flow-steps.steps.0.uses (line 9)
+uses: actions/checkout@v4
+── jobs.flow-steps.steps.1 (line 10)
+      - { run: echo, shell: bash }
+
+── jobs.flow-steps.steps.1.run (line 10)
+run: echo
+── jobs.flow-steps.steps.1.shell (line 10)
+shell: bash
+── jobs.expanded (line 11)
+  expanded:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Expanded
+        run: echo expanded
+      - name: Compact
+        run: echo compact
+
+── jobs.expanded.runs-on (line 12)
+    runs-on: ubuntu-latest
+
+── jobs.expanded.steps (line 13)
+    steps:
+      -
+        name: Expanded
+        run: echo expanded
+      - name: Compact
+        run: echo compact
+
+── jobs.expanded.steps.0 (line 14)
+      -
+        name: Expanded
+        run: echo expanded
+
+── jobs.expanded.steps.0.name (line 15)
+        name: Expanded
+
+── jobs.expanded.steps.0.run (line 16)
+        run: echo expanded
+
+── jobs.expanded.steps.1 (line 17)
+      - name: Compact
+        run: echo compact
+
+── jobs.expanded.steps.1.name (line 17)
+name: Compact
+
+── jobs.expanded.steps.1.run (line 18)
+        run: echo compact
+
+── jobs.blocks (line 19)
+  blocks:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    steps:
+      - run: |+
+          keep
+
+      - run: |
+          	a tab inside the block
+          last
+      - name: after
+        run: echo
+
+── jobs.blocks.runs-on (line 20)
+    runs-on: ubuntu-latest
+
+── jobs.blocks.if (line 21)
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+
+── jobs.blocks.steps (line 24)
+    steps:
+      - run: |+
+          keep
+
+      - run: |
+          	a tab inside the block
+          last
+      - name: after
+        run: echo
+
+── jobs.blocks.steps.0 (line 25)
+      - run: |+
+          keep
+
+
+── jobs.blocks.steps.0.run (line 25)
+run: |+
+          keep
+
+
+── jobs.blocks.steps.1 (line 28)
+      - run: |
+          	a tab inside the block
+          last
+
+── jobs.blocks.steps.1.run (line 28)
+run: |
+          	a tab inside the block
+          last
+
+── jobs.blocks.steps.2 (line 31)
+      - name: after
+        run: echo
+
+── jobs.blocks.steps.2.name (line 31)
+name: after
+
+── jobs.blocks.steps.2.run (line 32)
+        run: echo
+
+── jobs.empty (line 33)
+  empty:
+    runs-on: ubuntu-latest
+    steps:
+      -
+      - run: echo
+
+── jobs.empty.runs-on (line 34)
+    runs-on: ubuntu-latest
+
+── jobs.empty.steps (line 35)
+    steps:
+      -
+      - run: echo
+
+── jobs.empty.steps.0 (line 36)
+      -
+
+── jobs.empty.steps.1 (line 37)
+      - run: echo
+
+── jobs.empty.steps.1.run (line 37)
+run: echo

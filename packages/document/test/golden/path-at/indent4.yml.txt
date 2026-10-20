@@ -1,0 +1,23 @@
+  1 name
+  2 on
+  3 on.push
+  4 on.push.branches
+  5 on.push.branches.0
+  6 on.push.branches.1
+  7 jobs
+  8 jobs.build
+  9 jobs.build.runs-on
+ 10 jobs.build.needs
+ 11 jobs.build.needs.0
+ 12 jobs.build.if
+ 13 jobs.build.steps
+ 14 jobs.build.steps.0  →  jobs.build.steps.0.name
+ 15 jobs.build.steps.0.uses
+ 16 jobs.build.steps
+ 17 jobs.build.steps.1  →  jobs.build.steps.1.run
+ 18 jobs
+ 19 jobs.lint
+ 20 jobs.lint.runs-on
+ 21 jobs.lint.steps
+ 22 jobs.lint.steps.0  →  jobs.lint.steps.0.run
+ 23 ·
