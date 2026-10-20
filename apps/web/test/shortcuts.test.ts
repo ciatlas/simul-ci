@@ -6,7 +6,14 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
-import { installShortcuts, isNarrow, keyFor, type PageKey, shownView } from '../src/app/shortcuts';
+import {
+  historyKey,
+  installShortcuts,
+  isNarrow,
+  keyFor,
+  type PageKey,
+  shownView,
+} from '../src/app/shortcuts';
 import { ViewToggle } from '../src/app/ViewToggle';
 import { viewport } from '../src/graph/commands';
 import type { GraphState, JobModel, ScopeModel } from '../src/graph/types';
@@ -391,5 +398,47 @@ describe('the view toggle', () => {
     expect(graphButton.hasAttribute('disabled')).toBe(true);
     const hint = document.getElementById(graphButton.getAttribute('aria-describedby')!);
     expect(hint?.textContent).toBe('the graph needs 1024 px');
+  });
+});
+
+describe('the history keys in edit mode', () => {
+  const key = (
+    k: string,
+    mods: Partial<Record<'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey', boolean>> = {},
+    target: EventTarget | null = null,
+  ) => ({
+    key: k,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    defaultPrevented: false,
+    target,
+    ...mods,
+  });
+
+  it('undo with Mod+Z and redo with Mod+Shift+Z or Mod+Y, in edit mode only, where no field keeps its own undo', () => {
+    const store = createSessionStore();
+    store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'sample', name: 'x' });
+    store
+      .getState()
+      .transact({
+        label: 'Op',
+        origin: 'op',
+        files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '#' }] }],
+      });
+    const s = () => store.getState();
+    expect(historyKey(key('z', { ctrlKey: true }), s())).toBe(false);
+    s().setEdit(true);
+    expect(historyKey(key('z', { metaKey: true }), s())).toBe(true);
+    expect(s().files.byPath[CI]).toBe('on: push\n');
+    expect(historyKey(key('Z', { ctrlKey: true, shiftKey: true }), s())).toBe(true);
+    expect(s().files.byPath[CI]).toBe('#on: push\n');
+    historyKey(key('z', { ctrlKey: true }), s());
+    expect(historyKey(key('y', { ctrlKey: true }), s())).toBe(true);
+    expect(s().files.byPath[CI]).toBe('#on: push\n');
+    expect(historyKey(key('z'), s())).toBe(false);
+    expect(historyKey(key('z', { ctrlKey: true, altKey: true }), s())).toBe(false);
+    expect(historyKey(key('z', { ctrlKey: true }, document.createElement('input')), s())).toBe(false);
   });
 });

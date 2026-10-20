@@ -68,7 +68,7 @@ export function createGraphSession({
       const m = await measured;
       const s = store.getState();
       if (run !== generation || !s.plan) return;
-      const graph = model(s.plan.plan, s.plan.derived, graphUi(s.ui));
+      const graph = model(s.plan.plan, s.plan.derived, graphUi(s));
       const placed = await place(graph, m, run);
       if (!placed) return;
       if ('error' in placed) return fail(placed.error);
@@ -80,7 +80,7 @@ export function createGraphSession({
   };
 
   const unsubscribe = store.subscribe((s, prev) => {
-    if (s.plan !== prev.plan || uiChanged(s.ui, prev.ui)) void build();
+    if (s.plan !== prev.plan || uiChanged(s.ui, prev.ui) || onlyOf(s) !== onlyOf(prev)) void build();
   });
   if (store.getState().plan) void build();
 
@@ -92,12 +92,20 @@ export function createGraphSession({
   };
 }
 
-const graphUi = (ui: SessionState['ui']): GraphUi => ({
-  expanded: ui.expanded,
-  representative: ui.representative,
-  opened: ui.opened,
-  hideUntriggered: ui.hideUntriggered,
-});
+const graphUi = (s: SessionState): GraphUi => {
+  const ui: GraphUi = {
+    expanded: s.ui.expanded,
+    representative: s.ui.representative,
+    opened: s.ui.opened,
+    hideUntriggered: s.ui.hideUntriggered,
+  };
+  const only = onlyOf(s);
+  if (only !== undefined) ui.only = only;
+  return ui;
+};
+
+/** In edit mode the canvas is the builder of the focused workflow (synthesis § 4.1): its picture alone. */
+const onlyOf = (s: SessionState): string | undefined => (s.edit.on ? s.focus : undefined);
 
 /** The card state the picture depends on; the view, the prefs and the selection do not move a card. */
 const uiChanged = (ui: SessionState['ui'], prev: SessionState['ui']): boolean =>

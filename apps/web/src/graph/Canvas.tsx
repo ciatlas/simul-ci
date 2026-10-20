@@ -25,6 +25,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useApp, useSession } from '../app/providers';
+import { markEdit } from '../lib/marks';
 import type { SessionState, SessionStore } from '../state/store';
 import { cardActions, selectedNode } from './card';
 import { type ViewportCommands, viewport } from './commands';
@@ -127,6 +128,7 @@ function Flow() {
   graphRef.current = graph;
   const rf = useReactFlow<FlowNode, NeedsFlowEdge>();
   useViewportCommands(rf, graphRef);
+  usePaintedMark(graph?.for.files);
   // A new source is a new picture: it mounts afresh and is fitted. Neither an edit of its texts nor the project a
   // restart numbers anew is one: the picture stays mounted, where the author left it.
   return graph ? <Picture key={graph.for.epoch} graph={graph} graphRef={graphRef} /> : <Waiting />;
@@ -175,6 +177,15 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
       </ReactFlow>
     </div>
   );
+}
+
+/** Marks the frame after a picture of new texts is drawn (`lib/marks.ts`), for the latency gate. */
+function usePaintedMark(files: number | undefined): void {
+  useEffect(() => {
+    if (files === undefined) return undefined;
+    const frame = requestAnimationFrame(() => markEdit('edit:painted', files));
+    return () => cancelAnimationFrame(frame);
+  }, [files]);
 }
 
 function Waiting() {

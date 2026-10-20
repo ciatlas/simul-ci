@@ -118,7 +118,7 @@ describe('edits through the store', () => {
     a.transact({ label: 'x', origin: 'op', files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '#' }] }] });
     const { next } = store.getState().edit;
     a.setFiles({ [CI]: 'on: push\n' }, FOLDER);
-    expect(store.getState().edit).toEqual({ past: [], future: [], next });
+    expect(store.getState().edit).toEqual({ past: [], future: [], next, on: false, unlocked: [] });
     a.transact({ label: 'y', origin: 'op', files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '#' }] }] });
     a.forgetSource();
     expect(store.getState().edit.past).toEqual([]);

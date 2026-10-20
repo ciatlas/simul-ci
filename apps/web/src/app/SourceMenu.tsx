@@ -1,6 +1,6 @@
 import { type ChangeEvent, useRef, useState } from 'react';
 import { SAMPLES } from '../input/samples';
-import type { Source } from '../state/store';
+import { dirtyPaths, type Source } from '../state/store';
 import { PasteDialog } from './PasteDialog';
 import { useApp, useSession } from './providers';
 
@@ -12,10 +12,12 @@ export function SourceMenu() {
   const { sources } = useApp();
   const source = useSession((s) => s.source);
   const fileCount = useSession((s) => Object.keys(s.files.byPath).length);
+  const unsaved = useSession((s) => dirtyPaths(s.files).length);
   const [pasting, setPasting] = useState(false);
   return (
     <nav aria-label="Source" className="flex flex-wrap items-center gap-2">
       <SourceStatus source={source} fileCount={fileCount} />
+      {unsaved > 0 && <span className="text-text text-xs">● {unsaved} unsaved</span>}
       {sources.canPickFolder && (
         <button type="button" className={button} onClick={() => void sources.openFolder()}>
           Open folder

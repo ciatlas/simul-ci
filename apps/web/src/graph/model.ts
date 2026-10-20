@@ -32,6 +32,7 @@ export function graphModel(plan: RunPlan, derived: Derived, ui: GraphUi): GraphM
   };
   for (const wf of plan.workflows) {
     if (wf.depth !== 0 || (ui.hideUntriggered && wf.triggered.verdict === 'no')) continue;
+    if (ui.only !== undefined && wf.path !== ui.only) continue;
     b.model.roots.push(scopeOf(b, wf, undefined));
   }
   return b.model;

@@ -127,6 +127,11 @@ export interface SessionState {
     base: Record<string, string>;
     /** Per file, its text when the epoch began. */
     opened: Record<string, string>;
+    /**
+     * The edits of the last commit of the history, per file, with each file's rev before it: a view that shows the
+     * text of that rev maps the edits instead of comparing texts (`yaml/bridge.ts`).
+     */
+    edited?: { version: number; revs: Record<string, number>; edits: Record<string, readonly TextEdit[]> };
   };
   project: {
     status: 'idle' | 'loading' | 'ready' | 'error';
@@ -186,7 +191,7 @@ export interface SessionState {
   /** The unknown whose row the Unknowns tab was asked to focus, until the tab takes it. */
   unknownFocus?: UnknownFocus;
   pin?: Pin;
-  ui: Omit<GraphUi, 'hideUntriggered'> & {
+  ui: Omit<GraphUi, 'hideUntriggered' | 'only'> & {
     view: 'graph' | 'text';
     hideUntriggered: boolean;
     prefs: Prefs;
@@ -217,6 +222,10 @@ export interface RestoreOffer {
 
 export interface EditState extends history.History {
   restore?: RestoreOffer;
+  /** Edit mode (`e`, the top bar's Edit switch, `edit=1`): the pane edits the files it may (`writable`). */
+  on: boolean;
+  /** Generated files the author chose to edit this session. */
+  unlocked: string[];
 }
 
 export interface Replacing {
@@ -305,6 +314,9 @@ export interface SessionActions {
   settleRestore: (path: string, keep: 'mine' | 'disk') => void;
   /** The replace prompt shows, or goes. */
   setReplacing: (replacing: Replacing | undefined) => void;
+  setEdit: (on: boolean) => void;
+  /** The author chose to edit a generated file: "Edit anyway". */
+  unlock: (path: string) => void;
   projectLoading: () => void;
   projectReady: (version: number, outline: Outline, files: number) => void;
   /** A load of edited texts broke YAML that parsed: the project shown stays (§ 7.2). */
@@ -355,12 +367,16 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
     caseOpen: false,
     ui: { view: 'graph', hideUntriggered: false, prefs, expanded: [], representative: {}, opened: [] },
     notices: [],
-    edit: history.emptyHistory(),
+    edit: { ...history.emptyHistory(), on: false, unlocked: [] },
   };
 }
 
 /** The edit state of a new epoch: no history, no restore offer; entry ids go on, so none is ever reused. */
-const freshEdit = (edit: EditState): EditState => history.emptyHistory(edit.next);
+const freshEdit = (edit: EditState): EditState => ({
+  ...history.emptyHistory(edit.next),
+  on: edit.on,
+  unlocked: edit.unlocked,
+});
 
 const withoutConflict = (edit: EditState, path: string): EditState => {
   const conflicts = edit.restore?.conflicts.filter((c) => c.path !== path) ?? [];
@@ -542,6 +558,16 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         set((s) => ({ edit: withoutConflict(s.edit, path) }));
       },
       setReplacing: (replacing) => set({ replacing }),
+      setEdit: (on) =>
+        set((s) =>
+          s.edit.on === on
+            ? s
+            : { edit: { ...history.close(s.edit), restore: s.edit.restore, on, unlocked: s.edit.unlocked } },
+        ),
+      unlock: (path) =>
+        set((s) =>
+          s.edit.unlocked.includes(path) ? s : { edit: { ...s.edit, unlocked: [...s.edit.unlocked, path] } },
+        ),
       undo: () => commit((s) => history.undo(s.edit, s.files.byPath), 'undo').ok,
       redo: () => commit((s) => history.redo(s.edit, s.files.byPath), 'redo').ok,
       projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
@@ -610,6 +636,8 @@ function committed(
   // Nothing moved: no update, so no listener runs.
   if (!texts.files && outcome.history === s.edit) return { patch: s, outcome: { ok: false } };
   const patch: Partial<SessionState> = { ...texts, edit: { ...s.edit, ...outcome.history } };
+  if (texts.files)
+    texts.files.edited = { version: texts.files.version, revs: s.files.revs, edits: outcome.edits };
   if (!texts.files) return { patch, outcome: { ok: false } };
   patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
   return { patch, outcome: { ok: true } };
@@ -679,6 +707,7 @@ export function withTexts(
   const version = s.files.version + 1;
   const files = {
     ...s.files,
+    edited: undefined,
     version,
     byPath: { ...s.files.byPath },
     meta: { ...s.files.meta },
@@ -780,6 +809,29 @@ function answered(pin: Pin | undefined, plan: PlanState): Pin | undefined {
   const changes = verdictChanges(pin.before, plan);
   const { seq, scenario, assume } = pin;
   return { seq, scenario, assume, after: { plan: plan.plan, changes, sentence: pinSentence(changes) } };
+}
+
+/** Why the pane may not edit a file, or that it may. */
+export type Writable =
+  | { ok: true }
+  | { ok: false; reason: 'off' | 'missing' | 'encoding' | 'mixed' }
+  | { ok: false; reason: 'generated'; marker: string };
+
+/**
+ * Whether the pane may edit a file (synthesis § 4.3): in edit mode, a file read as valid UTF-8, with one kind of line
+ * ending, and not generated unless the author unlocked it this session. Invalid YAML stays writable: the pane is
+ * where it gets fixed.
+ */
+export function writable(s: Pick<SessionState, 'edit' | 'files' | 'project'>, path: string): Writable {
+  if (!s.edit.on) return { ok: false, reason: 'off' };
+  const meta = s.files.meta[path];
+  if (s.files.byPath[path] === undefined || !meta) return { ok: false, reason: 'missing' };
+  if (!meta.utf8) return { ok: false, reason: 'encoding' };
+  if (meta.eol === 'mixed') return { ok: false, reason: 'mixed' };
+  const marker = newestOutline(s)?.files.find((f) => f.path === path)?.generated;
+  if (marker !== undefined && !s.edit.unlocked.includes(path))
+    return { ok: false, reason: 'generated', marker };
+  return { ok: true };
 }
 
 /** The Outline of the newest texts loaded: the held one while the hold is on, since its errors are what to fix. */

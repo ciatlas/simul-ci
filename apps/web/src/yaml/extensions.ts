@@ -1,6 +1,8 @@
 import { yaml } from '@codemirror/lang-yaml';
 import { syntaxHighlighting } from '@codemirror/language';
 import {
+  Annotation,
+  type ChangeSpec,
   Compartment,
   EditorState,
   type Extension,
@@ -10,6 +12,7 @@ import {
   type StateEffectType,
   StateField,
   type Text,
+  Transaction,
 } from '@codemirror/state';
 import {
   Decoration,
@@ -19,16 +22,38 @@ import {
   gutter,
   lineNumbers,
 } from '@codemirror/view';
+import type { TextEdit } from '@simulci/document/edits';
 import type { NodeId, Tri } from '@simulci/engine';
+import { type Eol, toChanges } from './bridge';
 import type { DecidingLines, ProblemLine } from './locs';
 
 /**
- * The YAML pane's CodeMirror: read-only, line numbers, YAML highlighting over the page's tokens, and three
- * decorations the pane sets from the plan with effects — the verdict gutter, the selection's deciding line (and its
- * own line when the two differ), the lines the parsers refused — plus the flash a revealed line gets. Each maps
- * through a change of the text, so it stays on its line until the pane sets it again. Colours are the
- * token sheet's CSS variables, so the theme follows the page; `dark` only tells CodeMirror's own defaults.
+ * The YAML pane's CodeMirror: line numbers, YAML highlighting over the page's tokens, and three decorations the pane
+ * sets from the plan with effects — the verdict gutter, the selection's deciding line (and its own line when the two
+ * differ), the lines the parsers refused — plus the flash a revealed line gets. Each maps through a change of the
+ * text, so it stays on its line until the pane sets it again. A file's state is read-only until edit mode makes it
+ * writable through `editCompartment` (`yaml/editing.ts`). Colours are the token sheet's CSS variables, so the theme
+ * follows the page; `dark` only tells CodeMirror's own defaults.
  */
+
+/** Marks a transaction that brings the store's text in (undo, an op, a restore): nothing hands it back to the store. */
+export const fromStore = Annotation.define<boolean>();
+
+/** Read-only, or writable in edit mode: swapped as the file's state in the store changes. */
+export const editCompartment = new Compartment();
+
+/** A read-only file: focusable, so the keyboard can scroll it, and named so a screen reader says which and how. */
+export function readOnlyExtensions(path: string): Extension {
+  return [
+    EditorState.readOnly.of(true),
+    EditorView.editable.of(false),
+    EditorView.contentAttributes.of({
+      'aria-label': `${path}, read-only`,
+      'aria-readonly': 'true',
+      tabindex: '0',
+    }),
+  ];
+}
 
 /** A verdict mark as the gutter draws it: the node declared on the line and a title that names it. */
 export interface GutterMark {
@@ -61,19 +86,14 @@ export interface PaneOptions {
   dark: boolean;
   /** A verdict mark was pressed. */
   onMark: (node: NodeId) => void;
+  /** Whether the file is writable when its state is made: what goes in `editCompartment`. */
+  editing?: Extension;
 }
 
 /** The extensions of one file's state. */
-function paneExtensions({ path, dark, onMark }: PaneOptions): Extension[] {
+function paneExtensions({ path, dark, onMark, editing }: PaneOptions): Extension[] {
   return [
-    EditorState.readOnly.of(true),
-    EditorView.editable.of(false),
-    // Focusable, so the keyboard can scroll it; named, so a screen reader says which file and that it is read-only.
-    EditorView.contentAttributes.of({
-      'aria-label': `${path}, read-only`,
-      'aria-readonly': 'true',
-      tabindex: '0',
-    }),
+    editCompartment.of(editing ?? readOnlyExtensions(path)),
     lineNumbers(),
     verdictGutter(onMark),
     yaml(),
@@ -198,6 +218,16 @@ export interface PaneText {
   rev: number;
 }
 
+/**
+ * The store's edits that made `rev` from the text of rev `from`, and the file's line ending: a state that holds rev
+ * `from` takes them as CodeMirror changes (`toChanges`), so its cursor maps through exactly what changed.
+ */
+export interface PaneEdits {
+  from: number;
+  edits: readonly TextEdit[];
+  eol: Eol;
+}
+
 interface PaneDoc {
   state: EditorState;
   rev: number;
@@ -227,7 +257,13 @@ export class PaneDocs {
    * Puts a file's state in the view unless it is there already, with the text given. Returns the effects that scroll
    * it back to where it was left, when it was shown before.
    */
-  show(view: EditorView, path: string, at: PaneText, text: string): StateEffect<unknown>[] {
+  show(
+    view: EditorView,
+    path: string,
+    at: PaneText,
+    text: string,
+    edits?: PaneEdits,
+  ): StateEffect<unknown>[] {
     if (this.#epoch !== at.epoch) {
       this.#docs.clear();
       this.#shown = undefined;
@@ -239,7 +275,7 @@ export class PaneDocs {
       this.#shown = undefined;
     }
     if (this.#shown === path) {
-      if (this.#rev !== at.rev) view.dispatch({ changes: changesTo(view.state.doc, text) });
+      if (this.#rev !== at.rev) view.dispatch(this.#bringIn(view, text, edits));
       this.#rev = at.rev;
       return [];
     }
@@ -259,6 +295,33 @@ export class PaneDocs {
   /** The file the view shows. */
   get shown(): string | undefined {
     return this.#shown;
+  }
+
+  /** The author's change of the shown file reached the store as `rev`: the view holds that text already. */
+  typed(path: string, rev: number): void {
+    if (this.#shown === path) this.#rev = rev;
+  }
+
+  /** The shown file's state made again from the store's text, when the view and the store disagree. */
+  rebuild(view: EditorView, path: string, text: string, rev: number): void {
+    if (this.#shown !== path || this.#view !== view) return;
+    const state = this.#create(path, text);
+    this.#docs.set(path, { state, rev });
+    view.setState(state);
+    this.#rev = rev;
+  }
+
+  /** The change that brings the shown state to the store's text: the store's own edits when they apply. */
+  #bringIn(view: EditorView, text: string, edits: PaneEdits | undefined) {
+    const doc = view.state.doc;
+    const changes: ChangeSpec =
+      edits && edits.from === this.#rev
+        ? toChanges(doc, doc.sliceString(0, doc.length, edits.eol), edits.edits)
+        : changesTo(doc, text);
+    return {
+      changes,
+      annotations: [fromStore.of(true), Transaction.addToHistory.of(false)],
+    };
   }
 
   /** The state put aside for a file, brought to the text when the file's rev moved since. */

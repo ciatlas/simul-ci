@@ -1,5 +1,6 @@
 import { isProjectFile } from '../input/filter';
 import { debounce, scheduler, type Timers } from '../lib/debounce';
+import { markEdit } from '../lib/marks';
 import { defaultScenario } from '../scenario/defaults';
 import type { SessionState, SessionStore } from '../state/store';
 import { type CaseFormat, type CaseOutcome, requestCase } from '../testcase/case';
@@ -116,6 +117,7 @@ export function createSession({
       const r = await client.load({ files: projectFiles(byPath) });
       if (store.getState().files.version !== version) return;
       if (r.type === 'loaded') {
+        if (cause === 'edit') markEdit('edit:loaded', version);
         await commit(r, version, epoch);
         if (cause === 'edit') lastCycle = r.ms + planMs(version);
       } else if (r.type === 'error') {
@@ -182,14 +184,9 @@ export function createSession({
     const now = store.getState();
     if (r.type === 'superseded') return;
     if (r.type === 'plan') {
-      if (r.project === now.project.version && !now.project.held)
-        actions.planReceived({
-          plan: r.plan,
-          derived: r.derived,
-          text: r.text,
-          ms: r.ms,
-          for: asked,
-        });
+      if (r.project !== now.project.version || now.project.held) return;
+      actions.planReceived({ plan: r.plan, derived: r.derived, text: r.text, ms: r.ms, for: asked });
+      markEdit('edit:plan', files);
       return;
     }
     if (r.type === 'invalid') {
