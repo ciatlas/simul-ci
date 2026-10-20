@@ -46,9 +46,7 @@ export function EditHost() {
       {/* Siblings: each key names its slot too, so a question and a note of the same number are never one child. */}
       {open && <Opened key={`open-${shown.n}`} open={open} ui={ui} onClose={close} />}
       {ask && <ConfirmDialog key={`ask-${ask.n}`} ask={ask.ask} n={ask.n} onClose={closeAsk} />}
-      {note && (
-        <CardNote key={`note-${note.seq}`} seq={note.seq} anchor={note.anchor} onClose={closeNote} />
-      )}
+      {note && <CardNote key={`note-${note.seq}`} seq={note.seq} anchor={note.anchor} onClose={closeNote} />}
     </>
   );
 }
