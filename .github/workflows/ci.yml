@@ -228,11 +228,39 @@ jobs:
           name: playwright-traces
           path: apps/web/test-results/
 
+  docs:
+    # The docs site (apps/docs): the static export builds, with its search index and an llms.txt whose links are
+    # absolute.
+    name: Docs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @simulci/docs build
+      - name: The export has its search index and llms files, every link absolute
+        working-directory: apps/docs/out
+        run: |
+          test -s index.html
+          test -s api/search
+          test -s llms.txt
+          test -s llms-full.txt
+          if grep -n '](/' llms.txt llms-full.txt; then
+            echo "::error::llms.txt and llms-full.txt link by absolute URL only"
+            exit 1
+          fi
+
   ci-passed:
     # The only required status check: add new jobs to `needs` instead of changing the branch rules.
     name: CI passed
     if: always()
-    needs: [test, fallow, workflows, zizmor, schemas, action-dist, action-dogfood, browser-bundle, web-e2e]
+    needs: [test, fallow, workflows, zizmor, schemas, action-dist, action-dogfood, browser-bundle, web-e2e, docs]
     runs-on: ubuntu-latest
     steps:
       - name: Every job succeeded
