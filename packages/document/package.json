@@ -1,0 +1,18 @@
+{
+  "name": "@simulci/document",
+  "version": "0.3.0",
+  "private": true,
+  "description": "The simulci document model: a workflow file's text, edited in place and kept byte for byte.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./edits": {
+      "source": "./src/edits.ts",
+      "types": "./src/edits.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}
