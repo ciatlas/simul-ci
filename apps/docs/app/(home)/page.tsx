@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { REPO_URL } from '../../lib/site';
+import { APP_URL, REPO_URL } from '../../lib/site';
 
 const PARTS = [
   {
@@ -21,7 +21,7 @@ const PARTS = [
 
 export default function HomePage() {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-12 px-4 py-16">
+    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-12 px-4 py-16">
       <section className="flex flex-col gap-5">
         <h1 className="text-4xl font-semibold tracking-tight [font-stretch:110%] sm:text-5xl">
           What your workflow does, before it runs.
@@ -38,6 +38,9 @@ export default function HomePage() {
           >
             Get started
           </Link>
+          <a href={APP_URL} className="rounded-md border px-4 py-2 font-medium hover:bg-fd-accent">
+            Open the app
+          </a>
           <a href={REPO_URL} className="rounded-md border px-4 py-2 font-medium hover:bg-fd-accent">
             GitHub
           </a>
@@ -56,6 +59,6 @@ export default function HomePage() {
           </li>
         ))}
       </ul>
-    </main>
+    </div>
   );
 }

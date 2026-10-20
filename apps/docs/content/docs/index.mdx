@@ -4,7 +4,8 @@ description: Plan a run of your workflows, then keep it with a route test.
 ---
 
 simulci reads the workflows under `.github/workflows` and a scenario (an event, a branch, the changed files) and
-prints which jobs and steps run (`●`), skip (`○`) or might run (`◐`), and why. It never runs anything.
+prints which jobs and steps run (`●`), skip (`○`) or might run (`◐`), and why. It never runs anything. To try it
+without installing anything, open [the web app](https://simulci.vercel.app) and pick a sample.
 
 ## Install
 
@@ -59,6 +60,8 @@ pull_request:1/merge · 1 of 1 workflows triggered
   ○ deploy — if: github.ref == 'refs/heads/main' → false
 ```
 
+`~npm-test` is a `run:` step with neither a `name` nor an `id`; a test names it by its position, `test.#2`.
+
 A push to `main` that changes only docs starts nothing:
 
 ```sh
@@ -95,8 +98,8 @@ Pin it with `--assume deploy.build.outputs.changed=true` and the step runs.
 
 ## Write a first test
 
-Route tests live in `.github/simulci/tests/*.test.yml`. `simulci plan --as-test` prints a plan as a case to start
-from; keep the assertions that matter:
+Route tests live in `.github/simulci/tests/*.test.yml`. `simulci plan --as-test jobs` prints a plan as a case to
+start from; keep the assertions that matter:
 
 ```yaml title=".github/simulci/tests/ci.test.yml"
 workflow: ci.yml
@@ -124,7 +127,7 @@ npx simulci test
 2 passed · 0 failed · 0 invalid · 0 skipped · exit 0
 ```
 
-When the workflow changes and a case no longer holds, the failure says what was expected and which line decided:
+Had the first case said `run: [test, deploy]`, the failure would say what was expected and which line decided:
 
 ```text
   ✗ a pull request tests but never deploys
@@ -136,4 +139,6 @@ When the workflow changes and a case no longer holds, the failure says what was 
         at 6:19
 ```
 
-Run the tests on every pull request with the [GitHub Action](/docs/action).
+Run the tests on every pull request with the [GitHub Action](/docs/action). Every flag is under
+[simulci plan](/docs/cli/plan) and [simulci test](/docs/cli/test), every assertion under
+[Test files](/docs/reference/test-files).

@@ -38,7 +38,8 @@
       { "from": "cli", "allow": ["engine", "document", "node"] },
       { "from": "action", "allow": ["engine", "node"] },
       // The web app's tests check parity with the Node host (file discovery); the bundle check keeps node out of the page.
-      { "from": "web", "allow": ["engine", "document", "node"] },
+      // The docs' tests run the CLI's commands, so the flags and outputs the docs show are the CLI's.
+      { "from": "web", "allow": ["engine", "document", "node", "cli"] },
       { "from": "ee", "allow": ["engine", "document", "web"] },
     ],
   },

@@ -1,0 +1,84 @@
+---
+title: Mocks
+description: Assume entries pin what only the run knows; shipped models know what some actions produce.
+---
+
+A mock states what the runner would produce: a step's or job's outcome, its outputs, its `$GITHUB_ENV` writes.
+What the run derives from them (conclusions, `needs.<id>.result`, skips) is planned, never written.
+
+```yaml
+assume:
+  - step: build.version
+    outputs: { tag: v1.2.0 }
+  - job: lint
+    outcome: failure
+  - uses: actions/cache
+    as: miss
+```
+
+Mocks go in a test's `given.assume` or `when.assume`, in `--assume` and `--assume-file`, and in the Action's
+`assume` input.
+
+## An entry
+
+| Key        | Is                                                                                              |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| `step`     | a step, by [unit path](/docs/reference/test-files#unit-paths): `build.unit`, `test[os=windows-latest].#2`, `build.setup/cache` |
+| `job`      | a job, by unit path: `deploy`, `rel/build`; its `outcome` applies to the job as a whole          |
+| `uses`     | every step whose `uses:` matches: `actions/cache`, `actions/cache@v4`, `./.github/actions/x`; with `job`, within that job |
+| `workflow` | `ci.yml`, `.github/workflows/ci.yml` or `ci`, when the job id is in more than one workflow       |
+| `matrix`   | matrix values that select legs, instead of `[k=v]` in the path                                  |
+| `outcome`  | `success`, `failure` or `cancelled`                                                             |
+| `outputs`  | output values by name                                                                           |
+| `env`      | the `$GITHUB_ENV` writes of a step, which the steps after it read                               |
+| `as`       | a preset of a shipped model (`hit`, `miss`)                                                     |
+
+An entry names a step, a job, or a `uses` pattern, and states an `outcome`, `outputs`, `env` or `as`. A value of
+`{ unknown: true }` takes back a value a model or another layer set. `actions/cache` matches every ref and
+`actions/cache/restore`; `actions/cache@v4` matches that ref only.
+
+A mocked output must be one the step can set when simulci knows the step's outputs: a local action's `action.yml`,
+the `actions/cache` model, `dorny/paths-filter` with inline `filters`, or a `run:` script whose `$GITHUB_OUTPUT`
+writes it can read. For other steps any name goes. A job's mocked outputs must be among its `outputs:` (a call job's:
+the called workflow's).
+
+## Layers
+
+For each field the closest layer wins: `--assume` (or the Action's `assume`) over the case's `when.assume` over the
+file's `given.assume`, all over the shipped models. Within a layer, the entry that names more of the unit wins: a
+step over a job over a `uses` pattern with a `job` over a bare `uses` pattern; then a deeper path, more matrix keys,
+a pinned `@ref`, an explicit workflow. Two entries of the same rank that set a field to different values conflict.
+Entries resolve field by field, so a partial entry composes with others.
+
+## Shipped models
+
+simulci knows what some actions produce, from the scenario and the step's `with:`. `simulci models` lists them
+(`--format json` for JSON):
+
+```text
+actions/cache             v1  as: hit, partial, miss
+dorny/paths-filter        v1
+tj-actions/changed-files  v1
+```
+
+- `actions/cache` and `actions/cache/restore`: `cache-hit` is unknown until pinned. `as: hit` sets it to `'true'`,
+  `partial` (a `restore-keys` hit) to `'false'`, `miss` to `''`; `miss` also fails the step when
+  `fail-on-cache-miss` is `true`. `actions/cache/save` is not modelled.
+- `dorny/paths-filter`: one output per filter, `'true'` when a changed file matches it, and `changes`, the JSON list
+  of the filters that matched. Decided from the scenario's `changed`.
+- `tj-actions/changed-files`: `all_changed_files`, `added_files`, `modified_files` and the other lists, their
+  `_count`s, and `any_changed`, `any_modified`, `any_deleted`, over the changed files that match `files` and not
+  `files_ignore`.
+
+## Diagnostics
+
+A mock that cannot apply makes the case invalid (and is reported by `simulci plan`):
+
+| Code    | Means                                                                       |
+| ------- | --------------------------------------------------------------------------- |
+| `SC100` | the entry's unit path does not parse                                        |
+| `SC101` | it sets an output the step or job does not declare                          |
+| `SC102` | it matches nothing in the plan                                              |
+| `SC103` | two entries of the same rank set a field to different values                |
+| `SC105` | `as:` names no preset of the step's model                                   |
+| `SC108` | a note, not an error: a job's outcome is mocked, and its steps are planned as written |

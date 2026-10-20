@@ -20,13 +20,14 @@
   --color-fd-card: #fffdf9;
   --color-fd-card-foreground: #211d18;
   --color-fd-border: #ddd6ca;
-  --color-fd-primary: #b4532a;
+  /* The app's accent (#b4532a) a step darker: 4.5:1 for the current page's link on its own tint. */
+  --color-fd-primary: #a64c27;
   --color-fd-primary-foreground: #fffdf9;
   --color-fd-secondary: #efebe3;
   --color-fd-secondary-foreground: #211d18;
   --color-fd-accent: #f6e4da;
   --color-fd-accent-foreground: #211d18;
-  --color-fd-ring: #b4532a;
+  --color-fd-ring: #a64c27;
 }
 
 .dark {
