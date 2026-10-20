@@ -123,6 +123,8 @@ export interface GraphUi {
   /** Callees past depth 2 the author opened. */
   opened: readonly NodeId[];
   hideUntriggered: boolean;
+  /** The one depth-0 workflow to draw, by path: edit mode's focused workflow. Absent, every one is drawn. */
+  only?: string;
 }
 
 export interface Size {

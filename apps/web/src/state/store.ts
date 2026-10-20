@@ -1,6 +1,6 @@
 import type { AssumeEntry, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { TextEdit } from '@simulci/document/edits';
+import { regionEdit, type TextEdit, touched } from '@simulci/document/edits';
 import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
 import { fileLabel } from '../lib/file-label';
@@ -127,6 +127,17 @@ export interface SessionState {
     base: Record<string, string>;
     /** Per file, its text when the epoch began. */
     opened: Record<string, string>;
+    /**
+     * The edits of the last commit of the history, per file, with each file's rev before it: a view that shows the
+     * text of that rev maps the edits instead of comparing texts (`yaml/bridge.ts`).
+     */
+    edited?: {
+      version: number;
+      revs: Record<string, number>;
+      edits: Record<string, readonly TextEdit[]>;
+      /** Each file's line endings before the commit: the text the edits' offsets are in. */
+      eols: Record<string, FileMeta['eol']>;
+    };
   };
   project: {
     status: 'idle' | 'loading' | 'ready' | 'error';
@@ -186,7 +197,7 @@ export interface SessionState {
   /** The unknown whose row the Unknowns tab was asked to focus, until the tab takes it. */
   unknownFocus?: UnknownFocus;
   pin?: Pin;
-  ui: Omit<GraphUi, 'hideUntriggered'> & {
+  ui: Omit<GraphUi, 'hideUntriggered' | 'only'> & {
     view: 'graph' | 'text';
     hideUntriggered: boolean;
     prefs: Prefs;
@@ -194,8 +205,46 @@ export interface SessionState {
     yamlFile?: string;
   };
   notices: Notice[];
-  /** The edit history (`state/history.ts`), cleared by a new epoch only. */
-  edit: history.History;
+  /** The edit history (`state/history.ts`), cleared by a new epoch only, and the restore waiting to be settled. */
+  edit: EditState;
+  /** A new source asked to replace files with unsaved edits; the replace prompt answers it (`app/replace.ts`). */
+  replacing?: Replacing;
+  /**
+   * Core's generated marker of each file that has one, from the last Outline committed or held, kept through a load
+   * that failed; absent until the epoch's first Outline, when no file is known not to be generated.
+   */
+  generated?: Record<string, string>;
+}
+
+/** A file of the crash snapshot that did not come back by itself (synthesis § 5.6): the author settles it. */
+export interface RestoreConflict {
+  path: string;
+  /** The text the snapshot kept. */
+  text: string;
+  /** `changed`: the file's text is no longer the one the edits were made to; `gone`: it is not there; `exists`: a file the edits created is there now. */
+  reason: 'changed' | 'gone' | 'exists';
+}
+
+export interface RestoreOffer {
+  /** When the snapshot was taken. */
+  at: number;
+  conflicts: RestoreConflict[];
+}
+
+export interface EditState extends history.History {
+  restore?: RestoreOffer;
+  /** Edit mode (`e`, the top bar's Edit switch, `edit=1`): the pane edits the files it may (`writable`). */
+  on: boolean;
+  /** Generated files the author chose to edit this session. */
+  unlocked: string[];
+}
+
+export interface Replacing {
+  seq: number;
+  /** What would replace the files, as the prompt names it: "the sample starter", "the folder repo". */
+  what: string;
+  /** The edited files it would drop; edited buffers a paste leaves standing are not among them. */
+  paths: readonly string[];
 }
 
 /** What an edit asked of the store came to: applied, or nothing changed (a refusal says why, if there was one). */
@@ -211,7 +260,13 @@ export interface Held {
 
 export interface SessionActions {
   /** New files from a source; a file `meta` does not cover is a string no file was read for (a paste, a sample). */
-  setFiles: (byPath: Record<string, string>, source: Source, meta?: Record<string, FileMeta>) => void;
+  /** `base` gives the texts some files' edits were made to (`null`: created since), as stored buffers keep them. */
+  setFiles: (
+    byPath: Record<string, string>,
+    source: Source,
+    meta?: Record<string, FileMeta>,
+    base?: BaseDiff,
+  ) => void;
   forgetSource: () => void;
   /** A source that has no files until the author acts: a stored folder waiting for Reopen. */
   awaitReopen: (source: Source) => void;
@@ -272,6 +327,15 @@ export interface SessionActions {
   /** Undoes the last entry; false when there is none or the hash guard stopped it. */
   undo: () => boolean;
   redo: () => boolean;
+  /** Restore conflicts for the author to settle; the snapshot writer waits until none is left. */
+  offerRestore: (offer: RestoreOffer) => void;
+  /** Settles a restore conflict: the snapshot's text (`mine`, one undoable entry) or the file as it is (`disk`). */
+  settleRestore: (path: string, keep: 'mine' | 'disk') => void;
+  /** The replace prompt shows, or goes. */
+  setReplacing: (replacing: Replacing | undefined) => void;
+  setEdit: (on: boolean) => void;
+  /** The author chose to edit a generated file: "Edit anyway". */
+  unlock: (path: string) => void;
   projectLoading: () => void;
   projectReady: (version: number, outline: Outline, files: number) => void;
   /** A load of edited texts broke YAML that parsed: the project shown stays (§ 7.2). */
@@ -322,8 +386,82 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
     caseOpen: false,
     ui: { view: 'graph', hideUntriggered: false, prefs, expanded: [], representative: {}, opened: [] },
     notices: [],
-    edit: history.emptyHistory(),
+    edit: { ...history.emptyHistory(), on: false, unlocked: [] },
   };
+}
+
+/**
+ * The edit state of a new epoch: no history, no restore offer, nothing unlocked (another repository's file at the same
+ * path is another file); entry ids go on, so none is ever reused.
+ */
+const freshEdit = (edit: EditState): EditState => ({
+  ...history.emptyHistory(edit.next),
+  on: edit.on,
+  unlocked: [],
+});
+
+/** Where the last commit changed the files first: its file and the line of its first edit, in the new text. */
+function revealPatch(s: SessionState): Partial<SessionState> | undefined {
+  const edited = s.files.edited;
+  if (!edited) return undefined;
+  const path = Object.keys(edited.edits).find((p) => s.files.byPath[p] !== undefined);
+  const splices = path === undefined ? undefined : edited.edits[path];
+  if (path === undefined || !splices?.length) return undefined;
+  const text = s.files.byPath[path]!;
+  const at = Math.min(text.length, touched(splices)[0]!.from);
+  const line = text.slice(0, at).split(/\r\n?|\n/).length;
+  return { reveal: { file: path, line, seq: ++requestSeq }, ui: withYamlFile(s.ui, path) };
+}
+
+/** The edit state with its history gone and the rest (the mode, the unlocks, a restore offer) kept. */
+const clearedHistory = (edit: EditState): EditState => ({
+  ...edit,
+  ...history.emptyHistory(edit.next),
+  group: undefined,
+  lastOrigin: undefined,
+});
+
+/** Each generated file's marker, by path. */
+function markersOf(outline: Outline): Record<string, string> {
+  const markers: Record<string, string> = {};
+  for (const f of outline.files) if (f.generated !== undefined) markers[f.path] = f.generated;
+  return markers;
+}
+
+const withoutConflict = (edit: EditState, path: string): EditState => {
+  const conflicts = edit.restore?.conflicts.filter((c) => c.path !== path) ?? [];
+  return {
+    ...edit,
+    restore: conflicts.length > 0 && edit.restore ? { ...edit.restore, conflicts } : undefined,
+  };
+};
+
+/** The transaction that puts a conflicting file back to the snapshot's text: one region edit, or a creation. */
+function restoreOf(s: SessionState, conflict: RestoreConflict): history.TxInput {
+  const current = s.files.byPath[conflict.path];
+  const name = conflict.path.slice(conflict.path.lastIndexOf('/') + 1);
+  const file: history.TxFile =
+    current === undefined
+      ? { path: conflict.path, edits: [{ from: 0, to: 0, insert: conflict.text }], create: true }
+      : {
+          path: conflict.path,
+          edits: [regionEdit(current, conflict.text)],
+          expect: history.stampOf(current),
+        };
+  return { label: `Restored unsaved edits to ${name}`, origin: 'restore', files: [file] };
+}
+
+/** Per path whose text is not its base: the base, or `null` when it has none (a file created since). */
+export type BaseDiff = Record<string, string | null>;
+
+/**
+ * The files whose text is not what was read or last saved: edited, created since, or removed since. A selector, never
+ * stored: undoing back to the base leaves nothing unsaved.
+ */
+export function dirtyPaths(files: Pick<SessionState['files'], 'byPath' | 'base'>): string[] {
+  const dirty = Object.keys(files.byPath).filter((path) => files.byPath[path] !== files.base[path]);
+  for (const path of Object.keys(files.base)) if (!Object.hasOwn(files.byPath, path)) dirty.push(path);
+  return dirty;
 }
 
 let noticeId = 0;
@@ -342,6 +480,7 @@ const UNLOADED = {
   project: { status: 'idle' },
   plan: undefined,
   graph: undefined,
+  generated: undefined,
   stale: false,
   ...UNPINNED,
 } as const;
@@ -358,14 +497,19 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       });
       return outcome;
     };
+    /** After an undo or a redo, the pane shows the file and the line it changed (§ 6); it is not opened for it. */
+    const revealed = (outcome: EditOutcome): boolean => {
+      if (outcome.ok) set((s) => revealPatch(s) ?? s);
+      return outcome.ok;
+    };
     return {
       ...initial,
-      setFiles: (byPath, source, meta) =>
+      setFiles: (byPath, source, meta, base) =>
         set((s) => ({
           source,
-          files: sourceFiles(s.files, byPath, metaOf(byPath, meta)),
+          files: sourceFiles(s.files, byPath, metaOf(byPath, meta), base),
           ...UNLOADED,
-          edit: history.emptyHistory(s.edit.next),
+          edit: freshEdit(s.edit),
           error: s.error?.kind === 'source' ? undefined : s.error,
         })),
       forgetSource: () =>
@@ -373,7 +517,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           source: { kind: 'none' },
           files: sourceFiles(s.files, {}, {}),
           ...UNLOADED,
-          edit: history.emptyHistory(s.edit.next),
+          edit: freshEdit(s.edit),
           focus: undefined,
           sel: undefined,
           error: replaceError(s.error, undefined),
@@ -463,17 +607,38 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       transact: (input) => commit((s) => history.transact(s.edit, s.files.byPath, input, contextOf(s))),
       typed: (path, splices, alone) =>
         commit((s) => history.typed(s.edit, s.files.byPath, path, splices, contextOf(s), alone)),
-      closeGroup: () => set((s) => (s.edit.group ? { edit: history.close(s.edit) } : s)),
-      undo: () => commit((s) => history.undo(s.edit, s.files.byPath), 'undo').ok,
-      redo: () => commit((s) => history.redo(s.edit, s.files.byPath), 'redo').ok,
+      closeGroup: () => set((s) => (s.edit.group ? { edit: { ...s.edit, ...history.close(s.edit) } } : s)),
+      offerRestore: (restore) => set((s) => ({ edit: { ...s.edit, restore } })),
+      settleRestore: (path, keep) => {
+        const conflict = get().edit.restore?.conflicts.find((c) => c.path === path);
+        if (!conflict) return;
+        if (keep === 'mine')
+          commit((s) => history.transact(s.edit, s.files.byPath, restoreOf(s, conflict), contextOf(s)));
+        set((s) => ({ edit: withoutConflict(s.edit, path) }));
+      },
+      setReplacing: (replacing) => set({ replacing }),
+      setEdit: (on) =>
+        set((s) =>
+          s.edit.on === on
+            ? s
+            : { edit: { ...history.close(s.edit), restore: s.edit.restore, on, unlocked: s.edit.unlocked } },
+        ),
+      unlock: (path) =>
+        set((s) =>
+          s.edit.unlocked.includes(path) ? s : { edit: { ...s.edit, unlocked: [...s.edit.unlocked, path] } },
+        ),
+      undo: () => revealed(commit((s) => history.undo(s.edit, s.files.byPath), 'undo')),
+      redo: () => revealed(commit((s) => history.redo(s.edit, s.files.byPath), 'redo')),
       projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
       // A new project of the newest texts: whatever was held is released.
       projectReady: (version, outline, files) =>
         set((s) => ({
           project: { status: 'ready', version, outline, files },
+          generated: markersOf(outline),
           error: replaceError(s.error, undefined),
         })),
-      projectHeld: (held) => set((s) => ({ project: { ...s.project, held } })),
+      projectHeld: (held) =>
+        set((s) => ({ project: { ...s.project, held }, generated: markersOf(held.outline) })),
       projectFailed: (error) =>
         set((s) => ({ project: { status: 'error' }, error: replaceError(s.error, error) })),
       engineReady: ({ version, models }) =>
@@ -524,14 +689,21 @@ function committed(
       return { patch: s, outcome: { ok: false, refusal: outcome } };
     const text = `${stopped.verb} stopped: ${fileLabel(outcome.path)} changed outside the history`;
     return {
-      patch: { edit: history.emptyHistory(s.edit.next), notices: [...s.notices, { id: stopped.id, text }] },
+      patch: { edit: clearedHistory(s.edit), notices: [...s.notices, { id: stopped.id, text }] },
       outcome: { ok: false, refusal: outcome },
     };
   }
   const texts = withTexts(s, outcome.changes);
   // Nothing moved: no update, so no listener runs.
   if (!texts.files && outcome.history === s.edit) return { patch: s, outcome: { ok: false } };
-  const patch: Partial<SessionState> = { ...texts, edit: outcome.history };
+  const patch: Partial<SessionState> = { ...texts, edit: { ...s.edit, ...outcome.history } };
+  if (texts.files)
+    texts.files.edited = {
+      version: texts.files.version,
+      revs: s.files.revs,
+      edits: outcome.edits,
+      eols: Object.fromEntries(Object.keys(outcome.edits).map((p) => [p, s.files.meta[p]?.eol ?? 'none'])),
+    };
   if (!texts.files) return { patch, outcome: { ok: false } };
   patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
   return { patch, outcome: { ok: true } };
@@ -570,15 +742,23 @@ const contextOf = (s: SessionState): history.Context => ({
   },
 });
 
-/** The files of a new source: a new epoch, every file at the new version, its text as read and as opened. */
+/**
+ * The files of a new source: a new epoch, every file at the new version, its text as read and as opened, except
+ * where `diff` gives the text its edits were made to (pasted buffers carry their edits across epochs).
+ */
 function sourceFiles(
   files: SessionState['files'],
   byPath: Record<string, string>,
   meta: Record<string, FileMeta>,
+  diff?: BaseDiff,
 ): SessionState['files'] {
   const version = files.version + 1;
   const revs = Object.fromEntries(Object.keys(byPath).map((path) => [path, version]));
-  return { version, epoch: files.epoch + 1, byPath, meta, revs, base: byPath, opened: byPath };
+  const base = { ...byPath };
+  for (const [path, text] of Object.entries(diff ?? {}))
+    if (text === null) delete base[path];
+    else base[path] = text;
+  return { version, epoch: files.epoch + 1, byPath, meta, revs, base, opened: base };
 }
 
 /**
@@ -601,6 +781,7 @@ export function withTexts(
   const version = s.files.version + 1;
   const files = {
     ...s.files,
+    edited: undefined,
     version,
     byPath: { ...s.files.byPath },
     meta: { ...s.files.meta },
@@ -702,6 +883,32 @@ function answered(pin: Pin | undefined, plan: PlanState): Pin | undefined {
   const changes = verdictChanges(pin.before, plan);
   const { seq, scenario, assume } = pin;
   return { seq, scenario, assume, after: { plan: plan.plan, changes, sentence: pinSentence(changes) } };
+}
+
+/** Why the pane may not edit a file, or that it may. */
+export type Writable =
+  | { ok: true }
+  | { ok: false; reason: 'off' | 'missing' | 'encoding' | 'loading' | 'mixed' }
+  | { ok: false; reason: 'generated'; marker: string };
+
+/**
+ * Whether the pane may edit a file (synthesis § 4.3): in edit mode, a file read as valid UTF-8, known not to be
+ * generated (an Outline of the epoch has come) unless the author unlocked it in this epoch or has edited it already
+ * (a marker typed into it does not lock it under the cursor), with one kind of line ending. Generated is said before
+ * mixed, so a locked file never offers Convert. Invalid YAML stays writable: the pane is where it gets fixed.
+ */
+export function writable(s: Pick<SessionState, 'edit' | 'files' | 'generated'>, path: string): Writable {
+  if (!s.edit.on) return { ok: false, reason: 'off' };
+  const meta = s.files.meta[path];
+  const text = s.files.byPath[path];
+  if (text === undefined || !meta) return { ok: false, reason: 'missing' };
+  if (!meta.utf8) return { ok: false, reason: 'encoding' };
+  if (s.generated === undefined) return { ok: false, reason: 'loading' };
+  const marker = s.generated[path];
+  const kept = s.edit.unlocked.includes(path) || text !== s.files.base[path];
+  if (marker !== undefined && !kept) return { ok: false, reason: 'generated', marker };
+  if (meta.eol === 'mixed') return { ok: false, reason: 'mixed' };
+  return { ok: true };
 }
 
 /** The Outline of the newest texts loaded: the held one while the hold is on, since its errors are what to fix. */

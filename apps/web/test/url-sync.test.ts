@@ -113,8 +113,10 @@ describe('the URL bridge', () => {
       d: 'legs',
       view: 'text',
       hide: '1',
+      edit: '1',
     });
     const s = b.store.getState();
+    expect(s.edit.on).toBe(true);
     expect(s.scenario).toEqual({ event: 'pull_request', number: 7 });
     expect(s.scenarioFrom).toBe('url');
     expect(s.assume).toEqual([{ step: 'build.test', outcome: 'failure' }]);
@@ -129,7 +131,9 @@ describe('the URL bridge', () => {
       a: [{ step: 'build.test', outcome: 'failure' }],
       d: 'legs',
       hide: 1,
+      edit: 1,
     });
+    expect(b.store.getState().edit.on).toBe(true);
     b.store.getState().projectReady(1, outline, 1);
     b.history.entries[0] = {};
     b.routeRenders();
@@ -141,6 +145,7 @@ describe('the URL bridge', () => {
     expect(s.assumed).toEqual(d.assumed);
     expect(s.focus).toBe(CI);
     expect([s.assume, s.detail, s.ui.view, s.ui.hideUntriggered]).toEqual([[], 'steps', 'graph', false]);
+    expect(s.edit.on).toBe(false);
   });
 
   it('keeps assume entries too long for the URL when a URL without them is applied', () => {

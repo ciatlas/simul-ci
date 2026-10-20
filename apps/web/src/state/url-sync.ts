@@ -143,4 +143,6 @@ function applyView(s: Session, url: UrlState): void {
   if (s.ui.view !== view) s.setView(view);
   const hide = url.hide === true;
   if (s.ui.hideUntriggered !== hide) s.setHideUntriggered(hide);
+  const edit = url.edit === true;
+  if (s.edit.on !== edit) s.setEdit(edit);
 }

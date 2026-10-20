@@ -83,6 +83,8 @@ export type TextChanges = Record<string, string | null>;
 export interface Step {
   history: History;
   changes: TextChanges;
+  /** Per changed file, the edits that make its new text, in the offsets of the text before: what a view maps. */
+  edits: Record<string, readonly TextEdit[]>;
 }
 
 /**
@@ -152,7 +154,7 @@ export function transact(h: History, texts: Texts, input: TxInput, ctx: Context)
     files.push(planned.change);
     changes[file.path] = planned.text;
   }
-  if (files.length === 0) return { history: closed, changes: {} };
+  if (files.length === 0) return { history: closed, changes: {}, edits: {} };
   const tx: Transaction = {
     id: closed.next,
     label: input.label,
@@ -164,6 +166,7 @@ export function transact(h: History, texts: Texts, input: TxInput, ctx: Context)
   return {
     history: push({ ...closed, future: [], lastOrigin: input.origin, next: closed.next + 1 }, tx),
     changes,
+    edits: Object.fromEntries(files.map((f) => [f.path, f.edits])),
   };
 }
 
@@ -244,7 +247,7 @@ export function typed(
   if (current === undefined) return { refused: 'missing', path };
   const applied = tryApply(current, edits);
   if (applied === undefined) return { refused: 'range', path };
-  if (applied.text === current) return { history: h, changes: {} };
+  if (applied.text === current) return { history: h, changes: {}, edits: {} };
   const key = `pane:${path}`;
   const end = touched(edits).at(-1)!.to;
   const joins = alone === undefined && continues(h.group, key, current, edits, ctx.at);
@@ -264,7 +267,7 @@ export function typed(
         };
   const next: History = { ...open, future: [], group, lastOrigin: 'pane' };
   const after = alone !== undefined || breaksLine(edits) ? close(next) : next;
-  return { history: after, changes: { [path]: applied.text } };
+  return { history: after, changes: { [path]: applied.text }, edits: { [path]: edits } };
 }
 
 /**
@@ -356,6 +359,7 @@ export function undo(h: History, texts: Texts): Step | Refusal | undefined {
       lastOrigin: 'undo',
     },
     changes,
+    edits: Object.fromEntries(tx.files.map((f) => [f.path, f.inverse])),
   };
 }
 
@@ -371,6 +375,7 @@ export function redo(h: History, texts: Texts): Step | Refusal | undefined {
   return {
     history: { ...h, past: [...h.past, tx], future: h.future.slice(0, -1), lastOrigin: 'redo' },
     changes,
+    edits: Object.fromEntries(tx.files.map((f) => [f.path, f.edits])),
   };
 }
 

@@ -1,0 +1,219 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect, type Locator, type Page, test } from '@playwright/test';
+
+/**
+ * Editing the YAML in the pane, in a real browser under the deployment's CSP (synthesis § 9.2 A5, § 9.5): in edit
+ * mode a key typed into a file re-simulates and the card follows; undoing everything gives back the file's bytes; a
+ * CRLF file with a BOM edited by one character downloads with exactly that character changed, its BOM and its CRLF
+ * kept; a generated file refuses edits until the author unlocks it; an edit survives a reload; and opening another
+ * source while a file has unsaved edits asks first.
+ */
+
+const CI = '.github/workflows/ci.yml';
+const STARTER_CI = readFileSync(join(import.meta.dirname, '../src/samples/starter/ci.yml'), 'utf8');
+
+/** Every page error and console error, so a test that passes on screen still fails on a thrown handler. */
+let errors: string[] = [];
+
+test.beforeEach(({ page }) => {
+  errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(m.text());
+  });
+});
+
+test.afterEach(() => {
+  expect(errors).toEqual([]);
+});
+
+const jobNode = (page: Page, job: string, path = CI): Locator =>
+  page.locator(`.react-flow__node-job[data-id="${path}#${job}"]`);
+const pane = (page: Page): Locator => page.locator('[data-pane="yaml"]');
+const editor = (page: Page): Locator => pane(page).locator('.cm-content');
+const footer = (page: Page): Locator => pane(page).locator('footer');
+
+async function openStarter(page: Page): Promise<void> {
+  await page.goto('/');
+  await page.getByRole('button', { name: /^Starter/ }).click();
+  await expect(jobNode(page, 'deploy')).toBeVisible();
+}
+
+/** The top bar's Edit switch on, and the YAML pane open on its file. */
+async function editMode(page: Page): Promise<void> {
+  await page.getByRole('switch', { name: /^Edit/ }).click();
+  await expect(page.getByRole('switch', { name: /^Edit/ })).toHaveAttribute('aria-checked', 'true');
+  if ((await pane(page).count()) === 0) await page.keyboard.press('\\');
+  await expect(editor(page)).toHaveAttribute('contenteditable', 'true');
+}
+
+/** The cursor at the end of a line of the shown file, by the keyboard alone. */
+async function endOfLine(page: Page, line: number): Promise<void> {
+  await editor(page).click();
+  await page.keyboard.press('ControlOrMeta+Home');
+  for (let i = 1; i < line; i++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+}
+
+/** The shown file as Download hands it over, byte for byte. */
+async function downloaded(page: Page): Promise<Buffer> {
+  const downloading = page.waitForEvent('download');
+  await footer(page).getByRole('button', { name: 'Download' }).click();
+  return readFileSync(await (await downloading).path());
+}
+
+/** Drops loose files on the page, as the author drags them in: they become pasted workflows by their names. */
+async function dropFiles(page: Page, files: Record<string, number[]>): Promise<void> {
+  const transfer = await page.evaluateHandle((given) => {
+    const dt = new DataTransfer();
+    for (const [name, bytes] of Object.entries(given)) dt.items.add(new File([new Uint8Array(bytes)], name));
+    return dt;
+  }, files);
+  await page.dispatchEvent('header', 'drop', { dataTransfer: transfer });
+}
+
+const bytesOf = (text: string): number[] => [...Buffer.from(text, 'utf8')];
+
+/** Line 43 of the starter's CI: deploy's `if:`, whose condition runs it on a push. */
+const DEPLOY_IF = "github.event_name == 'push' || inputs.deploy";
+
+async function skipDeploy(page: Page): Promise<void> {
+  await endOfLine(page, 43);
+  for (let i = 0; i < DEPLOY_IF.length; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await page.keyboard.type('false');
+}
+
+test('typing if: false turns the deploy card skipped, and undoing everything gives back the file’s bytes', async ({
+  page,
+}) => {
+  await openStarter(page);
+  await expect(jobNode(page, 'deploy')).not.toHaveAttribute('aria-label', /^skipped/);
+  await editMode(page);
+  await skipDeploy(page);
+  await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/, { timeout: 2000 });
+  await expect(footer(page)).toContainText('● unsaved');
+  await expect(page).toHaveTitle('• simulci');
+
+  // Mod+Z in the editor goes to the page's history, as the Undo button does; the canvas follows.
+  await page.keyboard.press('ControlOrMeta+z');
+  const undo = page.getByRole('button', { name: /^Undo/ });
+  while ((await undo.getAttribute('aria-disabled')) !== 'true') await undo.click();
+  await expect(jobNode(page, 'deploy')).not.toHaveAttribute('aria-label', /^skipped/);
+  await expect(footer(page)).not.toContainText('● unsaved');
+  await expect(page).toHaveTitle('simulci');
+  expect((await downloaded(page)).toString('utf8')).toBe(STARTER_CI);
+  // Mod+Y redoes on the page outside the editor, Mod+Z undoes there too, and Mod+Shift+Z redoes in the editor.
+  await page.keyboard.press('ControlOrMeta+y');
+  await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(jobNode(page, 'deploy')).not.toHaveAttribute('aria-label', /^skipped/);
+  await editor(page).click();
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/);
+  await expect(page.getByRole('button', { name: /^Undo/ })).toHaveAttribute(
+    'aria-label',
+    'Undo Typing in ci.yml',
+  );
+});
+
+test('a CRLF file with a BOM edited by one character downloads with that character changed and nothing else', async ({
+  page,
+}) => {
+  const text =
+    'name: CRLF\r\non: push\r\njobs:\r\n  a:\r\n    runs-on: ubuntu-latest\r\n    steps:\r\n      - run: echo\r\n';
+  await page.goto('/');
+  await dropFiles(page, { 'crlf.yml': [0xef, 0xbb, 0xbf, ...bytesOf(text)] });
+  await expect(jobNode(page, 'a', '.github/workflows/crlf.yml')).toBeVisible();
+  await editMode(page);
+  await expect(footer(page)).toContainText('CRLF · 2 spaces');
+  await endOfLine(page, 1);
+  await page.keyboard.type('X');
+  await expect(footer(page)).toContainText('● unsaved');
+  const bytes = await downloaded(page);
+  expect([...bytes]).toEqual([0xef, 0xbb, 0xbf, ...bytesOf(text.replace('name: CRLF', 'name: CRLFX'))]);
+  // A line break typed into it is a CRLF too.
+  await endOfLine(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('#');
+  const after = (await downloaded(page)).toString('utf8');
+  expect(after).toBe(`\uFEFF${text.replace('name: CRLF\r\n', 'name: CRLFX\r\n#\r\n')}`);
+});
+
+test('a generated file refuses edits until the author unlocks it', async ({ page }) => {
+  const text =
+    '# Code generated by gen. DO NOT EDIT.\non: push\njobs:\n  a:\n    runs-on: x\n    steps: [{ run: echo }]\n';
+  await page.goto('/');
+  await dropFiles(page, { 'made.yml': bytesOf(text) });
+  await expect(jobNode(page, 'a', '.github/workflows/made.yml')).toBeVisible();
+  await page.getByRole('switch', { name: /^Edit/ }).click();
+  if ((await pane(page).count()) === 0) await page.keyboard.press('\\');
+  await expect(footer(page)).toContainText('Generated (line 1: Code generated by gen.)');
+  await expect(editor(page)).toHaveAttribute('contenteditable', 'false');
+  await footer(page).getByRole('button', { name: 'Edit anyway' }).click();
+  await expect(editor(page)).toHaveAttribute('contenteditable', 'true');
+  // The button goes; the focus goes to the text it unlocked, not to the page.
+  await expect(editor(page)).toBeFocused();
+  await endOfLine(page, 2);
+  await page.keyboard.type(' # edited');
+  await expect(footer(page)).toContainText('● unsaved');
+});
+
+test('an edit of the sample survives a reload, as the edited copy it became, still unsaved', async ({
+  page,
+}) => {
+  await openStarter(page);
+  await editMode(page);
+  await skipDeploy(page);
+  await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/);
+  await expect(page.getByRole('navigation', { name: 'Source' })).toContainText(
+    'edited copy of the starter sample',
+  );
+  // The buffers are written 500 ms after the last edit; then nothing waits, and the page leaves without asking.
+  await page.waitForTimeout(800);
+  await page.reload();
+  await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/);
+  await expect(page.getByRole('navigation', { name: 'Source' })).toContainText(
+    'edited copy of the starter sample',
+  );
+  // Still unsaved: the buffers keep the text the edit was made to, so opening another sample asks.
+  await expect(page).toHaveTitle('• simulci');
+  await page.getByRole('navigation', { name: 'Source' }).getByRole('combobox').selectOption('monorepo');
+  await expect(page.getByRole('dialog', { name: 'Unsaved edits' })).toContainText(
+    'ci.yml has unsaved edits.',
+  );
+});
+
+test('opening a sample or pasting over a file with unsaved edits asks first: Cancel keeps them, Discard goes on', async ({
+  page,
+}) => {
+  await openStarter(page);
+  await editMode(page);
+  await skipDeploy(page);
+  await expect(footer(page)).toContainText('● unsaved');
+  const sample = page.getByRole('navigation', { name: 'Source' }).getByRole('combobox');
+  await sample.selectOption('monorepo');
+  const dialog = page.getByRole('dialog', { name: 'Unsaved edits' });
+  await expect(dialog).toContainText('ci.yml has unsaved edits. Opening the monorepo sample drops them.');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/);
+
+  // Pasting over the edited file asks too; Cancel keeps the edits, and the paste dialog with what was pasted.
+  await page.getByRole('navigation', { name: 'Source' }).getByRole('button', { name: 'Paste YAML' }).click();
+  const paste = page.getByRole('dialog', { name: 'Paste a workflow or an action' });
+  await paste.getByLabel('Path in the repository').fill(CI);
+  await paste.getByLabel('YAML').fill('on: push\n');
+  await paste.getByRole('button', { name: 'Add' }).click();
+  await expect(dialog).toContainText(`ci.yml has unsaved edits. Pasting ${CI} drops them.`);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(paste.getByLabel('YAML')).toHaveValue('on: push\n');
+  await paste.getByRole('button', { name: 'Cancel' }).click();
+  await expect(paste).toHaveCount(0);
+  await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/);
+
+  await sample.selectOption('monorepo');
+  await dialog.getByRole('button', { name: 'Discard edits' }).click();
+  await expect(page.getByRole('navigation', { name: 'Source' })).toContainText('sample: monorepo');
+});
