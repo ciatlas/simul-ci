@@ -5,9 +5,11 @@ import type { JobModel, ScopeModel, StepMark } from './types';
 
 /**
  * A scope's shape: a hash of what decides its layout and nothing else, the key its positions are cached under. The
- * jobs in order with their labels, open step lists, the grid's cells and the strip's rows as size.ts counts them,
- * `uses:` and the shape of the workflow each one calls, and every `needs` edge. Verdicts, results, clauses and
- * values never enter it, so a scenario that only recolours the picture keeps every shape and moves nothing.
+ * jobs in order, open step lists, the grid's cells and the strip's rows as size.ts counts them, `uses:` and the shape
+ * of the workflow each one calls, and every `needs` edge. Verdicts, results, clauses and values never enter it, so a
+ * scenario that only recolours the picture keeps every shape and moves nothing. Nor do the labels: what a label
+ * decides is its card's width, which the layout cache keys by (layout.ts) and size.ts rounds up to a step, so
+ * renaming a job lays it out again only when its card grows or shrinks by a step.
  */
 export function shapeHash(
   scope: Pick<ScopeModel, 'id' | 'collapsed' | 'edges'>,
@@ -26,7 +28,6 @@ function jobShape(job: JobModel, calleeShapes: Readonly<Record<NodeId, string>>)
   // list's only while it is open.
   return [
     job.id,
-    job.label,
     job.expanded ? `open ${rows(job.steps)}` : '',
     gridCells(job),
     job.count ?? '',

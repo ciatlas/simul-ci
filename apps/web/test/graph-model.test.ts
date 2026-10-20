@@ -537,7 +537,8 @@ describe('the shape of a scope', () => {
       steps: [{ ...job.steps[0]!, verdict: 'no', outputs: 'v=?' }],
     };
     expect(shapeHash(scope, [recoloured], {})).toBe(shapeHash(scope, [job], {}));
-    expect(shapeHash(scope, [{ ...job, label: 'a longer name' }], {})).not.toBe(shapeHash(scope, [job], {}));
+    // A label decides only its card's width, which the layout cache keys by on its own (graph/layout.ts).
+    expect(shapeHash(scope, [{ ...job, label: 'a longer name' }], {})).toBe(shapeHash(scope, [job], {}));
     // Inner steps are rows of the open list only.
     const inner = { ...job.steps[0]!, inner: [{ ...job.steps[0]!, id: 'ci.yml#a[n=1]/~x>y/~z' }] };
     expect(shapeHash(scope, [{ ...job, steps: [inner] }], {})).toBe(shapeHash(scope, [job], {}));
