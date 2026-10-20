@@ -23,16 +23,19 @@ import {
   TestsError,
 } from '@simulci/node';
 import { type ArgsDef, defineCommand } from 'citty';
-import { assumeOf, readArgs, values } from './args';
+import { assumeOf, exitCodeOf, oneOf, readArgs, spoken, values } from './args';
 
 /** `simulci test`: the route tests under `.github/simulci/tests`, or the files named. */
 
+const DETAILS = ['steps', 'legs'] as const;
+
+/** The `simulci test` arguments: as citty parses them, by their camelCase names, with `--snapshot-detail` checked. */
 export interface TestArgs {
   dir: string;
   files?: string | string[];
   junit?: string;
   update?: boolean;
-  snapshotDetail?: string;
+  snapshotDetail?: (typeof DETAILS)[number];
   filter?: string;
   ci?: boolean;
   strict?: boolean;
@@ -56,7 +59,7 @@ export function runTestCommand(a: TestArgs, io: TestIo): number {
     ci: a.ci ?? io.env.CI === 'true',
     update: a.update ?? false,
     strict: a.strict ?? false,
-    snapshotDetail: a.snapshotDetail === 'legs' ? 'legs' : 'steps',
+    snapshotDetail: a.snapshotDetail ?? 'steps',
     snapshots: diskSnapshotStore(root),
   };
   if (a.filter !== undefined) options.filter = a.filter;
@@ -129,7 +132,7 @@ const TEST_ARGS = {
     description: 'Write every snapshot and prune stale ones',
     default: false,
   },
-  snapshotDetail: { type: 'string', description: 'steps or legs', default: 'steps' },
+  'snapshot-detail': { type: 'string', description: spoken(DETAILS), default: 'steps' },
   filter: { type: 'string', alias: 't', description: 'Run the cases whose name contains the text' },
   ci: {
     type: 'boolean',
@@ -144,23 +147,32 @@ const TEST_ARGS = {
     type: 'string',
     description: 'A mock for every case: build.unit=failure, build.unit.outputs.sha=abc (repeatable)',
   },
-  assumeFile: { type: 'string', description: 'A YAML list of mocks for every case' },
+  'assume-file': { type: 'string', description: 'A YAML list of mocks for every case' },
 } satisfies ArgsDef;
 
 export const testCommand = defineCommand({
   meta: { name: 'test', description: 'Run the route tests under .github/simulci/tests' },
   args: TEST_ARGS,
   run({ rawArgs }) {
-    process.exitCode = runTestCommand(testArgs(rawArgs), {
+    const io: TestIo = {
       stdout: (t) => process.stdout.write(t),
       stderr: (t) => process.stderr.write(t),
       env: process.env,
-    });
+    };
+    process.exitCode = exitCodeOf(() => runTestCommand(testArgs(rawArgs), io), io);
   },
 });
 
-/** The arguments of a `simulci test` command line: every test file named, and every `--assume`. */
+/**
+ * The arguments of a `simulci test` command line: every test file named, and every `--assume`. A `FlagError` when
+ * `--snapshot-detail` is given a value it does not take.
+ */
 export function testArgs(rawArgs: readonly string[]): TestArgs {
-  const a = readArgs(rawArgs, TEST_ARGS, { repeated: ['assume'] }) as unknown as TestArgs & { _: string[] };
-  return a._.length ? { ...a, files: a._ } : a;
+  const a = readArgs(rawArgs, TEST_ARGS, { repeated: ['assume'] });
+  const args = {
+    ...(a as unknown as TestArgs),
+    snapshotDetail: oneOf('snapshot-detail', a.snapshotDetail, DETAILS),
+  };
+  const files = a._ as string[];
+  return files.length ? { ...args, files } : args;
 }
