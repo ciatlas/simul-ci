@@ -1,0 +1,34 @@
+name: anchors
+on: push
+env:
+  # A scalar anchor, reused below.
+  RUNNER: &runner ubuntu-latest
+  EARLY: *later
+  MISSING: *nowhere
+defaults: &defaults
+  run:
+    shell: bash
+jobs:
+  build: &job
+    runs-on: *runner
+    defaults: *defaults
+    steps:
+      - &checkout
+        uses: actions/checkout@v4
+      - run: make
+  test:
+    runs-on: *runner
+    steps:
+      - *checkout
+      - run: make test
+  again: *job
+  merged:
+    <<: *job
+    name: merged
+  redefined:
+    runs-on: &runner self-hosted
+    env:
+      AFTER: *runner
+      LATER: &later late
+  quoted:
+    '<<': not a merge key

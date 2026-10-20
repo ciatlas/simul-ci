@@ -7,6 +7,10 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./src/index.ts"
+    },
     "./edits": {
       "source": "./src/edits.ts",
       "types": "./src/edits.ts"
@@ -14,5 +18,11 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@ciatlas/core": "github:ciatlas/core#v2.5.0"
   }
 }

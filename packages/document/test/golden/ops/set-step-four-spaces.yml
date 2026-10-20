@@ -1,0 +1,23 @@
+name: "Four spaces"
+on:
+    push:
+        branches:
+            - main
+            - "release/**"
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        needs:
+            - lint
+        if: ${{ github.event_name == 'push' }}
+        steps:
+            -   name: "Checkout"
+                uses: actions/checkout@v4  # pinned
+
+            -   run: make
+                shell: bash
+
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            -   run: make lint

@@ -1,0 +1,38 @@
+  1 on
+  2 on.workflow_dispatch
+  3 on.schedule
+  4 on.schedule.0  →  on.schedule.0.cron
+  5 jobs
+  6 jobs.flow-steps
+  7 jobs.flow-steps.runs-on
+  8 jobs.flow-steps.steps
+  9 jobs.flow-steps.steps.0
+ 10 jobs.flow-steps.steps.1
+ 11 jobs.expanded
+ 12 jobs.expanded.runs-on
+ 13 jobs.expanded.steps
+ 14 jobs.expanded.steps.0
+ 15 jobs.expanded.steps.0.name
+ 16 jobs.expanded.steps.0.run
+ 17 jobs.expanded.steps.1  →  jobs.expanded.steps.1.name
+ 18 jobs.expanded.steps.1.run
+ 19 jobs.blocks
+ 20 jobs.blocks.runs-on
+ 21 jobs.blocks.if
+ 22 jobs.blocks.if
+ 23 jobs.blocks.if
+ 24 jobs.blocks.steps
+ 25 jobs.blocks.steps.0  →  jobs.blocks.steps.0.run
+ 26 jobs.blocks.steps.0.run
+ 27 jobs.blocks.steps.0.run
+ 28 jobs.blocks.steps.1  →  jobs.blocks.steps.1.run
+ 29 jobs.blocks.steps.1.run
+ 30 jobs.blocks.steps.1.run
+ 31 jobs.blocks.steps.2  →  jobs.blocks.steps.2.name
+ 32 jobs.blocks.steps.2.run
+ 33 jobs.empty
+ 34 jobs.empty.runs-on
+ 35 jobs.empty.steps
+ 36 jobs.empty.steps.0
+ 37 jobs.empty.steps.1  →  jobs.empty.steps.1.run
+ 38 ·

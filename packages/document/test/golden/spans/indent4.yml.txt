@@ -1,0 +1,111 @@
+── name (line 1)
+name: "Four spaces"
+
+── on (line 2)
+on:
+    push:
+        branches:
+            - main
+            - "release/**"
+
+── on.push (line 3)
+    push:
+        branches:
+            - main
+            - "release/**"
+
+── on.push.branches (line 4)
+        branches:
+            - main
+            - "release/**"
+
+── on.push.branches.0 (line 5)
+            - main
+
+── on.push.branches.1 (line 6)
+            - "release/**"
+
+── jobs (line 7)
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        needs:
+            - lint
+        if: ${{ github.event_name == 'push' }}
+        steps:
+            -   name: "Checkout"
+                uses: actions/checkout@v4  # pinned
+
+            -   run: make
+
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            -   run: make lint
+
+── jobs.build (line 8)
+    build:
+        runs-on: ubuntu-latest
+        needs:
+            - lint
+        if: ${{ github.event_name == 'push' }}
+        steps:
+            -   name: "Checkout"
+                uses: actions/checkout@v4  # pinned
+
+            -   run: make
+
+── jobs.build.runs-on (line 9)
+        runs-on: ubuntu-latest
+
+── jobs.build.needs (line 10)
+        needs:
+            - lint
+
+── jobs.build.needs.0 (line 11)
+            - lint
+
+── jobs.build.if (line 12)
+        if: ${{ github.event_name == 'push' }}
+
+── jobs.build.steps (line 13)
+        steps:
+            -   name: "Checkout"
+                uses: actions/checkout@v4  # pinned
+
+            -   run: make
+
+── jobs.build.steps.0 (line 14)
+            -   name: "Checkout"
+                uses: actions/checkout@v4  # pinned
+
+── jobs.build.steps.0.name (line 14)
+name: "Checkout"
+
+── jobs.build.steps.0.uses (line 15)
+                uses: actions/checkout@v4  # pinned
+
+── jobs.build.steps.1 (line 17)
+            -   run: make
+
+── jobs.build.steps.1.run (line 17)
+run: make
+
+── jobs.lint (line 19)
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            -   run: make lint
+
+── jobs.lint.runs-on (line 20)
+        runs-on: ubuntu-latest
+
+── jobs.lint.steps (line 21)
+        steps:
+            -   run: make lint
+
+── jobs.lint.steps.0 (line 22)
+            -   run: make lint
+
+── jobs.lint.steps.0.run (line 22)
+run: make lint
