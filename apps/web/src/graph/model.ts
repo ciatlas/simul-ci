@@ -30,12 +30,19 @@ export function graphModel(plan: RunPlan, derived: Derived, ui: GraphUi): GraphM
     expanded: new Set(ui.expanded),
     opened: new Set(ui.opened),
   };
+  const only = onlyIn(plan, ui.only);
   for (const wf of plan.workflows) {
-    if (wf.depth !== 0 || (ui.hideUntriggered && wf.triggered.verdict === 'no')) continue;
+    if (wf.depth !== 0 || (only !== undefined && wf.path !== only)) continue;
+    // The workflow being edited is drawn untriggered too: hiding it would leave the builder nothing to show.
+    if (ui.hideUntriggered && wf.triggered.verdict === 'no' && wf.path !== only) continue;
     b.model.roots.push(scopeOf(b, wf, undefined));
   }
   return b.model;
 }
+
+/** The workflow `only` names, when it is one of the plan's depth-0 workflows; else every one is drawn. */
+const onlyIn = (plan: RunPlan, only: string | undefined): string | undefined =>
+  only !== undefined && plan.workflows.some((wf) => wf.depth === 0 && wf.path === only) ? only : undefined;
 
 interface Build {
   derived: Derived;

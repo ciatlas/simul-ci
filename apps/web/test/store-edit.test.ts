@@ -4,7 +4,7 @@ import { createSources } from '../src/input/sources';
 import { memoryStore } from '../src/lib/idb';
 import { stampOf } from '../src/state/history';
 import { sourceStore } from '../src/state/persist';
-import { createSessionStore, type PlanState, withTexts } from '../src/state/store';
+import { createSessionStore, type PlanState, withTexts, writable } from '../src/state/store';
 
 const CI = '.github/workflows/ci.yml';
 const RELEASE = '.github/workflows/release.yml';
@@ -118,7 +118,7 @@ describe('edits through the store', () => {
     a.transact({ label: 'x', origin: 'op', files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '#' }] }] });
     const { next } = store.getState().edit;
     a.setFiles({ [CI]: 'on: push\n' }, FOLDER);
-    expect(store.getState().edit).toEqual({ past: [], future: [], next });
+    expect(store.getState().edit).toEqual({ past: [], future: [], next, on: false, unlocked: [] });
     a.transact({ label: 'y', origin: 'op', files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '#' }] }] });
     a.forgetSource();
     expect(store.getState().edit.past).toEqual([]);
@@ -225,6 +225,78 @@ describe('edits through the store', () => {
     });
     sources.removeBuffer('.github/workflows/extra.yml');
     expect(sample.getState().source).toMatchObject({ name: 'edited copy of the starter sample' });
+  });
+
+  describe('which files the pane may edit', () => {
+    const GEN = '.github/workflows/gen.yml';
+    const outline = (generated: Record<string, string>) => ({
+      files: Object.entries(generated).map(([path, marker]) => ({
+        path,
+        kind: 'workflow' as const,
+        errors: [],
+        generated: marker,
+      })),
+      workflows: [],
+      events: {},
+    });
+    const editing = () => {
+      const store = createSessionStore();
+      store
+        .getState()
+        .setFiles({ [CI]: 'on: push\n', [GEN]: '# DO NOT EDIT\non: push\r\njobs: {}\n' }, FOLDER);
+      store.getState().setEdit(true);
+      return store;
+    };
+
+    it('refuses every file until an Outline of the epoch says which are generated, and keeps that through a failed load', () => {
+      const store = editing();
+      expect(writable(store.getState(), CI)).toEqual({ ok: false, reason: 'loading' });
+      store.getState().projectReady(1, outline({ [GEN]: 'DO NOT EDIT' }), store.getState().files.version);
+      expect(writable(store.getState(), CI)).toEqual({ ok: true });
+      store.getState().projectFailed({ kind: 'source', message: 'core threw' });
+      expect(writable(store.getState(), GEN)).toMatchObject({ ok: false, reason: 'generated' });
+    });
+
+    it('says generated before mixed, so a locked file offers no Convert, and unlocks per epoch', () => {
+      const store = editing();
+      store.getState().projectReady(1, outline({ [GEN]: 'DO NOT EDIT' }), store.getState().files.version);
+      expect(writable(store.getState(), GEN)).toEqual({
+        ok: false,
+        reason: 'generated',
+        marker: 'DO NOT EDIT',
+      });
+      store.getState().unlock(GEN);
+      expect(writable(store.getState(), GEN)).toEqual({ ok: false, reason: 'mixed' });
+      // Another repository's file at the same path is another file.
+      store.getState().setFiles({ [GEN]: '# DO NOT EDIT\non: push\n' }, FOLDER);
+      store.getState().projectReady(2, outline({ [GEN]: 'DO NOT EDIT' }), store.getState().files.version);
+      expect(writable(store.getState(), GEN)).toMatchObject({ reason: 'generated' });
+    });
+
+    it('does not lock a file the author is editing when a marker appears in it', () => {
+      const store = editing();
+      store.getState().projectReady(1, outline({}), store.getState().files.version);
+      store.getState().typed(CI, [{ from: 0, to: 0, insert: '# DO NOT EDIT\n' }]);
+      store.getState().projectReady(2, outline({ [CI]: 'DO NOT EDIT' }), store.getState().files.version);
+      expect(writable(store.getState(), CI)).toEqual({ ok: true });
+    });
+  });
+
+  it('shows the file and the line an undo or a redo changed', () => {
+    const { store } = showing();
+    store.getState().select(CI, undefined);
+    store.getState().transact({
+      label: 'Op',
+      origin: 'op',
+      files: [{ path: RELEASE, edits: [{ from: 13, to: 13, insert: 'jobs: {}\r\n' }] }],
+    });
+    store.getState().setYamlFile(CI);
+    const collapsed = store.getState().ui.prefs.collapsed.yaml;
+    store.getState().undo();
+    expect(store.getState().reveal).toMatchObject({ file: RELEASE, line: 2 });
+    expect(store.getState().ui.yamlFile).toBe(RELEASE);
+    // It shows the line in the pane; it does not open the pane for it.
+    expect(store.getState().ui.prefs.collapsed.yaml).toBe(collapsed);
   });
 
   it('holds a broken load off the screen until a project of the newest texts is ready', () => {

@@ -1,0 +1,294 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm coverage
+      - name: Dogfood — lint this repository's workflows
+        run: node packages/cli/dist/index.js lint --fail-on warning --output flowpact-report.json
+      - if: always() && matrix.node == '24'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reports
+          path: |
+            flowpact-report.json
+            coverage/
+
+  docs:
+    name: Docs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm docs:build
+      - run: pnpm docs:check
+      - run: pnpm --filter docs typecheck
+
+  smoke:
+    # The packed CLI, installed the way users install it, on every platform.
+    name: Smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter flowpact build
+      - name: Pack the CLI and check the tarball
+        shell: bash
+        working-directory: packages/cli
+        env:
+          # The repository must match packages/lint/src/location.json (npm provenance); a fork's own CI skips that check.
+          FLOWPACT_EXPECT_REPOSITORY: ${{ !github.event.repository.fork && github.repository || '' }}
+        run: |
+          # The package.json release.yml publishes: without what only builds the package here.
+          npm pkg delete devDependencies scripts
+          node ../../scripts/check-pack.mjs
+          tarball=$(npm pack --silent --pack-destination "$RUNNER_TEMP")
+          # The package has no dependencies, so linking the unpacked tarball gives users' `flowpact` command (the npm shim)
+          # without downloading anything. Relative paths keep Windows drive letters away from tar.
+          cd "$RUNNER_TEMP"
+          mkdir -p flowpact-package
+          tar -xzf "$tarball" -C flowpact-package
+          cd flowpact-package/package
+          npm link --ignore-scripts --no-audit --no-fund
+      # The command, and the API imported from a project that depends on the package.
+      - run: node scripts/smoke.mjs --package "$RUNNER_TEMP/flowpact-package/package"
+        shell: bash
+
+  vscode:
+    # The packaged extension, unpacked as VS Code would install it, in the oldest VS Code it supports and the current one.
+    name: VS Code (${{ matrix.vscode }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        vscode: ['1.101.0', stable]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter ./packages/vscode build
+      - name: Package the extension
+        working-directory: packages/vscode
+        run: |
+          pnpm exec vsce package --no-dependencies --out "$RUNNER_TEMP/flowpact.vsix"
+          unzip -q "$RUNNER_TEMP/flowpact.vsix" -d "$RUNNER_TEMP/vsix"
+          # vsce only checks `main`; the server the extension starts must be in the package too.
+          test -s "$RUNNER_TEMP/vsix/extension/dist/server.mjs"
+          unzip -l "$RUNNER_TEMP/flowpact.vsix"
+      - name: Smoke test in VS Code
+        working-directory: packages/vscode
+        env:
+          VSCODE_VERSION: ${{ matrix.vscode }}
+          FLOWPACT_EXTENSION_PATH: ${{ runner.temp }}/vsix/extension
+        run: xvfb-run -a node e2e/run.mjs
+      - if: matrix.vscode == 'stable'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flowpact-vsix
+          path: ${{ runner.temp }}/flowpact.vsix
+          retention-days: 14
+
+  action-dist:
+    name: Action bundle is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @flowpact/action build
+      - name: Compare with the committed bundle
+        run: |
+          if [ -n "$(git status --porcelain packages/action/dist)" ]; then
+            git status --short packages/action/dist
+            echo "::error::packages/action/dist is out of date. Run 'pnpm --filter @flowpact/action build' and commit the result."
+            exit 1
+          fi
+      - name: The release archive of the action is reproducible
+        run: |
+          scripts/action-archive.sh "$RUNNER_TEMP/a.tar.gz"
+          sleep 1
+          scripts/action-archive.sh "$RUNNER_TEMP/b.tar.gz"
+          cmp "$RUNNER_TEMP/a.tar.gz" "$RUNNER_TEMP/b.tar.gz"
+          tar -tzvf "$RUNNER_TEMP/a.tar.gz"
+
+  action-dogfood:
+    name: Action on this repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: flowpact
+        uses: $/
+        with:
+          mode: lint
+          fail-on: warning
+          report-sarif: flowpact.sarif
+      - name: Upload SARIF to code scanning
+        # Pull requests from forks get a read-only token, so only upload for this repository's own refs.
+        if: always() && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: flowpact.sarif
+          category: flowpact
+
+  action-smoke:
+    # The committed action bundle against fixtures with known results: outputs and reports.
+    name: Action smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: incident
+        name: lint finds the matrix incident
+        uses: $/
+        with:
+          working-directory: fixtures/incident-matrix
+          fail-on: never
+          annotations: false
+          summary: false
+          report-json: incident.json
+      - name: Check the outputs
+        env:
+          INCIDENT_ERRORS: ${{ steps.incident.outputs.errors }}
+        run: |
+          set -x
+          test "$INCIDENT_ERRORS" -ge 1
+          jq -e '.findings | any(.code == "FP401")' incident.json
+
+  artifact-upload:
+    # The contract drift artifact, uploaded for real and downloaded again; the same workflow also runs weekly.
+    name: Artifact upload
+    uses: $/.github/workflows/_artifact-upload.yml
+
+  fallow:
+    # Code health (fallow.tools, policy in .fallowrc.jsonc): no unused files, exports or dependencies and no duplicated
+    # code anywhere, and a pull request adds no complex, duplicated or unused code compared with its base. CRAP scores
+    # use fallow's coverage estimate: vitest writes no coverage-final.json, because the CLI's end-to-end tests run the
+    # bundle in a child process, where coverage reads 0 %.
+    name: Code health
+    runs-on: ubuntu-latest
+    env:
+      FALLOW_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The audit compares the pull request with its base branch.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec fallow dead-code
+      # The architecture boundaries (.fallowrc.jsonc), which fallow's next major version leaves out of dead-code.
+      - run: pnpm exec fallow architecture
+      - run: pnpm exec fallow dupes
+      - if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: pnpm exec fallow audit --base "origin/$BASE_REF"
+
+  zizmor:
+    # Workflow security (zizmor.sh): template injection, credentials left in the checkout, cache poisoning, unpinned or
+    # impostor actions and more, in this repository's workflows and in the action's own action.yml. flowpact checks how
+    # data flows through workflows; zizmor checks how they can be attacked. Findings fail the job and annotate the
+    # pull request.
+    name: Workflow security (zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          # The fixtures are test inputs that are unsafe on purpose.
+          inputs: .github/workflows action.yml
+          version: 1.30.1
+          advanced-security: false
+          annotations: true
+
+  ci-passed:
+    # The only required status check: add new jobs to `needs` instead of changing the branch rules.
+    name: CI passed
+    if: always()
+    needs: [test, fallow, zizmor, docs, smoke, vscode, action-dist, action-dogfood, action-smoke, artifact-upload]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != success ]; then
+              echo "::error::a required job did not succeed ($r)"
+              exit 1
+            fi
+          done

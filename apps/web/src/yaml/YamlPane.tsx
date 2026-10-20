@@ -1,4 +1,4 @@
-import type { StateEffect } from '@codemirror/state';
+import type { Extension, StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { NodeId } from '@simulci/engine';
 import {
@@ -12,7 +12,6 @@ import {
   useState,
 } from 'react';
 import { useApp, useSession } from '../app/providers';
-import { togglePaneKeepingFocus } from '../app/shortcuts';
 import { MARK_LABEL } from '../graph/Mark';
 import { planLabels } from '../panels/outline-tree';
 import { planIndex, resolveSelection, selectionOf } from '../plan/index';
@@ -23,14 +22,18 @@ import {
   type Reveal,
   type SessionState,
   type SessionStore,
+  writable,
 } from '../state/store';
+import { eolOf } from './bridge';
 import type { Outline } from '../worker/protocol';
 import {
   blankState,
+  editCompartment,
   FLASH_MS,
   followPageTheme,
   type GutterMark,
   PaneDocs,
+  type PaneEdits,
   pageIsDark,
   paneState,
   scrollOwnTo,
@@ -52,13 +55,17 @@ import {
   problemLines,
   shownFile,
 } from './locs';
+import { PaneFooter } from './PaneFooter';
+import { paneEditing } from './pane-edit';
 
 /**
- * The YAML pane (synthesis § 8): the loaded files as tabs over one read-only CodeMirror view with the verdict gutter,
- * the selection's deciding line and the lines the parsers refused. It shows the file that decided the selection
- * until the author picks a tab; a `file:line` link (`revealLine`) switches to its file, centres the line and flashes
- * it once. Pressing a mark selects its node. Nothing here takes the focus; closing the pane while it holds the focus
- * hands it to the plan.
+ * The YAML pane (synthesis § 8, § 4.3): the loaded files as tabs over one CodeMirror view with the verdict gutter,
+ * the selection's deciding line and the lines the parsers refused. In edit mode a writable file is edited here: each
+ * change goes to the store through the bridge, and changes from the store (undo, an op, a restore) come back as
+ * CodeMirror changes, so the cursor stays where it was. It shows the file that decided the selection until the author
+ * picks a tab; a `file:line` link (`revealLine`) switches to its file, centres the line and flashes it once. Pressing
+ * a mark selects its node. Nothing here takes the focus; closing the pane while it holds the focus hands it to the
+ * plan.
  */
 export function YamlPane() {
   const model = usePaneModel();
@@ -69,7 +76,7 @@ export function YamlPane() {
   const labelled = active >= 0 ? { role: 'tabpanel', 'aria-labelledby': `${ids}-tab-${active}` } : {};
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface">
-      <FileTabs tabs={model.tabs} active={active} ids={ids} />
+      <FileTabs tabs={model.tabs} active={active} ids={ids} files={model.files} />
       <div id={`${ids}-panel`} {...labelled} className="min-h-0 flex-1 overflow-hidden">
         {model.tabs.length === 0 && <p className="p-3 text-muted text-xs">No files are loaded.</p>}
         <div ref={host} className="h-full" />
@@ -127,27 +134,52 @@ const currentFor = (plan: PlanState | undefined, files: SessionState['files']): 
 function useEditor(host: RefObject<HTMLDivElement | null>, { files, path, node, lines }: PaneModel): void {
   const { store } = useApp();
   const reveal = useSession((s) => s.reveal);
+  // What decides whether the shown file is writable: edit mode, an unlock, its meta, its generated marker.
+  const writableNow = useSession((s) => (path === undefined ? false : writable(s, path).ok));
   const nearest = useRef(false);
-  const docs = useDocs(store, nearest);
+  const { docs, editing } = useDocs(store, nearest);
   const view = useEditorView(host);
   const text = path === undefined ? undefined : files.byPath[path];
   const rev = (path === undefined ? undefined : files.revs[path]) ?? 0;
   const { epoch } = files;
   useLayoutEffect(() => {
     if (!view || path === undefined || text === undefined) return;
-    const scroll = docs.show(view, path, { epoch, rev }, text);
-    view.dispatch({
-      effects: [
-        // A state made earlier may hold the other theme.
-        themeCompartment.reconfigure(themeFor(pageIsDark())),
-        ...lineEffects(lines),
-        ...scroll,
-      ],
-    });
-  }, [view, docs, path, epoch, rev, text, lines]);
+    const scroll = docs.show(view, path, { epoch, rev }, text, editsFor(files, path));
+    const effects = [
+      // A state made earlier may hold the other theme, or be read-only where the file is writable now.
+      ...themed(view),
+      ...configured(view, editing(path)),
+      ...lineEffects(lines),
+      ...scroll,
+    ];
+    // A key typed changes the text and nothing else here: no second transaction for it.
+    if (effects.length > 0) view.dispatch({ effects });
+  }, [view, docs, editing, path, epoch, rev, text, lines, files, writableNow]);
   useSelectionScroll(view, node, lines.plan, nearest, epoch);
   useReveal(view, path, reveal);
 }
+
+/** The store's edits that made the shown rev of a file, when the last commit did and the file has one line ending. */
+function editsFor(files: SessionState['files'], path: string): PaneEdits | undefined {
+  const { edited } = files;
+  const edits = edited?.edits[path];
+  const from = edited?.revs[path];
+  // The edits' offsets are in the text before the commit: its line endings, which a convert or a restore may change.
+  const eol = edited?.eols[path];
+  if (!edited || !edits || from === undefined || edited.version !== files.revs[path] || eol === 'mixed')
+    return undefined;
+  return { from, edits, eol: eolOf({ eol: eol ?? 'none' }) };
+}
+
+/** The effect that puts the page's theme in the view, unless it holds it already. */
+const themed = (view: EditorView): StateEffect<unknown>[] => {
+  const theme = themeFor(pageIsDark());
+  return themeCompartment.get(view.state) === theme ? [] : [themeCompartment.reconfigure(theme)];
+};
+
+/** The effect that puts a file's edit extension in the view, unless it holds that one already. */
+const configured = (view: EditorView, extension: Extension): StateEffect<unknown>[] =>
+  editCompartment.get(view.state) === extension ? [] : [editCompartment.reconfigure(extension)];
 
 /** The effects that set the lines the store has for the texts shown, and leave the others to map. */
 function lineEffects({ plan, problems }: PaneLines): StateEffect<unknown>[] {
@@ -155,24 +187,6 @@ function lineEffects({ plan, problems }: PaneLines): StateEffect<unknown>[] {
     ...(plan ? [setMarks.of(plan.marks), setDeciding.of(plan.deciding)] : []),
     ...(problems ? [setProblems.of(problems)] : []),
   ];
-}
-
-function PaneFooter({ path }: { path: string | undefined }) {
-  const { store } = useApp();
-  return (
-    <footer className="flex items-center gap-3 border-border border-t bg-chrome px-3 py-1 text-muted text-xs">
-      <span className="min-w-0 truncate font-mono">{path}</span>
-      <span className="shrink-0">read-only in this version</span>
-      <button
-        type="button"
-        className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-text hover:bg-surface"
-        aria-label="Close the workflow source"
-        onClick={() => togglePaneKeepingFocus(store.getState(), 'yaml')}
-      >
-        Close
-      </button>
-    </footer>
-  );
 }
 
 /** The last reveal a pane showed, so a pane opened again does not show it twice. */
@@ -210,19 +224,28 @@ function usePaneLines(
   }, [plan, labels, outline, path, node, representative]);
 }
 
-/** The files' states for this pane; a pressed mark selects its node and keeps the pane on the file it is in. */
-function useDocs(store: SessionStore, nearest: RefObject<boolean>): PaneDocs {
-  const [docs] = useState(
-    () =>
-      new PaneDocs((path, text) =>
-        paneState(text, {
-          path,
-          dark: pageIsDark(),
-          onMark: (node) => selectMark(store, node, docs.shown, nearest),
-        }),
-      ),
-  );
-  return docs;
+/**
+ * The files' states for this pane, each made writable or read-only as the store says; a pressed mark selects its
+ * node and keeps the pane on the file it is in.
+ */
+function useDocs(
+  store: SessionStore,
+  nearest: RefObject<boolean>,
+): { docs: PaneDocs; editing: (path: string) => Extension } {
+  const [made] = useState(() => {
+    let docs: PaneDocs | undefined;
+    const editing = paneEditing(store, () => docs);
+    docs = new PaneDocs((path, text) =>
+      paneState(text, {
+        path,
+        dark: pageIsDark(),
+        onMark: (node) => selectMark(store, node, docs?.shown, nearest),
+        editing: editing(path),
+      }),
+    );
+    return { docs, editing };
+  });
+  return made;
 }
 
 function selectMark(
@@ -324,8 +347,25 @@ function movedTab(key: string, at: number, count: number): number | undefined {
   return undefined;
 }
 
-/** The files as tabs; a file with problems has a red dot and says so. The arrows move between tabs and open them. */
-function FileTabs({ tabs, active, ids }: { tabs: readonly FileTab[]; active: number; ids: string }) {
+/** How a tab names its file to a screen reader: its label, then what its dots say. */
+const tabLabel = (tab: FileTab, dirty: boolean): string =>
+  [tab.label, ...(dirty ? ['unsaved'] : []), ...(tab.problems > 0 ? ['has problems'] : [])].join(', ');
+
+/**
+ * The files as tabs; a file with unsaved edits has a dot, a file with problems a red one, and each says so. The arrows
+ * move between tabs and open them.
+ */
+function FileTabs({
+  tabs,
+  active,
+  ids,
+  files,
+}: {
+  tabs: readonly FileTab[];
+  active: number;
+  ids: string;
+  files: Pick<SessionState['files'], 'byPath' | 'base'>;
+}) {
   const onPick = useSession((s) => s.setYamlFile);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -355,13 +395,16 @@ function FileTabs({ tabs, active, ids }: { tabs: readonly FileTab[]; active: num
           id={`${ids}-tab-${i}`}
           aria-selected={i === active}
           aria-controls={`${ids}-panel`}
-          aria-label={tab.problems > 0 ? `${tab.label}, has problems` : tab.label}
+          aria-label={tabLabel(tab, files.byPath[tab.path] !== files.base[tab.path])}
           tabIndex={i === active || (active < 0 && i === 0) ? 0 : -1}
           title={tab.path}
           className="flex shrink-0 items-center gap-1.5 rounded-t px-2.5 py-1 font-mono text-muted text-xs hover:text-text aria-selected:bg-surface aria-selected:text-text"
           onClick={() => onPick(tab.path)}
         >
           {tab.label}
+          {files.byPath[tab.path] !== files.base[tab.path] && (
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-text" />
+          )}
           {tab.problems > 0 && <span aria-hidden="true" className="size-1.5 rounded-full bg-danger" />}
         </button>
       ))}
