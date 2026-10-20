@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef } from 'react';
 import { useModal } from '../../app/modal';
-import type { Ask } from './actions';
+import type { Ask } from './ui';
 
 /**
  * The question before a removal that takes more than the author pointed at, or leaves expressions reading what goes

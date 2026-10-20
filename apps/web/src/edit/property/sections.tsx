@@ -1,5 +1,5 @@
 import type { IfReason, Value } from '@simulci/engine';
-import { type Json, unitPathAt, type WorkflowDocument, type YamlPath } from '@simulci/document';
+import type { Json, WorkflowDocument, YamlPath } from '@simulci/document';
 import { useState } from 'react';
 import { useApp, useSession } from '../../app/providers';
 import { SectionTitle, useSelected } from '../../panels/kit';
@@ -10,7 +10,7 @@ import { listOf, needsTransitively } from '../needs';
 import { RefusalNote } from '../Refusal';
 import { LineLink } from './Field';
 
-/** The parts of Properties that are not one field: needs, the step list, the YAML-only rows, what `if` evaluates to. */
+/** The parts of Properties that are not one field: needs, the YAML-only rows, what `if` evaluates to (the steps: PanelSteps). */
 
 /** A job's `needs` as checkboxes: every other job but those that need it, which would close a loop. */
 export function Needs({
@@ -60,34 +60,6 @@ export function Needs({
       ))}
       <RefusalNote seq={refusedSeq} />
     </fieldset>
-  );
-}
-
-/** A job's steps, each a button that selects it: its fields are then Properties'. */
-export function Steps({ doc, file, job }: { doc: WorkflowDocument; file: string; job: string }) {
-  const { store } = useApp();
-  const steps = doc.jobs().find((j) => j.id === job)?.steps ?? [];
-  if (steps.length === 0) return null;
-  return (
-    <section className="flex flex-col gap-1" aria-label="Steps">
-      <SectionTitle>Steps</SectionTitle>
-      <ol className="flex flex-col gap-0.5">
-        {steps.map((step) => (
-          <li key={step.index}>
-            <button
-              type="button"
-              className="w-full truncate rounded px-1.5 py-0.5 text-left text-sm hover:bg-chrome"
-              onClick={() =>
-                store.getState().select(file, unitPathAt(doc, ['jobs', job, 'steps', step.index]))
-              }
-            >
-              <span className="mr-1.5 font-mono text-muted text-xs">{step.index + 1}</span>
-              {step.name ?? step.uses ?? step.runHead ?? `step ${step.index + 1}`}
-            </button>
-          </li>
-        ))}
-      </ol>
-    </section>
   );
 }
 

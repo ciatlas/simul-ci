@@ -1,6 +1,6 @@
 import type { NodeId } from '@simulci/engine';
 import { Handle, type NodeProps, Position } from '@xyflow/react';
-import { memo, type MouseEvent, useMemo } from 'react';
+import { lazy, memo, type MouseEvent, Suspense, useMemo } from 'react';
 import { useApp } from '../../app/providers';
 import { gestures } from '../../edit/gestures';
 import { cardActions, cardAttrs, resultTone, subline } from '../card';
@@ -12,6 +12,9 @@ import { HoverCard } from './HoverCard';
 import { LegGrid, SkippedGrid } from './LegGrid';
 import { StepList } from './StepList';
 import { StepStrip } from './StepStrip';
+
+/** The open step list of a card being edited, from the edit runtime's chunk (in by the time edit mode draws it). */
+const CanvasSteps = lazy(() => import('../../edit/edit').then((m) => ({ default: m.CanvasSteps })));
 
 /**
  * The handles sit on the header line, where `needs` edges meet a card. They are seen only on a card of the workflow
@@ -47,7 +50,13 @@ function JobNodeView({ data, width }: NodeProps<JobFlowNode>) {
       <Handle type="target" position={Position.Left} isConnectable={editable} style={HANDLE} />
       <Header job={job} tabStop={state.selected} onToggle={toggle} />
       <Subline job={job} />
-      <Body job={job} width={width ?? CARD.minWidth} selected={state.inner} onPick={act.select} />
+      <Body
+        job={job}
+        width={width ?? CARD.minWidth}
+        selected={state.inner}
+        onPick={act.select}
+        editable={editable}
+      />
       <Handle type="source" position={Position.Right} isConnectable={editable} style={HANDLE} />
       {editable && (
         <button
@@ -135,12 +144,15 @@ function Body({
   width,
   selected,
   onPick,
+  editable,
 }: {
   job: JobModel;
   width: number;
   /** The selected leg or step inside the card. */
   selected?: NodeId;
   onPick: (id: NodeId) => void;
+  /** Of the workflow being edited: the open list moves, removes and adds steps. */
+  editable: boolean;
 }) {
   const cells = gridCells(job);
   const strip =
@@ -158,7 +170,14 @@ function Body({
     <>
       {strip}
       {grid}
-      {job.expanded && <StepList steps={job.steps} selected={selected} onPick={onPick} />}
+      {job.expanded &&
+        (editable ? (
+          <Suspense fallback={<StepList steps={job.steps} selected={selected} onPick={onPick} />}>
+            <CanvasSteps job={job} selected={selected} onPick={onPick} />
+          </Suspense>
+        ) : (
+          <StepList steps={job.steps} selected={selected} onPick={onPick} />
+        ))}
     </>
   );
 }

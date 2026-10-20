@@ -5,13 +5,15 @@ import { EmptyNote } from '../../panels/kit';
 import { newestOutline } from '../../state/store';
 import { storeLock } from '../dispatch';
 import { documents } from '../documents';
+import { gestures } from '../gestures';
 import { RefusalView } from '../Refusal';
 import { type Target, targetOf } from '../selection';
 import type { Refused } from '../types';
 import { PropertyField } from './Field';
 import { KeyValueRows } from './KeyValueRows';
 import { asText, type FieldSpec, jobFields, stepFields, workflowFields } from './model';
-import { EvaluatesTo, Needs, Steps, YamlRows } from './sections';
+import { PanelSteps } from '../steps/PanelSteps';
+import { EvaluatesTo, Needs, YamlRows } from './sections';
 import type { SessionTarget } from './session';
 
 /**
@@ -94,7 +96,7 @@ interface PartProps {
 }
 
 function Fields({ specs, target, doc, locked }: PartProps & { specs: FieldSpec[] }) {
-  const focusIf = useIfRequest();
+  const request = useFieldRequest();
   const options = useRunnerLabels(doc);
   const session: SessionTarget = target.step
     ? { file: target.file, step: { job: target.job!, index: target.step.index } }
@@ -108,21 +110,43 @@ function Fields({ specs, target, doc, locked }: PartProps & { specs: FieldSpec[]
           target={session}
           doc={doc}
           locked={locked}
-          {...(spec.key === 'if'
-            ? { idle: 400, after: <EvaluatesTo />, ...(focusIf ? { request: focusIf } : {}) }
-            : {})}
+          {...(spec.key === 'if' ? { idle: 400, after: <EvaluatesTo /> } : {})}
+          {...(request?.field === spec.key ? { request } : {})}
           {...(spec.key === 'runs-on' ? { options } : {})}
+          {...(spec.key === 'uses' && target.step
+            ? { after: <ChangeUses target={target} locked={locked} /> }
+            : {})}
         />
       ))}
     </div>
   );
 }
 
-/** The `i` key's request to put the focus in Run if, once this panel can take it. */
-function useIfRequest(): { seq: number; done: () => void } | undefined {
+/**
+ * A request to put the focus in a field once this panel shows it: the `i` key's Run if, a script step's Run once the
+ * palette inserted it.
+ */
+function useFieldRequest(): { field: string; seq: number; done: () => void } | undefined {
   const request = useSession((s) => s.propertyFocus);
   const done = useSession((s) => s.propertyFocused);
-  return request?.field === 'if' ? { seq: request.seq, done: () => done(request.seq) } : undefined;
+  return request && { ...request, done: () => done(request.seq) };
+}
+
+/** Uses → Change… (synthesis § 4.4): the palette, to pick another action for the step. */
+function ChangeUses({ target, locked }: { target: Target; locked: boolean }) {
+  const { store } = useApp();
+  const { job, step } = target;
+  if (job === undefined || !step) return null;
+  return (
+    <button
+      type="button"
+      disabled={locked}
+      className="self-start rounded border border-border px-2 py-0.5 text-xs hover:bg-chrome disabled:opacity-50"
+      onClick={() => gestures.of(store)?.palette({ job, index: step.index, change: true })}
+    >
+      Change…
+    </button>
+  );
 }
 
 /** The runner labels the file's jobs use, and GitHub's hosted ones: what Runs on offers. */
@@ -232,7 +256,7 @@ function JobProperties({ target, doc, locked }: PartProps) {
             op={(name, value) => ({ op: 'setBinding', file: target.file, job, kind: 'env', name, value })}
             locked={locked}
           />
-          <Steps doc={doc} file={target.file} job={job} />
+          <PanelSteps doc={doc} file={target.file} job={job} locked={locked} />
         </>
       )}
       <YamlRows

@@ -20,7 +20,7 @@ import {
   removedJobText,
   runsOnFor,
 } from '../src/edit/canvas/actions';
-import type { Ask, GestureUi, Open } from '../src/edit/canvas/actions';
+import type { Ask, GestureUi, Open } from '../src/edit/canvas/ui';
 import { documents } from '../src/edit/documents';
 import { gestures, pendingEdges } from '../src/edit/gestures';
 import { createSessionStore, type SessionStore } from '../src/state/store';

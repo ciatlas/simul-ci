@@ -4,17 +4,19 @@ import { useApp, useSession } from '../../app/providers';
 import { viewport } from '../../graph/commands';
 import { gestures } from '../gestures';
 import { RefusalNote } from '../Refusal';
-import { type Ask, cardElement, type GestureUi, gesturesOf, type Open } from './actions';
+import { cardElement, gesturesOf } from './actions';
 import { AddJobPopover } from './AddJob';
 import { ConfirmDialog } from './Confirm';
 import { RowMenu } from './Menu';
 import { NeedsPopover } from './Needs';
+import { Palette } from '../palette/Palette';
 import { AnchoredPopover } from './Popover';
+import { type Ask, type GestureUi, hostUi, type Open } from './ui';
 
 /**
  * The structural gestures' host while edit mode shows (synthesis § 4.2, § 4.5): it registers what the canvas, the
  * page keys and the outline tree ask for (`edit/gestures.ts`), and shows what they open: Add job, What it needs, an
- * outline row's actions, the question before a removal, and a refused canvas gesture's sentence at its card. A job
+ * outline row's actions, the palette, the question before a removal, and a refused canvas gesture's sentence at its card. A job
  * added takes the focus once its card is drawn, brought into view when it is outside it.
  */
 export function EditHost() {
@@ -35,7 +37,14 @@ export function EditHost() {
     }),
     [],
   );
-  useEffect(() => gestures.register(store, gesturesOf(store, ui)), [store, ui]);
+  useEffect(() => {
+    const unregister = hostUi.register(store, ui);
+    const ungesture = gestures.register(store, gesturesOf(store, ui));
+    return () => {
+      ungesture();
+      unregister();
+    };
+  }, [store, ui]);
   const close = useCallback(() => setShown(undefined), []);
   const closeAsk = useCallback((n: number) => setAsk((was) => (was?.n === n ? undefined : was)), []);
   const closeNote = useCallback(() => setNote(undefined), []);
@@ -55,6 +64,7 @@ export function EditHost() {
 function Opened({ open, ui, onClose }: { open: Open; ui: GestureUi; onClose: () => void }) {
   if (open.kind === 'addJob') return <AddJobPopover open={open} ui={ui} onClose={onClose} />;
   if (open.kind === 'needs') return <NeedsPopover open={open} ui={ui} onClose={onClose} />;
+  if (open.kind === 'palette') return <Palette open={open} ui={ui} onClose={onClose} />;
   return <RowMenu node={open.node} anchor={open.anchor} onClose={onClose} />;
 }
 

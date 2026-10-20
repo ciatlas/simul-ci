@@ -12,8 +12,15 @@ export interface Gestures {
   addJob(after?: string): boolean;
   /** Opens What it needs under the selected job. */
   needs(): boolean;
-  /** Removes the selected job, asking first when the removal warns or takes needs with it. */
+  /**
+   * Opens the palette: a step after the selected step, else the selected job's last; or at a place in a job; or, with
+   * `change`, another action for the step at that index.
+   */
+  palette(at?: { job: string; index: number; change?: boolean }): boolean;
+  /** Removes the selected job or step, asking first when the removal warns or takes needs with it. */
   remove(): boolean;
+  /** Moves the selected step up or down within its job. */
+  move(by: -1 | 1): boolean;
   /** Whether a drag from one job's handle may end on another's: the second would then need the first. */
   canConnect(source: NodeId, target: NodeId): boolean;
   /** The second job needs the first; a refused drag says why. */

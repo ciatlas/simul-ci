@@ -7,3 +7,4 @@
 export { EditHost } from './canvas/EditHost';
 export { Properties } from './property/Properties';
 export { RefusalLine } from './Refusal';
+export { CanvasSteps } from './steps/CanvasSteps';
