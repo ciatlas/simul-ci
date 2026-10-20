@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { ScenarioInput, Tri } from '@simulci/engine';
+import type { Tri } from '@simulci/engine';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ReactFlow, ReactFlowProvider } from '@xyflow/react';
@@ -11,7 +11,7 @@ import { type CardState, jobLabel, scopeLabel } from '../src/graph/card';
 import { Canvas } from '../src/graph/Canvas';
 import { viewport } from '../src/graph/commands';
 import type { FlowNode, JobFlowNode, WorkflowFlowNode } from '../src/graph/flow';
-import { FLASH_MS } from '../src/graph/highlight';
+import { FLASH_MS, RING_MS } from '../src/graph/highlight';
 import { JobNode } from '../src/graph/nodes/JobNode';
 import { LegGrid } from '../src/graph/nodes/LegGrid';
 import { StepList } from '../src/graph/nodes/StepList';
@@ -25,7 +25,8 @@ import {
   type ScopeModel,
   type StepMark,
 } from '../src/graph/types';
-import { createSessionStore, initialSessionState, type Pin, type PlanState } from '../src/state/store';
+import type { ChangeRow } from '../src/plan/change-rows';
+import { type Change, createSessionStore, initialSessionState, type PlanState } from '../src/state/store';
 
 /**
  * The plan index and the canvas keys' answers are other modules': a table of unit paths (a leg's id names its job
@@ -462,17 +463,28 @@ const frames = () => act(() => new Promise<void>((resolve) => setTimeout(resolve
 const answeredPlan = (): PlanState =>
   ({ plan: { unknowns: [] }, for: { files: 1, epoch: 1, project: 1 } }) as unknown as PlanState;
 
-/** A pin the plan answered, which changed the verdicts of `changed`. */
-const pinOf = (seq: number, plan: PlanState, changed: string[]): Pin => ({
-  seq,
-  scenario: {} as ScenarioInput,
-  assume: [],
-  after: {
-    plan: plan.plan,
-    changes: changed.map((id) => ({ id, kind: 'job', from: 'no', to: 'yes', label: id })),
-    sentence: 'pinned; test now runs',
-  },
-});
+/** A change the plan answered, which changed the verdicts of `changed` and added the jobs `added`. */
+const changeOf = (seq: number, plan: PlanState, changed: string[], added: string[] = []): Change => {
+  const rows: ChangeRow[] = [
+    ...changed.map((id): ChangeRow => ({
+      change: 'changed',
+      kind: 'job',
+      from: 'no',
+      to: 'yes',
+      label: id,
+      id,
+      card: id,
+    })),
+    ...added.map((id): ChangeRow => ({ change: 'added', kind: 'job', to: 'yes', label: id, id, card: id })),
+  ];
+  return {
+    seq,
+    cause: 'edit',
+    label: 'Op',
+    waitFor: {},
+    after: { plan: plan.plan, rows, sentence: 'Op: test now runs' },
+  };
+};
 
 function mountCanvas(paths: Record<string, string> = {}) {
   const store = storeOf(paths, { graph: graphOf() });
@@ -646,15 +658,15 @@ describe('the canvas', () => {
     expect(paths()).toEqual([null, null, null]);
   });
 
-  it("flashes the cards a pin changed once its plan's picture is on the canvas, and again for the next pin", () => {
+  it("flashes the cards a change changed once its plan's picture is on the canvas, and again for the next change", () => {
     vi.useFakeTimers();
     try {
       const store = storeOf({}, { graph: graphOf() });
       render(withApp(store, <Canvas />));
       const flash = () => drawn('runs test, needs build').getAttribute('data-flash');
       const first = answeredPlan();
-      act(() => store.setState({ plan: first, pin: pinOf(3, first, [TEST]) }));
-      // The picture is still the plan's before the pin: its cards do not flash in their old colours.
+      act(() => store.setState({ plan: first, change: changeOf(3, first, [TEST]) }));
+      // The picture is still the plan's before the change: its cards do not flash in their old colours.
       expect(flash()).toBeNull();
       act(() => store.getState().graphReady({ ...graphOf(), for: first.for }));
       expect(flash()).toBe('b');
@@ -664,12 +676,39 @@ describe('the canvas', () => {
       });
       expect(flash()).toBeNull();
       const next = answeredPlan();
-      act(() => store.setState({ plan: next, pin: pinOf(4, next, [TEST]) }));
+      act(() => store.setState({ plan: next, change: changeOf(4, next, [TEST]) }));
       act(() => store.getState().graphReady({ ...graphOf(), for: next.for }));
       expect(flash()).toBe('a');
-      // A plan without a pin ends it.
+      // A plan the change did not answer ends it.
       act(() => store.setState({ plan: answeredPlan() }));
       expect(flash()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rings the card a change added for two seconds, and flashes the cards it changed beside it', () => {
+    vi.useFakeTimers();
+    try {
+      const plan = answeredPlan();
+      const store = storeOf(
+        {},
+        { graph: { ...graphOf(), for: plan.for }, plan, change: changeOf(7, plan, [BUILD], [TEST]) },
+      );
+      render(withApp(store, <Canvas />));
+      const test = drawn('runs test, needs build');
+      expect([test.getAttribute('data-added'), test.hasAttribute('data-flash')]).toEqual(['b', false]);
+      expect(drawn('runs build').getAttribute('data-flash')).toBe('b');
+      act(() => {
+        vi.advanceTimersByTime(FLASH_MS);
+      });
+      // The ring outlasts the flash: both go together once it has run.
+      expect(drawn('runs test, needs build').getAttribute('data-added')).toBe('b');
+      act(() => {
+        vi.advanceTimersByTime(RING_MS - FLASH_MS);
+      });
+      expect(drawn('runs test, needs build').hasAttribute('data-added')).toBe(false);
+      expect(drawn('runs build').hasAttribute('data-flash')).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -681,7 +720,7 @@ describe('the canvas', () => {
       const plan = answeredPlan();
       const store = storeOf(
         {},
-        { graph: { ...graphOf(), for: plan.for }, plan, pin: pinOf(6, plan, [TEST]) },
+        { graph: { ...graphOf(), for: plan.for }, plan, change: changeOf(6, plan, [TEST]) },
       );
       const first = render(withApp(store, <Canvas />));
       expect(drawn('runs test, needs build').getAttribute('data-flash')).toBe('a');
@@ -702,7 +741,7 @@ describe('the canvas', () => {
       const plan = answeredPlan();
       const store = storeOf(
         {},
-        { graph: { ...graphOf(), for: plan.for }, plan, pin: pinOf(5, plan, [TEST]) },
+        { graph: { ...graphOf(), for: plan.for }, plan, change: changeOf(5, plan, [TEST]) },
       );
       render(withApp(store, <Canvas />));
       expect(document.querySelector('[data-flash]')).toBeNull();

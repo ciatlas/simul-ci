@@ -190,19 +190,18 @@ export function createSession({
     const id = ++request;
     const { epoch } = s.files;
     const { assume, scenario } = s;
-    const untriggered = untriggeredOf(s);
     busy(1);
     const r = await client.simulate({
       project,
       scenario,
       assume,
       detail: s.detail,
-      planUntriggered: untriggered,
+      planUntriggered: untriggeredOf(s),
     });
     busy(-1);
     if (id !== request) return;
     // The files the project was loaded from, not the store's newest: an edit since is not in this plan.
-    await settle(r, { files, epoch, project, assume, scenario, ...(untriggered ? { untriggered } : {}) });
+    await settle(r, { files, epoch, project, assume, scenario });
   };
 
   const settle = async (

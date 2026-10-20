@@ -102,7 +102,7 @@ export const countsText = (counts: Record<Tri, number>): string =>
     .map((p) => `${p.n} ${MARK_LABEL[p.verdict]}`)
     .join(', ');
 
-/** How a card stands towards the selection, a hovered unknown and the last pin, as `flow.ts` works it out. */
+/** How a card stands towards the selection, a hovered unknown and the last change, as `flow.ts` works it out. */
 export interface CardState {
   /** The card holds the selection: it is the selected node, or the selected leg or step is inside it. */
   selected: boolean;
@@ -114,19 +114,22 @@ export interface CardState {
    */
   path?: 'on' | 'off';
   hovered: boolean;
-  /** The last pin changed what the card shows: it flashes once, the value following the pin's parity. */
+  /** The last change changed what the card shows: it flashes once, the value following the change's parity. */
   flash?: 'a' | 'b';
+  /** The last change added the card: it gets the added ring for two seconds, the value following the parity. */
+  added?: 'a' | 'b';
 }
 
 /**
- * The attributes the canvas styles key on: the verdict picks the border, the rest the outline, the fade and the
- * flash.
+ * The attributes the canvas styles key on: the verdict picks the border, the rest the outline, the fade, the flash
+ * and the added ring.
  */
 export function cardAttrs(verdict: Tri, state: CardState): Record<string, string> {
   const attrs: Record<string, string> = { 'data-verdict': verdict };
   if (state.selected) attrs['data-selected'] = state.inner === undefined ? 'self' : 'inner';
   if (state.path) attrs['data-path'] = state.path;
   if (state.flash) attrs['data-flash'] = state.flash;
+  if (state.added) attrs['data-added'] = state.added;
   return attrs;
 }
 

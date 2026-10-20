@@ -109,63 +109,67 @@ describe('the store for the panels', () => {
     const { store, plan } = showing();
     store.getState().pinAssume([detect]);
     const pinned = store.getState();
-    const pin = pinned.pin!;
+    const pin = pinned.change!;
     expect([pinned.assume, pinned.stale]).toEqual([[detect], 'inputs']);
+    expect([pin.cause, pin.label]).toEqual(['pin', 'pinned']);
     expect(pin.before!.plan).toBe(plan.plan);
     expect(pin.before!.derived).toBe(plan.derived);
-    expect(pin.assume).toBe(pinned.assume);
-    expect(pin.scenario).toBe(pinned.scenario);
+    expect(pin.waitFor.assume).toBe(pinned.assume);
+    expect(pin.waitFor.scenario).toBe(pinned.scenario);
     expect(pin.after).toBeUndefined();
 
     pinned.pinScenario({ ...source, changed: ['docs/**'] }, ['changed'], { path: 'changed' });
     const s = store.getState();
-    const again = s.pin!;
+    const again = s.change!;
     expect(again.seq).toBeGreaterThan(pin.seq);
-    expect(again.scenario).toBe(s.scenario);
-    expect(again.assume).toBe(s.assume);
+    expect(again.waitFor.scenario).toBe(s.scenario);
+    expect(again.waitFor.assume).toBe(s.assume);
     expect(again.before!.plan).toBe(plan.plan);
   });
 
   it('keeps the plain assume edits of the Assumptions list from being pins', () => {
     const { store } = showing();
     store.getState().setAssume([detect]);
-    expect(store.getState().pin).toBeUndefined();
+    expect(store.getState().change).toBeUndefined();
   });
 
   it('settles a pin with the plan simulated from its very inputs, and only once', () => {
     const { store, plan: before } = showing();
     store.getState().pinAssume([detect]);
-    const pin = store.getState().pin!;
+    const pin = store.getState().change!;
+    const { scenario, assume } = pin.waitFor as Required<typeof pin.waitFor>;
 
     // An older reply, and a plan for equal inputs that are not the pin's objects, leave it waiting.
     store.getState().planReceived(before);
-    expect(store.getState().pin?.after).toBeUndefined();
-    store.getState().planReceived(planState({ ...pin.scenario }, [...pin.assume]));
-    expect(store.getState().pin?.after).toBeUndefined();
+    expect(store.getState().change?.after).toBeUndefined();
+    store.getState().planReceived(planState({ ...scenario }, [...assume]));
+    expect(store.getState().change?.after).toBeUndefined();
 
-    const answer = planState(pin.scenario, pin.assume);
+    const answer = planState(scenario, assume);
     store.getState().planReceived(answer);
-    const settled = store.getState().pin!;
+    const settled = store.getState().change!;
     expect(settled.seq).toBe(pin.seq);
     expect(settled.after?.plan).toBe(answer.plan);
-    expect(settled.after?.changes.map((c) => c.label)).toEqual(['build.#3']);
+    expect(settled.after?.rows.map((r) => [r.change, r.kind, r.label])).toEqual([
+      ['changed', 'step', 'build.#3'],
+    ]);
     expect(settled.after?.sentence).toBe('pinned; build.#3 now runs');
 
     // A second plan for the same inputs keeps what the first said.
-    store.getState().planReceived(planState(pin.scenario, pin.assume));
-    expect(store.getState().pin).toBe(settled);
+    store.getState().planReceived(planState(scenario, assume));
+    expect(store.getState().change).toBe(settled);
   });
 
   it('lets go of the plan a pin was made over once the pin is settled', () => {
     const { store } = showing();
     store.getState().pinAssume([detect]);
-    const pin = store.getState().pin!;
+    const pin = store.getState().change!;
     expect(pin.before).toBeDefined();
-    const answer = planState(pin.scenario, pin.assume);
+    const answer = planState(pin.waitFor.scenario!, pin.waitFor.assume);
     store.getState().planReceived(answer);
-    const settled = store.getState().pin!;
-    expect(Object.keys(settled).sort()).toEqual(['after', 'assume', 'scenario', 'seq']);
-    expect(settled).toMatchObject({ seq: pin.seq, scenario: pin.scenario, assume: pin.assume });
+    const settled = store.getState().change!;
+    expect(Object.keys(settled).sort()).toEqual(['after', 'cause', 'label', 'seq', 'waitFor']);
+    expect(settled).toMatchObject({ seq: pin.seq, waitFor: pin.waitFor });
     expect(settled.after?.plan).toBe(answer.plan);
   });
 
@@ -174,15 +178,15 @@ describe('the store for the panels', () => {
     store.getState().pinAssume([detect]);
     store.getState().hoverUnknown('scenario.changed');
     store.getState().showUnknown('scenario.changed');
-    const pin = store.getState().pin!;
+    const pin = store.getState().change!;
     expect(pin.after).toBeUndefined();
 
     store.getState().setFiles({ ...starter }, { kind: 'sample', name: 'starter' });
     let s = store.getState();
-    expect([s.pin, s.hoveredUnknown, s.unknownFocus]).toEqual([undefined, undefined, undefined]);
+    expect([s.change, s.hoveredUnknown, s.unknownFocus]).toEqual([undefined, undefined, undefined]);
     // The new files' first plan, simulated from the very inputs the pin left, finds no pin to settle.
-    s.planReceived(planState(pin.scenario, pin.assume));
-    expect(store.getState().pin).toBeUndefined();
+    s.planReceived(planState(pin.waitFor.scenario!, pin.waitFor.assume));
+    expect(store.getState().change).toBeUndefined();
 
     s = store.getState();
     s.pinAssume([]);
@@ -190,18 +194,18 @@ describe('the store for the panels', () => {
     s.showUnknown('scenario.changed');
     s.forgetSource();
     s = store.getState();
-    expect([s.pin, s.hoveredUnknown, s.unknownFocus]).toEqual([undefined, undefined, undefined]);
+    expect([s.change, s.hoveredUnknown, s.unknownFocus]).toEqual([undefined, undefined, undefined]);
   });
 
-  it('keeps counting pins across files that dropped one, so the next flashes the other way', () => {
+  it('keeps counting changes across files that dropped one, so the next flashes the other way', () => {
     const { store } = showing();
     store.getState().pinAssume([detect]);
-    const first = store.getState().pin!.seq;
+    const first = store.getState().change!.seq;
     store.getState().setFiles({ ...starter }, { kind: 'sample', name: 'starter' });
     const s = store.getState();
     s.planReceived(planState(s.scenario, s.assume));
     store.getState().pinAssume([]);
-    const next = store.getState().pin!.seq;
+    const next = store.getState().change!.seq;
     expect(next).toBe(first + 1);
     expect(next % 2).not.toBe(first % 2);
   });
@@ -210,9 +214,9 @@ describe('the store for the panels', () => {
     const store = createSessionStore();
     store.getState().pinAssume([detect]);
     const s = store.getState();
-    expect(s.pin?.before).toBeUndefined();
+    expect(s.change?.before).toBeUndefined();
     s.planReceived(planState(s.scenario, s.assume));
-    expect(store.getState().pin?.after).toBeUndefined();
+    expect(store.getState().change?.after).toBeUndefined();
   });
 
   it('holds the hovered unknown, and leaves the state alone when it is the one held', () => {

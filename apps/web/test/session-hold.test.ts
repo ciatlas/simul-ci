@@ -53,7 +53,7 @@ const plan = (project: number, text = 'plan'): SimulateResult =>
     id: 1,
     type: 'plan',
     project,
-    plan: { workflows: [] },
+    plan: { workflows: [], unknowns: [], detail: 'steps' },
     derived: {},
     text,
     ms: { simulate: 1, derive: 0 },

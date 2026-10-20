@@ -7,8 +7,8 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
  * mode a key typed into a file re-simulates and the card follows; undoing everything gives back the file's bytes; an
  * edit that stops the workflow from being triggered keeps its jobs on the canvas, dimmed under a banner; a
  * CRLF file with a BOM edited by one character downloads with exactly that character changed, its BOM and its CRLF
- * kept; a generated file refuses edits until the author unlocks it; an edit survives a reload; and opening another
- * source while a file has unsaved edits asks first.
+ * kept; a generated file refuses edits until the author unlocks it; an edit survives a reload; opening another
+ * source while a file has unsaved edits asks first; and the status line says what an edit changed, with Details.
  */
 
 const CI = '.github/workflows/ci.yml';
@@ -115,6 +115,29 @@ test('typing if: false turns the deploy card skipped, and undoing everything giv
   await expect(page.getByRole('button', { name: /^Undo/ })).toHaveAttribute(
     'aria-label',
     'Undo Typing in ci.yml',
+  );
+});
+
+test('typing a branch filter that untriggers CI says so, and Details lists it', async ({ page }) => {
+  await openStarter(page);
+  await editMode(page);
+  // Line 4 of the starter's CI: `    branches: [main]`; the branch is replaced in one input.
+  await endOfLine(page, 4);
+  await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 'main'.length; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await page.keyboard.insertText('release');
+
+  const sentence = page.getByRole('contentinfo').locator('[aria-live="polite"]');
+  await expect(sentence).toHaveText('Edited ci.yml: CI is no longer triggered', { timeout: 3000 });
+  await page.getByRole('contentinfo').getByRole('button', { name: 'Details' }).click();
+  const rows = page.getByRole('list', { name: 'What changed' });
+  await expect(rows.getByRole('button', { name: 'CI is no longer triggered' })).toBeVisible();
+  // The checks CI reported went with it: listed, with nothing left on the canvas to select.
+  await expect(rows).toContainText("check 'build' removed");
+  await rows.getByRole('button', { name: 'CI is no longer triggered' }).click();
+  await expect(page.locator(`.react-flow__node-workflow[data-id="${CI}"] .sc-scope`)).toHaveAttribute(
+    'data-selected',
+    'self',
   );
 });
 
