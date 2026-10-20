@@ -11,7 +11,8 @@ import { dirtyPaths, type SessionState, type SessionStore } from './store';
 
 /**
  * Keeps the crash snapshot of a folder's edits (`state/snapshot.ts`): written behind the edits (`state/behind.ts`),
- * and dropped once nothing is unsaved, or once the author lets the edits go by replacing the folder (the replace
+ * at once after a save (the base moves, the version does not), and dropped once nothing is unsaved, or once the author
+ * lets the edits go by replacing the folder (the replace
  * prompt asked first) or forgetting it. When a folder's files come in, the snapshot that belongs to them comes back
  * first: the writer waits while it loads, and while conflicts wait it writes their kept texts with the new edits.
  */
@@ -94,6 +95,11 @@ export function createSnapshotKeeper({
     const settled = prev.edit.restore !== undefined && s.edit.restore !== prev.edit.restore;
     if (prev.edit.restore !== undefined && s.edit.restore === undefined) kept = undefined;
     if (s.files.version !== prev.files.version || settled) writer.call();
+    // A save moved the base: the saved files leave the snapshot now, and with nothing unsaved it goes.
+    if (s.files.base !== prev.files.base) {
+      writer.call();
+      void writer.flush();
+    }
   });
 
   return {

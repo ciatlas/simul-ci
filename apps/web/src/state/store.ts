@@ -6,6 +6,7 @@ import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
 import { fileLabel } from '../lib/file-label';
 import { classifyEol, type FileMeta, textMeta } from '../input/read';
+import type { DiskConflict, DiskFile, FileOutcome } from '../input/save';
 import { type ChangeRow, changeRows, changeSentence } from '../plan/change-rows';
 import { diffOf, pinSentence, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
@@ -240,6 +241,10 @@ export interface SessionState {
   edit: EditState;
   /** A new source asked to replace files with unsaved edits; the replace prompt answers it (`app/replace.ts`). */
   replacing?: Replacing;
+  /** A save to the folder under way, or the last one's report, until new files come (`app/saver.ts`). */
+  saving?: Saving;
+  /** Files the folder and the page both changed, for the author to settle before a save or a reload goes on. */
+  settling?: Settling;
   /**
    * Core's generated marker of each file that has one, from the last Outline committed or held, kept through a load
    * that failed; absent until the epoch's first Outline, when no file is known not to be generated.
@@ -280,6 +285,28 @@ export interface Replacing {
   what: string;
   /** The edited files it would drop; edited buffers a paste leaves standing are not among them. */
   paths: readonly string[];
+}
+
+/** A save under way, or what the last one did to each file (synthesis § 5.3); `open` while its dialog shows. */
+export type Saving =
+  | { status: 'running'; folder: string }
+  | {
+      status: 'done';
+      folder: string;
+      at: number;
+      /** Write access was refused: nothing was written. */
+      denied?: true;
+      files: FileOutcome[];
+      sentence: string;
+      open: boolean;
+    };
+
+/** The conflicts of a save or a reload (§ 5.4, § 5.7), until the author chose for each or cancelled. */
+export interface Settling {
+  seq: number;
+  mode: 'save' | 'reload';
+  folder: string;
+  conflicts: DiskConflict[];
 }
 
 /** What an edit asked of the store came to: applied, or nothing changed (a refusal says why, if there was one). */
@@ -380,6 +407,24 @@ export interface SessionActions {
   settleRestore: (path: string, keep: 'mine' | 'disk') => void;
   /** The replace prompt shows, or goes. */
   setReplacing: (replacing: Replacing | undefined) => void;
+  /**
+   * Files saved to the folder of `epoch`: each one's base becomes the text written, so it is no longer unsaved unless
+   * it changed since. The history and the texts stay; files of another epoch are not these, and nothing moves.
+   */
+  saved: (epoch: number, texts: Readonly<Record<string, string>>) => void;
+  /**
+   * The folder's files, as a save's conflict or a reload read them, become the base of their paths (`null`: not in
+   * the folder), with their BOM; the paths in `take` also take the folder's text, as one undoable `disk` transaction
+   * (§ 5.4, § 5.7). Nothing happens for files of another epoch, or when the transaction is refused.
+   */
+  fromDisk: (
+    epoch: number,
+    label: string,
+    disk: Readonly<Record<string, DiskFile | null>>,
+    take: readonly string[],
+  ) => EditOutcome;
+  setSaving: (saving: Saving | undefined) => void;
+  setSettling: (settling: Settling | undefined) => void;
   setEdit: (on: boolean) => void;
   /** The author chose to edit a generated file: "Edit anyway". */
   unlock: (path: string) => void;
@@ -502,6 +547,49 @@ function restoreOf(s: SessionState, conflict: RestoreConflict): history.TxInput 
 /** Per path whose text is not its base: the base, or `null` when it has none (a file created since). */
 export type BaseDiff = Record<string, string | null>;
 
+/** The transaction that gives each path of `take` the folder's text: a region edit, a creation or a removal. */
+function diskTx(
+  byPath: Record<string, string>,
+  label: string,
+  disk: Readonly<Record<string, DiskFile | null>>,
+  take: readonly string[],
+): history.TxInput {
+  const files: history.TxFile[] = [];
+  for (const path of take) {
+    const now = byPath[path];
+    const then = disk[path]?.text;
+    if (now === then) continue;
+    if (then === undefined) files.push({ path, edits: [], remove: true, expect: history.stampOf(now!) });
+    else if (now === undefined) files.push({ path, edits: [{ from: 0, to: 0, insert: then }], create: true });
+    else files.push({ path, edits: [regionEdit(now, then)], expect: history.stampOf(now) });
+  }
+  return { label, origin: 'disk', files };
+}
+
+/**
+ * The files with each path's base moved to the folder's text, or gone where the folder has none. A path that took
+ * the folder's text takes what reading found too; one that keeps its own text takes only the folder's BOM, which a
+ * save puts back, and keeps its encoding and line endings, which are its text's.
+ */
+function rebased(
+  files: SessionState['files'],
+  disk: Readonly<Record<string, DiskFile | null>>,
+  take: ReadonlySet<string>,
+): SessionState['files'] {
+  const base = { ...files.base };
+  const meta = { ...files.meta };
+  for (const [path, d] of Object.entries(disk)) {
+    if (d === null) {
+      delete base[path];
+      continue;
+    }
+    base[path] = d.text;
+    const own = meta[path];
+    meta[path] = take.has(path) || !own ? d.meta : { ...own, bom: d.meta.bom };
+  }
+  return { ...files, base, meta };
+}
+
 /**
  * The files whose text is not what was read or last saved: edited, created since, or removed since. A selector, never
  * stored: undoing back to the base leaves nothing unsaved.
@@ -530,6 +618,7 @@ const UNLOADED = {
   graph: undefined,
   generated: undefined,
   stale: false,
+  saving: undefined,
   ...UNCHANGED,
 } as const;
 
@@ -545,12 +634,16 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       said: (s: SessionState) => Said,
       verb?: 'undo' | 'redo',
       after?: history.SelectionRef,
+      /** What else the same `set()` changes, unless the step was refused. */
+      also?: (files: SessionState['files']) => SessionState['files'],
     ): EditOutcome => {
       let outcome: EditOutcome = { ok: false };
       set((s) => {
         const result = committed(s, step(s), said(s), verb && { verb, id: ++noticeId }, after);
         outcome = result.outcome;
-        return result.patch;
+        if (!also || ('refusal' in result.outcome && result.outcome.refusal)) return result.patch;
+        const files = also(result.patch.files ?? s.files);
+        return result.patch === s ? { files } : { ...result.patch, files };
       });
       return outcome;
     };
@@ -722,6 +815,24 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         set((s) => ({ edit: withoutConflict(s.edit, path) }));
       },
       setReplacing: (replacing) => set({ replacing }),
+      saved: (epoch, texts) =>
+        set((s) =>
+          s.files.epoch === epoch ? { files: { ...s.files, base: { ...s.files.base, ...texts } } } : s,
+        ),
+      fromDisk: (epoch, label, disk, take) => {
+        const s = get();
+        if (s.files.epoch !== epoch) return { ok: false };
+        const input = diskTx(s.files.byPath, label, disk, take);
+        return commit(
+          (now) => history.transact(now.edit, now.files.byPath, input, contextOf(now)),
+          () => ({ label }),
+          undefined,
+          undefined,
+          (files) => rebased(files, disk, new Set(take)),
+        );
+      },
+      setSaving: (saving) => set({ saving }),
+      setSettling: (settling) => set({ settling }),
       setEdit: (on) =>
         set((s) =>
           s.edit.on === on

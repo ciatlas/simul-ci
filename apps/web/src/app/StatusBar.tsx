@@ -6,6 +6,7 @@ import { summarize } from '../plan/summary';
 import type { Change } from '../state/store';
 import { ChangeDetails } from './ChangeDetails';
 import { useSession } from './providers';
+import { SaveLine } from './SaveDialog';
 
 /**
  * The sentence the line says, the key of the element that says it, and the rows Details lists with it. A polite live
@@ -71,6 +72,7 @@ export function StatusBar() {
           </Suspense>
         )}
       </div>
+      <SaveLine />
     </footer>
   );
 }

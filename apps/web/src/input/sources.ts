@@ -1,8 +1,9 @@
 import { downloadText } from '../lib/download';
-import { hashFiles } from '../lib/hash';
+import { fileLabel } from '../lib/file-label';
 import { downloadPatch } from '../state/changes';
 import type { SourceStore, StoredSource } from '../state/persist';
-import { type BaseDiff, dirtyPaths, type SessionState, type SessionStore, type Source } from '../state/store';
+import { reloadPlan, settledReload } from '../state/reload';
+import { type BaseDiff, dirtyPaths, type SessionStore, type Settling, type Source } from '../state/store';
 import { type Dropped, filesFromDrop } from './drop';
 import { filterFiles } from './filter';
 import { canPickFolder, canReadFolder, pickFolder, readFolder, requestFolder } from './folder';
@@ -11,13 +12,15 @@ import { checkPaste, type PasteCheck } from './paste';
 import { filesFromList } from './picker';
 import { asWritten, type FileMeta } from './read';
 import { sampleByName } from './samples';
+import type { Choices, DiskConflict } from './save';
 
 /**
  * Every way files come in ends in `setFiles` after the filter and the limits, and in the source store so a reload
  * finds them again. Failures are the `source` error of the store; a cancelled picker is nothing; files a walk left
  * out for their size are a notice. Files with unsaved edits are never replaced unasked (synthesis § 5.7): opening a
- * folder or a sample, choosing or dropping files, a paste over an edited buffer, Reload and Forget first ask the
- * author, who can download the edited files (each, or as one patch), let them go, or keep them.
+ * folder or a sample, choosing or dropping files, a paste over an edited buffer and Forget first ask the author, who
+ * can save them to the folder, download them (each, or as one patch), let them go, or keep them. Reload replaces
+ * nothing: it merges the folder into the files one by one (`state/reload.ts`).
  */
 export interface Sources {
   canPickFolder: boolean;
@@ -27,7 +30,10 @@ export interface Sources {
   paste(path: string, text: string): Pasted;
   removeBuffer(path: string): void;
   useSample(name: string): void;
-  /** Re-reads an opened folder; says so when nothing changed. */
+  /**
+   * Reads an opened folder again and takes in what changed on disk, file by file, as one undoable entry; the files
+   * both sides changed are the author's to settle. Says so when nothing changed.
+   */
   reload(): Promise<void>;
   /** Asks for the stored folder again; must run in a click. */
   reopen(): Promise<void>;
@@ -37,10 +43,10 @@ export interface Sources {
 }
 
 /**
- * What the author answered the replace prompt: download the edited files first, each or as one patch; let them go;
- * or keep them.
+ * What the author answered the replace prompt: save the edited files to the folder first, or download them, each or
+ * as one patch; let them go; or keep them.
  */
-export type ReplaceChoice = 'download' | 'patch' | 'discard' | 'cancel';
+export type ReplaceChoice = 'save' | 'download' | 'patch' | 'discard' | 'cancel';
 
 /** A paste the files took, once the replace prompt (if it asked) is answered: `done` is false when it was cancelled. */
 export type Pasted = { ok: true; path: string; done: Promise<boolean> } | Extract<PasteCheck, { ok: false }>;
@@ -55,6 +61,14 @@ export interface SourcesOptions {
   ask?: (what: string, paths: readonly string[]) => Promise<ReplaceChoice>;
   /** Hands files to the browser to save; one call per file, or one for the patch. */
   download?: (name: string, text: string) => void;
+  /** Saves the edits to the folder (`app/saver.ts`), for the prompt's Save: true once nothing is unsaved. */
+  save?: () => Promise<boolean>;
+  /** Asks the author to settle the files both the folder and the page changed; `undefined` when they cancelled. */
+  settle?: (
+    mode: Settling['mode'],
+    folder: string,
+    conflicts: DiskConflict[],
+  ) => Promise<Choices | undefined>;
 }
 
 const downloadFile = (name: string, text: string): void =>
@@ -68,15 +82,14 @@ const LOOKED_FOR = 'looked for .github/workflows/*.yml, .github/actions/**/actio
  */
 type Brought = Pick<Walked, 'files'> & Partial<Pick<Walked, 'meta' | 'skipped'>> & { base?: BaseDiff };
 
-/** Whether a folder read again is what the store holds: a BOM added or removed changes no text, but it is a change. */
-function unchanged(read: Walked, files: SessionState['files']): boolean {
-  if (hashFiles(read.files) !== hashFiles(files.byPath)) return false;
-  return Object.entries(read.meta).every(
-    ([path, m]) => m.bom === files.meta[path]?.bom && m.utf8 === files.meta[path]?.utf8,
-  );
-}
-
-export function createSources({ store, persist, ask, download = downloadFile }: SourcesOptions): Sources {
+export function createSources({
+  store,
+  persist,
+  ask,
+  download = downloadFile,
+  save,
+  settle,
+}: SourcesOptions): Sources {
   const actions = store.getState();
 
   /**
@@ -89,6 +102,12 @@ export function createSources({ store, persist, ask, download = downloadFile }: 
     const lost = dirtyPaths(store.getState().files).filter((p) => !kept.has(p));
     if (lost.length === 0 || !ask) return true;
     return ask(what, lost).then((choice) => {
+      // The edits go only once every one of them is in the folder: a save that stopped keeps them all.
+      if (choice === 'save')
+        return (save?.() ?? Promise.resolve(false)).then(() => {
+          const left = new Set(dirtyPaths(store.getState().files));
+          return lost.every((p) => !left.has(p));
+        });
       if (choice === 'download') downloadAll(lost);
       if (choice === 'patch') downloadPatch(store.getState().files, lost, 'base', download);
       return choice !== 'cancel';
@@ -270,6 +289,29 @@ export function createSources({ store, persist, ask, download = downloadFile }: 
     if (!accept(read, { ...source, readAt: Date.now() }, `the folder ${name}`)) await persist.clear();
   };
 
+  /**
+   * The folder read again, merged into the files (`state/reload.ts`): the files both sides changed wait for the
+   * author's choices, and Cancel leaves everything as it was.
+   */
+  const merge = async (name: string, epoch: number, read: Walked): Promise<void> => {
+    const where = `the folder ${name}`;
+    const limit = overLimit(read.files);
+    if (limit) return fail(`${where} is too big: ${limit}`);
+    const plan = reloadPlan(store.getState().files, read);
+    if (Object.keys(plan.disk).length === 0) actions.notify(`${name}: no changes`);
+    else {
+      // Without anyone to ask, the files both sides changed stay as they are.
+      const asking = plan.conflicts.length > 0 && settle;
+      const choices = asking ? await settle('reload', name, plan.conflicts) : {};
+      if (!choices || store.getState().files.epoch !== epoch) return;
+      const { disk, take } = settledReload(plan, choices);
+      const outcome = actions.fromDisk(epoch, `Reloaded ${name}`, disk, take);
+      if (!outcome.ok && outcome.refusal)
+        return fail(`reloading ${name} stopped: ${fileLabel(outcome.refusal.path)} changed meanwhile`);
+    }
+    tellLeftOut(where, read.skipped);
+  };
+
   /** What the last visit stored, set again; a kind this page does not know is nothing stored. */
   const restoreStored = async (stored: StoredSource, untouched: () => boolean): Promise<void> => {
     switch (stored.kind) {
@@ -363,16 +405,9 @@ export function createSources({ store, persist, ask, download = downloadFile }: 
       guarded(async () => {
         const s = store.getState();
         if (s.source.kind !== 'folder') return;
-        if (!(await mayReplace(`Reloading ${s.source.name} from disk`))) return;
+        const epoch = s.files.epoch;
         const read = await readAgain(s.source, 'open it again');
-        if (!read) return;
-        const where = `the folder ${s.source.name}`;
-        if (unchanged(read, s.files)) {
-          actions.notify(`${s.source.name}: no changes`);
-          tellLeftOut(where, read.skipped);
-          return;
-        }
-        accept(read, { ...s.source, readAt: Date.now() }, where);
+        if (read && store.getState().files.epoch === epoch) await merge(s.source.name, epoch, read);
       }),
 
     reopen: () =>

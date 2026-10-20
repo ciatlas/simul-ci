@@ -6,6 +6,7 @@ import { memoryStore } from '../src/lib/idb';
 import { sampleByName } from '../src/input/samples';
 import { sourceStore } from '../src/state/persist';
 import { createSessionStore, dirtyPaths } from '../src/state/store';
+import { fakeFolder } from './fake-folder';
 
 const CI = '.github/workflows/ci.yml';
 const RELEASE = '.github/workflows/release.yml';
@@ -158,17 +159,42 @@ describe('the replace prompt', () => {
     expect(store.getState().source).toMatchObject({ kind: 'paste' });
   });
 
-  it('asks before Forget, and before a reload drops the edits for the disk', async () => {
+  it('asks before Forget; Reload asks nothing, since it keeps the edits of files the disk did not change', async () => {
     const { store, sources, asked } = setup('cancel');
-    store.getState().setFiles(sampleByName('starter')!.files, { kind: 'folder', name: 'repo', readAt: 0 });
+    const files = sampleByName('starter')!.files;
+    store.getState().setFiles(files, { kind: 'folder', name: 'repo', readAt: 0 });
     edit(store, CI);
     await sources.forget();
     expect(store.getState().source).toMatchObject({ kind: 'folder', name: 'repo' });
-    const handle = {} as FileSystemDirectoryHandle;
-    store.setState({ source: { kind: 'folder', name: 'repo', handle, readAt: 0 } });
+    store.setState({ source: { kind: 'folder', name: 'repo', handle: fakeFolder(files).handle, readAt: 0 } });
     await sources.reload();
-    expect(asked).toEqual(['Forgetting repo', 'Reloading repo from disk']);
+    expect(asked).toEqual(['Forgetting repo']);
+    expect(store.getState().notices.map((n) => n.text)).toEqual(['repo: no changes']);
     expect(store.getState().files.byPath[CI]).toMatch(/^# edited\n/);
+  });
+
+  it('replaces the files after Save only once every edited file is in the folder', async () => {
+    const store = createSessionStore();
+    let saved = false;
+    const sources = createSources({
+      store,
+      persist: sourceStore(memoryStore()),
+      ask: () => Promise.resolve('save'),
+      save: () => {
+        if (saved) store.getState().saved(store.getState().files.epoch, { ...store.getState().files.byPath });
+        return Promise.resolve(saved);
+      },
+    });
+    const handle = fakeFolder({}).handle;
+    store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'folder', name: 'repo', handle, readAt: 0 });
+    edit(store, CI);
+    sources.useSample('starter');
+    await settle();
+    expect(store.getState().source).toMatchObject({ kind: 'folder', name: 'repo' });
+    saved = true;
+    sources.useSample('starter');
+    await settle();
+    expect(store.getState().source).toEqual({ kind: 'sample', name: 'starter' });
   });
 
   it('is one question at a time, answered through the store', async () => {
