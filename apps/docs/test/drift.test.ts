@@ -24,6 +24,7 @@ import { parse } from 'yaml';
 import { renderModels } from '../../../packages/cli/src/models';
 import { type PlanArgs, planCommand, planOutput } from '../../../packages/cli/src/plan';
 import { runTestCommand, testCommand } from '../../../packages/cli/src/test';
+import { APP_URL } from '../lib/site';
 
 /**
  * The docs against the source: the flags they name are the commands' flags, their tables list the schemas' keys and
@@ -171,6 +172,13 @@ function codesIn(dir: string, pattern: RegExp): string[] {
   );
   return [...new Set(files.flatMap((f) => read(`${dir}/${f}`).match(pattern) ?? []))];
 }
+
+describe('the web app', () => {
+  it('is linked where it is served', () => {
+    expect(page('web-app')).toContain(`(${APP_URL})`);
+    expect(page('index')).toContain(`(${APP_URL})`);
+  });
+});
 
 describe('the Action page', () => {
   const action = parse(read('action.yml')) as {

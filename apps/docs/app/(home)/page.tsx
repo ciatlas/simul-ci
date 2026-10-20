@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { REPO_URL } from '../../lib/site';
+import { APP_URL, REPO_URL } from '../../lib/site';
 
 const PARTS = [
   {
@@ -38,6 +38,9 @@ export default function HomePage() {
           >
             Get started
           </Link>
+          <a href={APP_URL} className="rounded-md border px-4 py-2 font-medium hover:bg-fd-accent">
+            Open the app
+          </a>
           <a href={REPO_URL} className="rounded-md border px-4 py-2 font-medium hover:bg-fd-accent">
             GitHub
           </a>
