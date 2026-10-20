@@ -1,0 +1,891 @@
+# From flowpact (https://github.com/ciatlas/flowpact), .github/workflows/release.yml at 69546008408998f5688b597cf682a90cc1080909.
+# MIT License, Copyright (c) 2026 Ruman Kazi. A test fixture: references of the resolve job for a rename.
+name: Release
+# Every push to main updates the release pull request (version bump and changelog from Conventional Commits).
+# Merging that pull request tags the release and creates the GitHub release; this workflow then publishes to npm,
+# moves the floating tag (v0.2 before 1.0, v1 after), smoke-tests the published package, and packages the VS Code
+# extension, attaches it to the release and publishes it to the VS Code Marketplace and Open VSX.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish again (e.g. v0.2.0) when publishing failed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Release jobs never read the Actions cache (no `cache:` in setup-node): a cache written by another run must not end up
+# in a published artifact.
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release pull request
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Writes go through the ciatlas-release-bot app: unlike GITHUB_TOKEN, its pull requests, pushes and tags start the
+    # usual workflows, so the release pull request gets the required checks like any other.
+    permissions:
+      contents: read
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        with:
+          token: ${{ steps.app.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # The release pull request changes the version, which is compiled into the committed action bundle.
+      - if: steps.rp.outputs.prs_created == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: true  # pushes with the token below
+      - if: steps.rp.outputs.prs_created == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - if: steps.rp.outputs.prs_created == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+      - name: Rebuild the action bundle and move the docs to the new version on the release branch
+        if: steps.rp.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BOT: ${{ steps.app.outputs.app-slug }}[bot]
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @flowpact/action build
+          # `uses: ciatlas/flowpact@v0.<minor>` and friends in the docs and READMEs follow the new release line.
+          node scripts/sync-version-refs.mjs
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "$BOT"
+            git config user.email "$(gh api "/users/$BOT" --jq .id)+$BOT@users.noreply.github.com"
+            git add -A packages/action/dist README.md SECURITY.md CONTRIBUTING.md packages/cli/README.md apps/docs/content/docs apps/docs/public/screenshots
+            git commit -m "build: rebuild the action bundle and update version references for the release"
+            git push
+          fi
+
+  resolve:
+    name: Resolve the release
+    needs: release-please
+    if: ${{ !cancelled() && (needs.release-please.outputs.created == 'true' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - id: tag
+        env:
+          TAG: ${{ needs.release-please.outputs.tag || inputs.tag }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::not a release tag: $TAG"
+            exit 1
+          fi
+          version="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+      - name: The tag exists
+        # Jobs check out refs/tags/<tag>; a branch of the same name must never stand in for the release.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent; then
+            echo "::error::$TAG is not a tag in this repository"
+            exit 1
+          fi
+
+  npm:
+    name: Publish to npm
+    needs: resolve
+    if: ${{ !cancelled() && needs.resolve.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: The tag matches every package version
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          for pkg in packages/lint packages/reporters packages/cli packages/action packages/language-server packages/vscode; do
+            # Older tags (re-published by hand) predate some packages; packages/core in older tags is not checked (it is
+            # @ciatlas/core now, versioned on its own in ciatlas/core).
+            [ -f "$pkg/package.json" ] || continue
+            actual=$(node -p "require('./$pkg/package.json').version")
+            if [ "$actual" != "$VERSION" ]; then
+              echo "::error file=$pkg/package.json::version $actual does not match the release $VERSION"
+              exit 1
+            fi
+          done
+          # version.ts moved from packages/core to packages/lint; older tags have it in core.
+          version_ts=packages/lint/src/version.ts
+          [ -f "$version_ts" ] || version_ts=packages/core/src/version.ts
+          grep -q "VERSION = '$VERSION'" "$version_ts" || { echo "::error file=$version_ts::VERSION is not $VERSION"; exit 1; }
+      - name: Already published?
+        id: published
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          if npm view "flowpact@$VERSION" version >/dev/null 2>&1; then
+            echo "flowpact@$VERSION is already on npm; skipping the publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.published.outputs.skip != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter flowpact build
+      - name: npm 11.5.1 or later (trusted publishing)
+        if: steps.published.outputs.skip != 'true'
+        # Node.js 24 ships a recent npm; fail clearly instead of installing an unpinned npm.
+        run: |
+          version=$(npm --version)
+          if ! node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$version"; then
+            echo "::error::npm $version cannot use trusted publishing (needs 11.5.1 or later)"
+            exit 1
+          fi
+      - name: npm publish (trusted publishing, with provenance)
+        if: steps.published.outputs.skip != 'true'
+        working-directory: packages/cli
+        # npm exchanges this job's OIDC identity for a short-lived publish token; the package's trusted publisher on
+        # npmjs.com names this repository, release.yml and the npm environment. A trusted publisher can only be added
+        # once the package exists, so the first publish of a new package name falls back to an NPM_TOKEN secret, which
+        # is deleted afterwards (unset, the variable is empty and unused).
+        env:
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          # check-pack.mjs fails before publishing when packages/lint/src/location.json names another repository.
+          FLOWPACT_EXPECT_REPOSITORY: ${{ github.repository }}
+        run: |
+          # devDependencies and scripts only build the package in this repository; where it is vendored into an npm
+          # workspace, npm cannot install their workspace:* packages and workspace-wide scripts would run tsup. Then the
+          # files and the manifest are checked as CI checks them (scripts/check-pack.mjs).
+          npm pkg delete devDependencies scripts
+          node ../../scripts/check-pack.mjs
+          if [ "$PRERELEASE" = true ]; then
+            npm publish --provenance --access public --tag next
+            exit 0
+          fi
+          # `latest` only for the newest stable release: an older one completed after a newer one went out gets
+          # `previous` (npm refuses to move `latest` back without --tag).
+          tags=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*.*.*')
+          newest=$(cut -f2 <<< "$tags" | cut -d/ -f3- | grep -v -e '-' | sort -V | tail -n 1)
+          [ -n "$newest" ] || { echo "::error::cannot list the release tags"; exit 1; }
+          if [ "$newest" = "$TAG" ]; then
+            npm publish --provenance --access public --tag latest
+          else
+            npm publish --provenance --access public --tag previous
+          fi
+
+  major-tag:
+    name: Move the floating tag
+    # Only once the release is public, with every signed asset attached.
+    needs: [resolve, publish-release]
+    if: ${{ !cancelled() && needs.publish-release.result == 'success' && needs.resolve.outputs.prerelease == 'false' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Release tags are protected by a ruleset that only the release bot bypasses (.github/rulesets/release-tags.json).
+      - id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: true  # pushes or fetches with the token below
+      - name: Point the floating tag at the release
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BOT: ${{ steps.app.outputs.app-slug }}[bot]
+        run: |
+          git fetch --force --tags origin
+          # Before 1.0 each minor line gets its own tag (v0.2), as a minor release can change what is reported; from 1.0, the
+          # major (v1).
+          major="${TAG%%.*}"
+          if [ "$major" = v0 ]; then
+            rest="${TAG#v0.}"
+            float="v0.${rest%%.*}"
+          else
+            float="$major"
+          fi
+          # A re-publish of an older release must not move the floating tag backwards.
+          latest=$(git tag --list "$float.*" --sort=-v:refname | grep -v -- - | head -n 1)
+          if [ "$latest" != "$TAG" ]; then
+            echo "$TAG is not the latest $float release ($latest); leaving $float alone."
+            exit 0
+          fi
+          git config user.name "$BOT"
+          git config user.email "$(gh api "/users/$BOT" --jq .id)+$BOT@users.noreply.github.com"
+          git tag -fa "$float" -m "$float → $TAG" "$TAG^{commit}"
+          git push origin "refs/tags/$float" --force
+
+  smoke-published:
+    name: Smoke test the published package (${{ matrix.os }})
+    needs: [resolve, npm]
+    if: ${{ !cancelled() && needs.npm.result == 'success' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+      - name: Install the published package
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          cd "$RUNNER_TEMP"
+          # The registry can take a moment to serve a new version everywhere. --prefer-online revalidates npm's cached
+          # metadata on every attempt (the registry marks it fresh for 5 minutes, so a cached miss would repeat).
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            npm pack "flowpact@$VERSION" --prefer-online --loglevel=error && break
+            echo "not available yet (attempt $attempt); retrying in 30s"
+            sleep 30
+          done
+          if [ ! -f "flowpact-$VERSION.tgz" ]; then
+            echo "::error::flowpact@$VERSION is still not available from the registry"
+            exit 1
+          fi
+          # The exact published tarball, linked as users' `flowpact` command.
+          mkdir -p flowpact-package
+          tar -xzf "flowpact-$VERSION.tgz" -C flowpact-package
+          cd flowpact-package/package
+          npm link --ignore-scripts --no-audit --no-fund
+      # The `flowpact` command, then the API: a project that depends on the published package imports it and runs lint()
+      # on a fixture.
+      - run: node scripts/smoke.mjs --version "$VERSION" --package "$RUNNER_TEMP/flowpact-package/package"
+        # Tags from before the smoke test existed (v0.1.0) have nothing to run.
+        if: hashFiles('scripts/smoke.mjs') != ''
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+
+  release-assets:
+    # Signed release assets: the published npm tarball with a Sigstore bundle and its in-toto provenance, so a release
+    # can be verified without the registry (`gh attestation verify <tgz> --repo ciatlas/flowpact`).
+    name: Attach the signed package to the release
+    needs: [resolve, npm]
+    if: ${{ !cancelled() && needs.npm.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    outputs:
+      assets: ${{ steps.done.outputs.assets }}
+    steps:
+      - id: asset
+        name: What is attached already?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          tgz="flowpact-$VERSION.tgz"
+          # A published release is never changed: its assets are what was verified (and immutable releases forbid it).
+          # Read as an assignment, so a failed read stops the job instead of looking like a published release.
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          case "$draft" in
+            true) ;;
+            false) echo "published=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            *) echo "::error::cannot tell whether $TAG is a draft ($draft)"; exit 1 ;;
+          esac
+          # A re-run keeps what an earlier run attached completely, and replaces a partial upload. Only finished uploads
+          # count: a failed upload can leave an empty asset behind under the name.
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | select(.state == "uploaded") | .name')
+          has() { grep -qxF "$1" <<< "$assets"; }
+          if has "$tgz" && has "$tgz.sigstore.json" && has "$tgz.intoto.jsonl"; then echo "signed=true" >> "$GITHUB_OUTPUT"; fi
+          if has "flowpact-$VERSION.cdx.json"; then echo "sbom-attached=true" >> "$GITHUB_OUTPUT"; fi
+      # The same npm as the smoke test, not the runner image's default.
+      - if: steps.asset.outputs.published != 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+      - name: Fetch the published tarball
+        if: >-
+          steps.asset.outputs.published != 'true' &&
+          (steps.asset.outputs.signed != 'true' || steps.asset.outputs.sbom-attached != 'true')
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          # --prefer-online: see the smoke test; without it a miss cached on the first attempt repeats for 5 minutes.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            npm pack "flowpact@$VERSION" --prefer-online --loglevel=error && break
+            echo "not available yet (attempt $attempt); retrying in 30s"
+            sleep 30
+          done
+          if [ ! -f "flowpact-$VERSION.tgz" ]; then
+            echo "::error::flowpact@$VERSION is still not available from the registry"
+            exit 1
+          fi
+          # It must be byte for byte what the registry serves.
+          expected=$(npm view "flowpact@$VERSION" dist.integrity --prefer-online)
+          actual="sha512-$(openssl dgst -sha512 -binary "flowpact-$VERSION.tgz" | base64 -w0)"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::tarball integrity $actual does not match the registry ($expected)"
+            exit 1
+          fi
+      - id: attest
+        if: steps.asset.outputs.published != 'true' && steps.asset.outputs.signed != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: flowpact-${{ needs.resolve.outputs.version }}.tgz
+      - name: Upload the tarball, signature bundle and provenance
+        if: steps.asset.outputs.published != 'true' && steps.asset.outputs.signed != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          tgz="flowpact-$VERSION.tgz"
+          cp "$BUNDLE" "$tgz.sigstore.json"
+          # The signed in-toto statement (DSSE envelope), one per line.
+          node -e 'const b = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(JSON.stringify(b.dsseEnvelope))' "$BUNDLE" > "$tgz.intoto.jsonl"
+          # The release is a draft (checked above), so --clobber only replaces a partial upload.
+          gh release upload "$TAG" "$tgz" "$tgz.sigstore.json" "$tgz.intoto.jsonl" --clobber --repo "$GITHUB_REPOSITORY"
+      - id: sbom
+        name: Take the SBOM out of the tarball
+        if: steps.asset.outputs.published != 'true' && steps.asset.outputs.sbom-attached != 'true'
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          # The SBOM the build wrote into the package (scripts/bundle-licenses.ts); 0.8.2 and earlier have none.
+          if tar -xzOf "flowpact-$VERSION.tgz" package/dist/sbom.cdx.json > "flowpact-$VERSION.cdx.json" 2>/dev/null; then
+            echo "sbom=flowpact-$VERSION.cdx.json" >> "$GITHUB_OUTPUT"
+          fi
+      # The SBOM as a CycloneDX predicate (`gh attestation verify <tgz> --predicate-type https://cyclonedx.org/bom`).
+      - if: steps.sbom.outputs.sbom != ''
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: flowpact-${{ needs.resolve.outputs.version }}.tgz
+          predicate-type: https://cyclonedx.org/bom
+          predicate-path: ${{ steps.sbom.outputs.sbom }}
+      - name: Upload the SBOM
+        if: steps.sbom.outputs.sbom != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SBOM: ${{ steps.sbom.outputs.sbom }}
+        run: gh release upload "$TAG" "$SBOM" --clobber --repo "$GITHUB_REPOSITORY"
+      - id: done
+        if: steps.asset.outputs.published != 'true'
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          HAS_SBOM: ${{ steps.asset.outputs.sbom-attached == 'true' || steps.sbom.outputs.sbom != '' }}
+        run: |
+          # What publish-release checks for on the release before it publishes it.
+          tgz="flowpact-$VERSION.tgz"
+          sbom=""
+          if [ "$HAS_SBOM" = true ]; then sbom="flowpact-$VERSION.cdx.json"; fi
+          echo "assets=$tgz $tgz.sigstore.json $tgz.intoto.jsonl $sbom" >> "$GITHUB_OUTPUT"
+
+  action-archive:
+    # The GitHub Action as released: action.yml and its committed bundle in a reproducible archive with provenance, so a
+    # mirror can check that it copies exactly what this workflow built (`gh attestation verify <archive> --repo
+    # ciatlas/flowpact`).
+    name: Attach the signed action to the release
+    needs: resolve
+    if: ${{ !cancelled() && needs.resolve.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    outputs:
+      assets: ${{ steps.done.outputs.assets }}
+      none: ${{ steps.asset.outputs.none }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - id: asset
+        name: What is attached already?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          archive="flowpact-action-$VERSION.tar.gz"
+          sbom="flowpact-action-$VERSION.cdx.json"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "sbom=$sbom" >> "$GITHUB_OUTPUT"
+          # Tags from before the archive existed (0.8.2 and earlier) have no scripts/action-archive.sh.
+          if [ ! -x scripts/action-archive.sh ]; then
+            echo "none=true" >> "$GITHUB_OUTPUT"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A published release is never changed; a failed read stops the job.
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          case "$draft" in
+            true) ;;
+            false) echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            *) echo "::error::cannot tell whether $TAG is a draft ($draft)"; exit 1 ;;
+          esac
+          # A re-run keeps the archive an earlier run attached (its provenance is for those bytes), and adds what is
+          # missing: the signature bundle and provenance after a partial upload, or the SBOM. Only finished uploads
+          # count.
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | select(.state == "uploaded") | .name')
+          has() { grep -qxF "$1" <<< "$assets"; }
+          if has "$archive"; then echo "archive-attached=true" >> "$GITHUB_OUTPUT"; fi
+          if has "$archive" && has "$archive.sigstore.json" && has "$archive.intoto.jsonl"; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          fi
+          if has "$sbom"; then echo "sbom-attached=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Build the archive
+        if: steps.asset.outputs.skip != 'true' && steps.asset.outputs.archive-attached != 'true'
+        env:
+          ARCHIVE: ${{ steps.asset.outputs.archive }}
+        run: |
+          scripts/action-archive.sh "$ARCHIVE"
+          tar -tzvf "$ARCHIVE"
+      - name: Download the attached archive
+        # What is still missing is attested against the archive as released.
+        if: >-
+          steps.asset.outputs.skip != 'true' && steps.asset.outputs.archive-attached == 'true' &&
+          (steps.asset.outputs.signed != 'true' || steps.asset.outputs.sbom-attached != 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          ARCHIVE: ${{ steps.asset.outputs.archive }}
+        run: gh release download "$TAG" --pattern "$ARCHIVE" --repo "$GITHUB_REPOSITORY"
+      - id: attest
+        if: steps.asset.outputs.skip != 'true' && steps.asset.outputs.signed != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.asset.outputs.archive }}
+      - name: Upload the archive, signature bundle and provenance
+        if: steps.asset.outputs.skip != 'true' && steps.asset.outputs.signed != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          ARCHIVE: ${{ steps.asset.outputs.archive }}
+          ATTACHED: ${{ steps.asset.outputs.archive-attached }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" "$ARCHIVE.sigstore.json"
+          node -e 'const b = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(JSON.stringify(b.dsseEnvelope))' "$BUNDLE" > "$ARCHIVE.intoto.jsonl"
+          files=("$ARCHIVE.sigstore.json" "$ARCHIVE.intoto.jsonl")
+          if [ "$ATTACHED" != true ]; then files=("$ARCHIVE" "${files[@]}"); fi
+          # The release is a draft (checked above), so --clobber only replaces a partial upload.
+          gh release upload "$TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Take the SBOM out of the archive
+        if: steps.asset.outputs.skip != 'true' && steps.asset.outputs.sbom-attached != 'true'
+        env:
+          ARCHIVE: ${{ steps.asset.outputs.archive }}
+          SBOM: ${{ steps.asset.outputs.sbom }}
+        run: tar -xzOf "$ARCHIVE" packages/action/dist/sbom.cdx.json > "$SBOM"
+      - if: steps.asset.outputs.skip != 'true' && steps.asset.outputs.sbom-attached != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.asset.outputs.archive }}
+          predicate-type: https://cyclonedx.org/bom
+          predicate-path: ${{ steps.asset.outputs.sbom }}
+      - name: Upload the SBOM
+        if: steps.asset.outputs.skip != 'true' && steps.asset.outputs.sbom-attached != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SBOM: ${{ steps.asset.outputs.sbom }}
+        run: gh release upload "$TAG" "$SBOM" --clobber --repo "$GITHUB_REPOSITORY"
+      - id: done
+        if: steps.asset.outputs.skip != 'true'
+        env:
+          ARCHIVE: ${{ steps.asset.outputs.archive }}
+          SBOM: ${{ steps.asset.outputs.sbom }}
+        run: echo "assets=$ARCHIVE $ARCHIVE.sigstore.json $ARCHIVE.intoto.jsonl $SBOM" >> "$GITHUB_OUTPUT"
+
+  publish-release:
+    # release-please creates the release as a draft (release-please-config.json: draft, force-tag-creation), so it is
+    # public only once every signed asset is attached. With immutable releases enabled, nothing in it changes after that.
+    # The extension may be missing only from a prerelease (vscode-package skipped) or a tag without one (no vsix); when
+    # packaging it failed, vscode-release-asset is skipped too, and the release stays a draft.
+    name: Publish the release
+    needs: [resolve, release-assets, action-archive, vscode-package, vscode-release-asset]
+    if: >-
+      ${{ !cancelled() && needs.release-assets.result == 'success' && needs.action-archive.result == 'success' &&
+      (needs.vscode-release-asset.result == 'success' || (needs.vscode-release-asset.result == 'skipped' &&
+      (needs.vscode-package.result == 'skipped' || (needs.vscode-package.result == 'success' &&
+      needs.vscode-package.outputs.vsix == '')))) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          PACKAGE: ${{ needs.release-assets.outputs.assets }}
+          ACTION: ${{ needs.action-archive.outputs.assets }}
+          NO_ACTION: ${{ needs.action-archive.outputs.none }}
+          EXTENSION: ${{ needs.vscode-release-asset.outputs.assets }}
+        run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          case "$draft" in
+            true) ;;
+            false) echo "$TAG is already published."; exit 0 ;;
+            *) echo "::error::cannot tell whether $TAG is a draft ($draft)"; exit 1 ;;
+          esac
+          # The package and (from 0.9) the action are on every release; a job that stands for no assets went wrong.
+          if [ -z "$PACKAGE" ] || { [ -z "$ACTION" ] && [ "$NO_ACTION" != true ]; }; then
+            echo "::error::an asset job reported no assets; $TAG stays a draft"
+            exit 1
+          fi
+          # Every asset the jobs above stand for must be on the release, fully uploaded; otherwise it stays a draft.
+          attached=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | select(.state == "uploaded") | .name')
+          missing=0
+          for asset in $PACKAGE $ACTION $EXTENSION; do
+            if ! grep -qxF "$asset" <<< "$attached"; then
+              echo "::error::$TAG has no $asset; it stays a draft"
+              missing=1
+            fi
+          done
+          [ "$missing" = 0 ] || exit 1
+          if [ "$PRERELEASE" = true ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            # Latest only when this is the newest stable release: completing an older draft must not demote a newer one.
+            tags=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*.*.*')
+            newest=$(cut -f2 <<< "$tags" | cut -d/ -f3- | grep -v -e '-' | sort -V | tail -n 1)
+            [ -n "$newest" ] || { echo "::error::cannot list the release tags"; exit 1; }
+            latest=false
+            if [ "$newest" = "$TAG" ]; then latest=true; fi
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets \
+            --jq '"published: draft=\(.isDraft) assets=\([.assets[].name] | join(", "))"'
+
+  vscode-package:
+    # The extension, built and packaged from the tag and smoke-tested as shipped. This job runs the build and a
+    # downloaded VS Code, so it gets no write access; vscode-release-asset signs and attaches the result. The Marketplace
+    # rejects pre-release versions (x.y.z-rc.1).
+    name: Package the VS Code extension
+    needs: resolve
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.prerelease == 'false' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      vsix: ${{ steps.pack.outputs.vsix }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - id: has
+        # Releases before the extension existed (re-published by hand) have nothing to package.
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          if [ ! -f packages/vscode/package.json ]; then
+            echo "$TAG has no VS Code extension; nothing to package."
+            exit 0
+          fi
+          actual=$(node -p "require('./packages/vscode/package.json').version")
+          if [ "$actual" != "$VERSION" ]; then
+            echo "::error file=packages/vscode/package.json::version $actual does not match the release $VERSION"
+            exit 1
+          fi
+          echo "extension=true" >> "$GITHUB_OUTPUT"
+      - if: steps.has.outputs.extension == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - if: steps.has.outputs.extension == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+      - id: pack
+        name: Build and package
+        if: steps.has.outputs.extension == 'true'
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter ./packages/vscode build
+          vsix="flowpact-vscode-$VERSION.vsix"
+          # The tag's commit time as the archive timestamps: packaging the tag again gives the same bytes.
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct HEAD)
+          export SOURCE_DATE_EPOCH
+          # Relative README links point into packages/vscode at this tag (vsce ignores repository.directory). Images come
+          # from raw.githubusercontent.com itself: github.com's /raw/ redirect to it intermittently answers 504.
+          (cd packages/vscode && pnpm exec vsce package --no-dependencies --out "$RUNNER_TEMP/$vsix" \
+            --baseContentUrl "https://github.com/$GITHUB_REPOSITORY/blob/$TAG/packages/vscode" \
+            --baseImagesUrl "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/packages/vscode")
+          unzip -q "$RUNNER_TEMP/$vsix" -d "$RUNNER_TEMP/vsix"
+          test -s "$RUNNER_TEMP/vsix/extension/dist/server.mjs"
+          echo "vsix=$vsix" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/$vsix" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Smoke test the packaged extension in VS Code
+        if: steps.has.outputs.extension == 'true'
+        working-directory: packages/vscode
+        env:
+          FLOWPACT_EXTENSION_PATH: ${{ runner.temp }}/vsix/extension
+        run: xvfb-run -a node e2e/run.mjs
+      - if: steps.has.outputs.extension == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vsix-build
+          path: ${{ runner.temp }}/${{ steps.pack.outputs.vsix }}
+          retention-days: 7
+
+  vscode-release-asset:
+    # Signs the packaged extension and attaches it to the release (no checkout, nothing of the build runs here). The
+    # release asset is the file both registries get: when the release already has one (a re-run), it is reused, not
+    # replaced, so the registries and the signed asset never differ.
+    name: Attach the signed extension to the release
+    needs: [resolve, vscode-package]
+    if: ${{ !cancelled() && needs.vscode-package.result == 'success' && needs.vscode-package.outputs.vsix != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    outputs:
+      vsix: ${{ steps.asset.outputs.vsix }}
+      sha256: ${{ steps.asset.outputs.sha256 }}
+      assets: ${{ steps.done.outputs.assets }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vsix-build
+          path: ${{ runner.temp }}/build
+      - id: asset
+        name: Use the release's extension, or the new build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VSIX: ${{ needs.vscode-package.outputs.vsix }}
+          SHA256: ${{ needs.vscode-package.outputs.sha256 }}
+        run: |
+          echo "$SHA256  $RUNNER_TEMP/build/$VSIX" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/release"
+          # Reads as assignments, so a failed read stops the job; only finished uploads count.
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          case "$draft" in
+            true | false) ;;
+            *) echo "::error::cannot tell whether $TAG is a draft ($draft)"; exit 1 ;;
+          esac
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | select(.state == "uploaded") | .name')
+          has() { grep -qxF "$1" <<< "$assets"; }
+          if has "$VSIX"; then
+            gh release download "$TAG" --pattern "$VSIX" --dir "$RUNNER_TEMP/release" --repo "$GITHUB_REPOSITORY"
+            existing=$(sha256sum "$RUNNER_TEMP/release/$VSIX" | cut -d' ' -f1)
+            [ "$existing" = "$SHA256" ] || echo "::warning::$TAG already has $VSIX ($existing); publishing that file, not this build ($SHA256)."
+            echo "attached=true" >> "$GITHUB_OUTPUT"
+          else
+            cp "$RUNNER_TEMP/build/$VSIX" "$RUNNER_TEMP/release/$VSIX"
+          fi
+          echo "vsix=$VSIX" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/release/$VSIX" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # A published release is never changed; the registries still get its extension (or this build).
+          if [ "$draft" = false ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A re-run adds what an earlier run left out: the signature bundle and provenance after a partial upload, or
+          # the SBOM.
+          if has "$VSIX" && has "$VSIX.sigstore.json" && has "$VSIX.intoto.jsonl"; then echo "signed=true" >> "$GITHUB_OUTPUT"; fi
+          if has "${VSIX%.vsix}.cdx.json"; then echo "sbom-attached=true" >> "$GITHUB_OUTPUT"; fi
+      - id: attest
+        if: steps.asset.outputs.published != 'true' && steps.asset.outputs.signed != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release/${{ steps.asset.outputs.vsix }}
+      - name: Upload the extension, signature bundle and provenance
+        if: steps.asset.outputs.published != 'true' && steps.asset.outputs.signed != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VSIX: ${{ steps.asset.outputs.vsix }}
+          ATTACHED: ${{ steps.asset.outputs.attached }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cd "$RUNNER_TEMP/release"
+          cp "$BUNDLE" "$VSIX.sigstore.json"
+          node -e 'const b = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(JSON.stringify(b.dsseEnvelope))' "$BUNDLE" > "$VSIX.intoto.jsonl"
+          files=("$VSIX.sigstore.json" "$VSIX.intoto.jsonl")
+          if [ "$ATTACHED" != true ]; then files=("$VSIX" "${files[@]}"); fi
+          # The release is a draft (checked above), so --clobber only replaces a partial upload.
+          gh release upload "$TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+      - id: sbom
+        name: Take the SBOM out of the extension
+        if: steps.asset.outputs.published != 'true' && steps.asset.outputs.sbom-attached != 'true'
+        env:
+          VSIX: ${{ steps.asset.outputs.vsix }}
+        run: |
+          # The extension as released (attached earlier, or this build). Extensions of 0.8.2 and earlier have none.
+          sbom="$RUNNER_TEMP/release/${VSIX%.vsix}.cdx.json"
+          if unzip -p "$RUNNER_TEMP/release/$VSIX" extension/dist/sbom.cdx.json > "$sbom" 2>/dev/null && [ -s "$sbom" ]; then
+            echo "sbom=$sbom" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.sbom.outputs.sbom != ''
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release/${{ steps.asset.outputs.vsix }}
+          predicate-type: https://cyclonedx.org/bom
+          predicate-path: ${{ steps.sbom.outputs.sbom }}
+      - name: Upload the SBOM
+        if: steps.sbom.outputs.sbom != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SBOM: ${{ steps.sbom.outputs.sbom }}
+        run: gh release upload "$TAG" "$SBOM" --clobber --repo "$GITHUB_REPOSITORY"
+      - id: done
+        if: steps.asset.outputs.published != 'true'
+        env:
+          VSIX: ${{ steps.asset.outputs.vsix }}
+          HAS_SBOM: ${{ steps.asset.outputs.sbom-attached == 'true' || steps.sbom.outputs.sbom != '' }}
+        run: |
+          sbom=""
+          if [ "$HAS_SBOM" = true ]; then sbom="${VSIX%.vsix}.cdx.json"; fi
+          echo "assets=$VSIX $VSIX.sigstore.json $VSIX.intoto.jsonl $sbom" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vsix
+          path: ${{ runner.temp }}/release/${{ steps.asset.outputs.vsix }}
+          retention-days: 7
+
+  vscode-marketplace:
+    # Microsoft Entra ID, no token: azure/login exchanges this job's OIDC identity (the vscode-marketplace environment)
+    # for a managed identity that is a member of the Marketplace publisher. Runs once AZURE_CLIENT_ID is configured.
+    name: Publish to the VS Code Marketplace
+    needs: [resolve, vscode-release-asset]
+    if: ${{ !cancelled() && needs.vscode-release-asset.result == 'success' && needs.vscode-release-asset.outputs.vsix != '' && vars.AZURE_CLIENT_ID != '' }}
+    runs-on: ubuntu-latest
+    environment: vscode-marketplace
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+      # Only for the lockfile-pinned vsce; no install scripts run while this job can sign in to Azure.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vsix
+          path: ${{ runner.temp }}
+      - name: The extension is the release's
+        env:
+          VSIX: ${{ needs.vscode-release-asset.outputs.vsix }}
+          SHA256: ${{ needs.vscode-release-asset.outputs.sha256 }}
+        run: echo "$SHA256  $RUNNER_TEMP/$VSIX" | sha256sum -c -
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: vsce publish
+        working-directory: packages/vscode
+        env:
+          VSIX: ${{ needs.vscode-release-asset.outputs.vsix }}
+        # --skip-duplicate: re-running a release completes it instead of failing on versions already published.
+        run: pnpm exec vsce publish --packagePath "$RUNNER_TEMP/$VSIX" --azure-credential --skip-duplicate
+
+  open-vsx:
+    # Open VSX trusted publishing: ovsx exchanges this job's OIDC identity (release.yml, the open-vsx environment) for a
+    # short-lived token. The first version of a new extension needs an access token instead (OVSX_PAT in the open-vsx
+    # environment, deleted afterwards). Runs once the repository variable OPEN_VSX_PUBLISH is true.
+    name: Publish to Open VSX
+    needs: [resolve, vscode-release-asset]
+    if: ${{ !cancelled() && needs.vscode-release-asset.result == 'success' && needs.vscode-release-asset.outputs.vsix != '' && vars.OPEN_VSX_PUBLISH == 'true' }}
+    runs-on: ubuntu-latest
+    environment: open-vsx
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          package-manager-cache: false
+          node-version: '24'
+      # Only for the lockfile-pinned ovsx; no install scripts run while this job holds a publishing identity.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vsix
+          path: ${{ runner.temp }}
+      - name: The extension is the release's
+        env:
+          VSIX: ${{ needs.vscode-release-asset.outputs.vsix }}
+          SHA256: ${{ needs.vscode-release-asset.outputs.sha256 }}
+        run: echo "$SHA256  $RUNNER_TEMP/$VSIX" | sha256sum -c -
+      - name: ovsx publish
+        working-directory: packages/vscode
+        env:
+          VSIX: ${{ needs.vscode-release-asset.outputs.vsix }}
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -n "$OVSX_PAT" ]; then
+            pnpm exec ovsx publish "$RUNNER_TEMP/$VSIX" --skip-duplicate
+          else
+            # A token, even an empty one, would take precedence over trusted publishing.
+            env -u OVSX_PAT pnpm exec ovsx publish "$RUNNER_TEMP/$VSIX" --trusted-publishing --skip-duplicate
+          fi

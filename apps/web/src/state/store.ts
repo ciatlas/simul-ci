@@ -1,6 +1,7 @@
 import type { AssumeEntry, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { GraphState, GraphUi } from '../graph/types';
+import { type FileMeta, textMeta } from '../input/read';
 import { pinSentence, type VerdictChange, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
 import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
@@ -96,7 +97,13 @@ export interface Reveal {
 
 export interface SessionState {
   source: Source;
-  files: { version: number; byPath: Record<string, string> };
+  files: {
+    version: number;
+    /** The project files' texts, a BOM stripped. */
+    byPath: Record<string, string>;
+    /** What reading each file in `byPath` found: its BOM, its line endings, whether it is valid UTF-8. */
+    meta: Record<string, FileMeta>;
+  };
   project: {
     status: 'idle' | 'loading' | 'ready' | 'error';
     version?: number;
@@ -152,7 +159,8 @@ export interface SessionState {
 }
 
 export interface SessionActions {
-  setFiles: (byPath: Record<string, string>, source: Source) => void;
+  /** New files from a source; a file `meta` does not cover is a string no file was read for (a paste, a sample). */
+  setFiles: (byPath: Record<string, string>, source: Source, meta?: Record<string, FileMeta>) => void;
   forgetSource: () => void;
   setScenario: (
     scenario: ScenarioInput,
@@ -220,7 +228,7 @@ const DEFAULT_SCENARIO: ScenarioInput = { event: 'push' };
 export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState {
   return {
     source: { kind: 'none' },
-    files: { version: 0, byPath: {} },
+    files: { version: 0, byPath: {}, meta: {} },
     project: { status: 'idle' },
     scenario: DEFAULT_SCENARIO,
     scenarioFrom: 'default',
@@ -249,10 +257,10 @@ const UNPINNED = { pin: undefined, hoveredUnknown: undefined, unknownFocus: unde
 export function createSessionStore(initial: SessionState = initialSessionState()): SessionStore {
   return createStore<SessionState & SessionActions>((set, get) => ({
     ...initial,
-    setFiles: (byPath, source) =>
+    setFiles: (byPath, source, meta) =>
       set((s) => ({
         source,
-        files: { version: s.files.version + 1, byPath },
+        files: { version: s.files.version + 1, byPath, meta: metaOf(byPath, meta) },
         project: { status: 'idle' },
         plan: undefined,
         graph: undefined,
@@ -263,7 +271,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     forgetSource: () =>
       set({
         source: { kind: 'none' },
-        files: { version: get().files.version + 1, byPath: {} },
+        files: { version: get().files.version + 1, byPath: {}, meta: {} },
         project: { status: 'idle' },
         plan: undefined,
         graph: undefined,
@@ -386,6 +394,16 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     },
     dismissNotice: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
   }));
+}
+
+/** The meta of each file: as the reader gave it, else that of a string. A path not in `byPath` is dropped. */
+function metaOf(
+  byPath: Record<string, string>,
+  given: Record<string, FileMeta> = {},
+): Record<string, FileMeta> {
+  const meta: Record<string, FileMeta> = {};
+  for (const [path, text] of Object.entries(byPath)) meta[path] = given[path] ?? textMeta(text);
+  return meta;
 }
 
 /**

@@ -12,7 +12,7 @@ export interface PickedFiles extends Walked {
 }
 
 export async function filesFromList(list: ArrayLike<File>): Promise<PickedFiles> {
-  const walked: Walked = { files: {}, skipped: [] };
+  const walked: Walked = { files: {}, meta: {}, skipped: [] };
   let name: string | undefined;
   for (const file of Array.from(list)) {
     const relative = normalizePath(file.webkitRelativePath || file.name);

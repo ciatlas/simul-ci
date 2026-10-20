@@ -21,8 +21,9 @@ export function Panels() {
   const setPanel = useSession((s) => s.setPanel);
   const plan = useSession((s) => s.plan?.plan);
   const outline = useSession((s) => s.project.outline);
+  const files = useSession((s) => s.files);
   const gating = plan ? plan.unknowns.filter((u) => u.affects.length > 0).length : 0;
-  const problems = useMemo(() => problemRows(outline, plan).length, [outline, plan]);
+  const problems = useMemo(() => problemRows(outline, plan, files).length, [outline, plan, files]);
 
   return (
     <Tabs.Root

@@ -6,11 +6,15 @@ import type { PlanState } from '../state/store';
 import { EmptyNote, LocLink } from './kit';
 import { type ProblemRow, placeOf, problemRows } from './problem-rows';
 
-/** The Problems tab (synthesis § 10): files that could not be read, files that are no workflow, the plan's diagnostics. */
+/**
+ * The Problems tab (synthesis § 10): files that could not be read, files that are not UTF-8, files that are no
+ * workflow, the plan's diagnostics.
+ */
 export function Problems() {
   const outline = useSession((s) => s.project.outline);
   const plan = useSession((s) => s.plan);
-  const rows = useMemo(() => problemRows(outline, plan?.plan), [outline, plan]);
+  const files = useSession((s) => s.files);
+  const rows = useMemo(() => problemRows(outline, plan?.plan, files), [outline, plan, files]);
   if (rows.length === 0)
     return <EmptyNote>No problems: every file was read and the plan has no diagnostics.</EmptyNote>;
   return (

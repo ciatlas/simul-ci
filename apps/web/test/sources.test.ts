@@ -4,10 +4,17 @@ import { memoryStore } from '../src/lib/idb';
 import { type SourceStore, type StoredSource, sourceStore } from '../src/state/persist';
 import { createSessionStore } from '../src/state/store';
 
-/** A tree as `{ name: text | subtree }`. */
-type Tree = { [name: string]: string | Tree };
+/** A tree as `{ name: text | bytes | subtree }`. */
+type Tree = { [name: string]: string | Uint8Array<ArrayBuffer> | Tree };
 
-const fileOf = (text: string) => ({ size: text.length, text: () => Promise.resolve(text) });
+const isFile = (v: Tree[string]): v is string | Uint8Array<ArrayBuffer> =>
+  typeof v === 'string' || v instanceof Uint8Array;
+
+/** A File as a walk reads it: its size and its bytes. Text is written as UTF-8; bytes are taken as they are. */
+const fileOf = (content: string | Uint8Array<ArrayBuffer>) => {
+  const blob = new Blob([content]);
+  return { size: blob.size, arrayBuffer: () => blob.arrayBuffer() };
+};
 
 interface FolderOptions {
   /** The browser's answer to whether the folder may be read without a click. */
@@ -28,9 +35,7 @@ function folder(name: string, tree: Tree, options: FolderOptions = {}): FileSyst
       for (const [n, v] of Object.entries(tree))
         yield [
           n,
-          typeof v === 'string'
-            ? { kind: 'file', name: n, getFile: () => Promise.resolve(fileOf(v)) }
-            : folder(n, v),
+          isFile(v) ? { kind: 'file', name: n, getFile: () => Promise.resolve(fileOf(v)) } : folder(n, v),
         ];
     },
   } as unknown as FileSystemDirectoryHandle;
@@ -43,7 +48,7 @@ const folderItem = (handle: FileSystemDirectoryHandle) => ({
   webkitGetAsEntry: () => null,
   getAsFile: () => null,
 });
-const fileItem = (name: string, text: string) => ({
+const fileItem = (name: string, text: string | Uint8Array<ArrayBuffer>) => ({
   kind: 'file',
   webkitGetAsEntry: () => null,
   getAsFile: () => ({ name, ...fileOf(text) }),
@@ -61,6 +66,15 @@ function later<T>() {
 const workflows = (files: Tree): Tree => ({ '.github': { workflows: files } });
 const BIG = 'x'.repeat(2.5 * 1024 * 1024);
 const BIG_LEFT_OUT = 'left out .github/workflows/big.yml (2.5 MB); a file may be at most 2 MB';
+
+const CI = '.github/workflows/ci.yml';
+const LATIN1_PATH = '.github/workflows/latin1.yml';
+const utf8 = (text: string): number[] => Array.from(new TextEncoder().encode(text));
+const withBom = (text: string) => new Uint8Array([0xef, 0xbb, 0xbf, ...utf8(text)]);
+/** A workflow saved as Latin-1: its é is no UTF-8. */
+const LATIN1 = new Uint8Array([...utf8('name: caf'), 0xe9, ...utf8('\non: push\n')]);
+const BOM_CRLF_META = { bom: true, eol: 'crlf', utf8: true };
+const LATIN1_META = { bom: false, eol: 'lf', utf8: false };
 
 function setup(persistOf: (kv: ReturnType<typeof memoryStore>) => SourceStore = sourceStore) {
   const store = createSessionStore();
@@ -254,5 +268,85 @@ describe('the sources of a session, at their edges', () => {
     ] as unknown as File[]);
     expect(store.getState().source).toMatchObject({ kind: 'folder', name: 'other' });
     expect(notices().at(-1)).toBe(`other: ${BIG_LEFT_OUT}`);
+  });
+
+  it('keeps what reading found of a copy through the next visit', async () => {
+    const { store, kv, sources } = setup();
+    await sources.chooseFiles([
+      {
+        name: 'ci.yml',
+        webkitRelativePath: 'repo/.github/workflows/ci.yml',
+        ...fileOf(withBom('on: push\r\n')),
+      },
+      { name: 'latin1.yml', webkitRelativePath: 'repo/.github/workflows/latin1.yml', ...fileOf(LATIN1) },
+    ] as unknown as File[]);
+    const meta = { [CI]: BOM_CRLF_META, [LATIN1_PATH]: LATIN1_META };
+    expect(store.getState().files).toMatchObject({ byPath: { [CI]: 'on: push\r\n' }, meta });
+    expect(await kv.get('current')).toMatchObject({ kind: 'copy', meta });
+    const next = setup(() => sourceStore(kv));
+    await next.sources.restore();
+    expect(next.store.getState().files).toEqual({ ...store.getState().files, version: 1 });
+  });
+
+  it('keeps what a drop read of a loose file among the pasted buffers, until a paste replaces it', async () => {
+    const { store, kv, sources } = setup();
+    await sources.drop(dropOf(fileItem('ci.yml', withBom('on: push\r\n'))));
+    sources.paste('', 'on: pull_request\n');
+    expect(store.getState().files.meta).toEqual({
+      [CI]: BOM_CRLF_META,
+      '.github/workflows/pasted.yml': { bom: false, eol: 'lf', utf8: true },
+    });
+    const next = setup(() => sourceStore(kv));
+    await next.sources.restore();
+    expect(next.store.getState().files.meta).toEqual(store.getState().files.meta);
+
+    sources.removeBuffer('.github/workflows/pasted.yml');
+    expect(store.getState().files.meta).toEqual({ [CI]: BOM_CRLF_META });
+    await sources.drop(dropOf(fileItem('latin1.yml', LATIN1)));
+    expect(store.getState().files.meta).toEqual({ [CI]: BOM_CRLF_META, [LATIN1_PATH]: LATIN1_META });
+    sources.paste(CI, 'on: push');
+    expect(store.getState().files.meta).toEqual({
+      [CI]: { bom: false, eol: 'none', utf8: true },
+      [LATIN1_PATH]: LATIN1_META,
+    });
+  });
+
+  it('takes a folder read again whose only change is a BOM as a change', async () => {
+    const { store, sources, notices } = setup();
+    const files = { 'ci.yml': withBom('on: push') as string | Uint8Array<ArrayBuffer> };
+    await sources.drop(dropOf(folderItem(folder('repo', workflows(files)))));
+    expect(store.getState().files.meta).toEqual({ [CI]: { bom: true, eol: 'none', utf8: true } });
+    files['ci.yml'] = 'on: push';
+    await sources.reload();
+    expect(notices()).toEqual([]);
+    expect(store.getState().files).toMatchObject({
+      version: 2,
+      byPath: { [CI]: 'on: push' },
+      meta: { [CI]: { bom: false, eol: 'none', utf8: true } },
+    });
+    await sources.reload();
+    expect(notices()).toEqual(['repo: no changes']);
+  });
+
+  it('reads a stored meta entry that is not one from the file’s text instead', async () => {
+    const { store, kv, sources } = setup();
+    await kv.set('current', {
+      kind: 'copy',
+      name: 'repo',
+      buffers: [
+        { path: CI, text: 'on: push\n' },
+        { path: LATIN1_PATH, text: 'name: caf\uFFFD\non: push\n' },
+      ],
+      meta: { [CI]: { bom: 'yes', eol: 'lf', utf8: true }, [LATIN1_PATH]: LATIN1_META },
+    });
+    await sources.restore();
+    expect(store.getState().files.meta).toEqual({
+      [CI]: { bom: false, eol: 'lf', utf8: true },
+      [LATIN1_PATH]: LATIN1_META,
+    });
+    await kv.set('current', { kind: 'paste', buffers: [{ path: CI, text: 'on: push' }], meta: 'odd' });
+    const next = setup(() => sourceStore(kv));
+    await next.sources.restore();
+    expect(next.store.getState().files.meta).toEqual({ [CI]: { bom: false, eol: 'none', utf8: true } });
   });
 });

@@ -1,3 +1,4 @@
+import { getCronDescription } from '@actions/workflow-parser/model/converter/cron';
 import type { EventsConfig } from '@actions/workflow-parser/model/workflow-template';
 import { compilePattern, matchesPatterns, pathsMatch, refMatches, refSubject } from './filters';
 import type {
@@ -73,6 +74,15 @@ export function skipMarker(message: string): string | undefined {
   if (marker) return marker;
   const trailer = SKIP_TRAILER.exec(message);
   return trailer ? trailer[0] : undefined;
+}
+
+/**
+ * A schedule's cron in words, in GitHub's own wording ("Runs at 06:00, only on Monday"): the workflow-parser's
+ * description, so apps/web, which does not depend on it, gets it through the engine. `undefined` when GitHub would
+ * not accept the cron (wrong field count, a value out of range, `@daily`, a stray space); the parser never throws.
+ */
+export function describeCron(cron: string): string | undefined {
+  return getCronDescription(cron);
 }
 
 function activityGate(scenario: Scenario, config: EventConfig): Gate[] {

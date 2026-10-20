@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import {
   ACTIVITY_TYPES,
+  describeCron,
   matchTrigger,
   parseScenario,
   readSettings,
@@ -217,6 +218,18 @@ describe('skip markers and schedules', () => {
         { kind: 'schedule', crons: ['0 6 * * 1'], cron: '0 0 * * *', matched: false },
       ],
     });
+  });
+
+  it('describes a cron in words, or nothing when GitHub rejects it', () => {
+    expect(describeCron('0 6 * * 1')).toBe('Runs at 06:00, only on Monday');
+    expect(describeCron('*/15 * * * *')).toBe('Runs every 15 minutes');
+    expect(describeCron('30 5,17 * * *')).toBe('Runs at 05:30 and 17:30');
+    expect(describeCron('0 9-17 * * 1-5')).toBe(
+      'Runs every hour, between 09:00 and 17:00, Monday through Friday',
+    );
+    for (const bad of ['', 'not a cron', '* * * *', '61 * * * *', '0 6 * * 7', '@daily', ' 0 6 * * 1']) {
+      expect(describeCron(bad), bad).toBeUndefined();
+    }
   });
 
   it('does not listen to events the workflow lacks', () => {
