@@ -212,6 +212,27 @@ describe('the page key listener', () => {
     stopGestures();
   });
 
+  it('opens the palette with s and Mod+K in edit mode, for a job or a step, not from inside a dialog', () => {
+    const asked: string[] = [];
+    const stopGestures = gestures.register(store, {
+      palette: () => asked.push('palette') > 0,
+    } as unknown as Gestures);
+    const mod = (more: KeyboardEventInit = {}): boolean =>
+      win.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, cancelable: true, ...more }));
+    store.getState().select(CI, 'build.#2');
+    expect(press('s')).toBe(true);
+    expect(mod()).toBe(true);
+    store.getState().setEdit(true);
+    expect(press('s')).toBe(false);
+    expect(mod()).toBe(false);
+    expect(mod({ shiftKey: true })).toBe(true);
+    expect(asked).toEqual(['palette', 'palette']);
+    store.getState().select(CI, undefined);
+    expect(press('s')).toBe(true);
+    expect(mod()).toBe(true);
+    stopGestures();
+  });
+
   it('switches between the graph and the text with t, and has nothing to switch below 1024 px', () => {
     expect(press('t')).toBe(false);
     expect(store.getState().ui.view).toBe('text');

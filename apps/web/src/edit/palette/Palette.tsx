@@ -108,7 +108,8 @@ function insert(store: SessionStore, ui: GestureUi, open: PaletteOpen, entry: En
       uses: entry.uses,
     });
   }
-  const step = entry.kind === 'run' ? { run: '' } : { uses: entry.uses };
+  // A script starts as a plain line, selected in Run: an empty `''` would keep its quotes once the author types.
+  const step = entry.kind === 'run' ? { run: SCRIPT } : { uses: entry.uses };
   const label = `Added ${entry.kind === 'run' ? 'a script' : entry.uses} to ${job}`;
   const result = dispatch(store, { op: 'addStep', file, job, index, step }, { revs, label });
   if (result.ok && result.changed) {
@@ -118,6 +119,9 @@ function insert(store: SessionStore, ui: GestureUi, open: PaletteOpen, entry: En
   }
   return result;
 }
+
+/** The script a new run: step starts with, plain, for the author to type over. */
+const SCRIPT = 'echo hello';
 
 function showProperties(store: SessionStore): void {
   const s = store.getState();

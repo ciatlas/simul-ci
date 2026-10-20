@@ -154,14 +154,20 @@ export function changesKey(event: HistoryKey, s: SessionState & SessionActions):
   return true;
 }
 
-/** Mod+K in edit mode, outside a dialog: the palette, when there is a job to add a step to. */
-export function paletteKey(event: HistoryKey, s: SessionState, store: SessionStore): boolean {
-  const chord = (event.metaKey || event.ctrlKey) && event.shiftKey !== true && !event.altKey;
-  if (!s.edit.on || !chord || event.defaultPrevented || letterOf(event) !== 'k') return false;
-  if (ownedElsewhere(event.target, 'dialog, [role="dialog"]')) return false;
-  if (!s.sel || s.sel.includes('/')) return false;
-  return gestures.ask(store, (g) => g.palette());
+/** Mod+K in edit mode, outside a dialog: the palette, when a job or a step of the focused workflow is selected. */
+function paletteKey(event: HistoryKey, s: SessionState, store: SessionStore): boolean {
+  if (!s.edit.on || !modKey(event, 'k') || ownedElsewhere(event.target, 'dialog, [role="dialog"]'))
+    return false;
+  return Boolean(s.sel) && !s.sel?.includes('/') && gestures.ask(store, (g) => g.palette());
 }
+
+/** Mod and a letter, without Shift or Alt, that nothing handled yet. */
+const modKey = (event: HistoryKey, letter: string): boolean =>
+  (event.metaKey || event.ctrlKey) &&
+  event.shiftKey !== true &&
+  !event.altKey &&
+  !event.defaultPrevented &&
+  letterOf(event) === letter;
 
 /** Runs a command; false when it has nothing to act on, so the key goes on as if unheard. */
 function run(

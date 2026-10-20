@@ -101,8 +101,9 @@ export function Combobox({
         {options.length === 0 ? (
           <p className="px-1.5 py-1 text-muted">{empty}</p>
         ) : (
-          sections(options).map(({ title, items }) => (
-            <Section key={title ?? ''} title={title} id={`${id}-${title ?? ''}`}>
+          sections(options).map(({ title, items }, n) => (
+            // An id of the section's place: a title holds spaces, which aria-labelledby reads as a list of ids.
+            <Section key={title ?? ''} title={title} id={`${id}-section-${n}`}>
               {items.map(({ option, index }) => (
                 <div
                   key={option.key}

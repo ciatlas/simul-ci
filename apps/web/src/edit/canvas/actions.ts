@@ -10,7 +10,7 @@ import { type Gestures, pendingEdges } from '../gestures';
 import { dependentsOf, needsOf, needsTransitively } from '../needs';
 import { type Target, targetOf } from '../selection';
 import { moveStep, removeStep, stepTarget } from '../steps/actions';
-import { type GestureUi, removal } from './ui';
+import { type GestureUi, type PaletteOpen, removal } from './ui';
 
 /**
  * The structural gestures of the canvas and the outline tree (synthesis § 4.2, § 4.5), as ops through the one dispatch
@@ -328,27 +328,43 @@ function openPalette(
   ui: GestureUi,
   at?: { job: string; index: number; change?: boolean },
 ): boolean {
-  const s = store.getState();
-  const file = s.edit.on ? s.focus : undefined;
-  const rev = file === undefined ? undefined : s.files.revs[file];
-  const doc = file === undefined ? undefined : docOf(store, file);
-  if (file === undefined || rev === undefined || !doc) return false;
-  if (at?.change) {
-    const step = stepTarget(store, file, at.job, at.index);
-    if (!step) return false;
-    ui.open({ kind: 'palette', file, rev: step.rev, job: at.job, index: at.index, change: step.step.fp });
-    return true;
-  }
-  if (at) {
-    ui.open({ kind: 'palette', file, rev, job: at.job, index: at.index });
-    return true;
-  }
+  const open = at?.change ? changeAt(store, at) : at ? insertAt(store, at) : afterSelection(store);
+  if (open) ui.open(open);
+  return open !== undefined;
+}
+
+/** The palette for another action of the step at a place: its fingerprint read now. */
+function changeAt(store: SessionStore, at: { job: string; index: number }): PaletteOpen | undefined {
+  const file = workflowAt(store)?.file;
+  const step = file === undefined ? undefined : stepTarget(store, file, at.job, at.index);
+  return (
+    step && {
+      kind: 'palette',
+      file: step.file,
+      rev: step.rev,
+      job: at.job,
+      index: at.index,
+      change: step.step.fp,
+    }
+  );
+}
+
+/** The palette for a step at a place in a job of the focused workflow. */
+function insertAt(store: SessionStore, at: { job: string; index: number }): PaletteOpen | undefined {
+  const wf = workflowAt(store);
+  return wf && { kind: 'palette', file: wf.file, rev: wf.rev, job: at.job, index: at.index };
+}
+
+/** The palette for a step after the selected one, else last in the selected job. */
+function afterSelection(store: SessionStore): PaletteOpen | undefined {
   const target = selected(store);
-  if (target?.job === undefined) return false;
-  const count = doc.jobs().find((j) => j.id === target.job)?.steps.length ?? 0;
+  if (target?.job === undefined) return undefined;
+  const count =
+    docOf(store, target.file)
+      ?.jobs()
+      .find((j) => j.id === target.job)?.steps.length ?? 0;
   const index = target.step ? target.step.index + 1 : count;
-  ui.open({ kind: 'palette', file, rev: target.rev, job: target.job, index });
-  return true;
+  return { kind: 'palette', file: target.file, rev: target.rev, job: target.job, index };
 }
 
 /** What it needs, under the selected job's card (a leg's or a step's job). */

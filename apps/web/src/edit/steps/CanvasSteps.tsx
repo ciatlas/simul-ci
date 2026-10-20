@@ -1,9 +1,7 @@
 import type { NodeId } from '@simulci/engine';
-import type { MouseEvent } from 'react';
 import { useApp } from '../../app/providers';
-import { listRows } from '../../graph/card';
-import { Mark, MARK_LABEL } from '../../graph/Mark';
-import { CARD, type JobModel } from '../../graph/types';
+import { type RowEdit, StepList } from '../../graph/nodes/StepList';
+import type { JobModel, StepMark } from '../../graph/types';
 import { planIndex, selectionOf } from '../../plan/index';
 import type { SessionStore } from '../../state/store';
 import { hostUi } from '../canvas/ui';
@@ -13,7 +11,7 @@ import { moveStep } from './actions';
 import { DragHandle, InsertGap, useStepDrag } from './rows';
 
 /**
- * The open step list of a card of the workflow being edited (synthesis § 4.5): the read-only list's rows, the job's own
+ * The open step list of a card of the workflow being edited (synthesis § 4.5): the read-only list, the job's own
  * steps with a handle to drag them to another place and + between them for the palette; a composite action's inner
  * steps stay as they are. The rows are the plan's, so each gesture reads its step with `planned`: while the plan lags
  * the text, a step known only by its position is refused rather than mistaken for another. Rows are not tab stops:
@@ -29,7 +27,6 @@ export function CanvasSteps({
   onPick: (step: NodeId) => void;
 }) {
   const { store } = useApp();
-  const { rows, more } = listRows(job.steps);
   const own = job.steps.map((s) => s.id);
   const move = (from: number, to: number): void => {
     const step = rowTarget(store, own[from]);
@@ -43,41 +40,21 @@ export function CanvasSteps({
       gestures.of(store)?.palette({ job: job.jobId, index: before === 0 ? 0 : index + 1 });
   };
   const drag = useStepDrag(move);
-  return (
-    <ul className="sc-list sc-list-edit" aria-label={`${rows.length + more} steps`}>
-      {rows.map(({ step, depth }) => {
-        const at = depth === 0 ? own.indexOf(step.id) : -1;
-        const pick = (e: MouseEvent): void => {
-          e.stopPropagation();
-          onPick(step.id);
-        };
-        return (
-          <li
-            key={step.id}
-            data-step={step.id}
-            data-selected={step.id === selected ? 'true' : undefined}
-            style={{ height: CARD.listRow, paddingLeft: depth * 12 }}
-            onClick={pick}
-            {...(at >= 0 ? drag.target(at) : {})}
-          >
-            {at >= 0 && <DragHandle {...drag.handle(at)} />}
-            {at >= 0 && <InsertGap label={`Add a step before ${step.label}`} onInsert={() => insert(at)} />}
-            {at === own.length - 1 && (
-              <InsertGap after label={`Add a step after ${step.label}`} onInsert={() => insert(own.length)} />
-            )}
-            <Mark verdict={step.verdict} title={MARK_LABEL[step.verdict]} />
-            <span className="sc-list-label">{step.label}</span>
-            {step.outputs && <span className="sc-list-outputs font-mono">{step.outputs}</span>}
-          </li>
-        );
-      })}
-      {more > 0 && (
-        <li className="sc-list-more" style={{ height: CARD.listRow }}>
-          +{more}
-        </li>
-      )}
-    </ul>
-  );
+  const edit = (step: StepMark, depth: number): RowEdit | undefined => {
+    const at = depth === 0 ? own.indexOf(step.id) : -1;
+    if (at < 0) return undefined;
+    const controls = (
+      <>
+        <DragHandle {...drag.handle(at)} />
+        <InsertGap label={`Add a step before ${step.label}`} onInsert={() => insert(at)} />
+        {at === own.length - 1 && (
+          <InsertGap after label={`Add a step after ${step.label}`} onInsert={() => insert(own.length)} />
+        )}
+      </>
+    );
+    return { attrs: drag.target(at), controls };
+  };
+  return <StepList steps={job.steps} selected={selected} onPick={onPick} edit={edit} />;
 }
 
 /** A row's step in the text now, read as the plan names it. */
