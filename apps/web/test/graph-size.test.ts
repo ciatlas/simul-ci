@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { canvasMetrics, loadedMetrics, tableMetrics } from '../src/graph/metrics';
-import { calleeOffset, cardSize, gridCells, legGrid, stripRows } from '../src/graph/size';
-import { CARD, type JobModel, type StepMark } from '../src/graph/types';
+import { calleeOffset, callFrame, cardSize, gridCells, legGrid, stripRows } from '../src/graph/size';
+import { CARD, type JobModel, type Metrics, type StepMark } from '../src/graph/types';
 
 const step = (id: string, inner: StepMark[] = []): StepMark => ({ id, label: id, verdict: 'yes', inner });
 const steps = (n: number): StepMark[] => Array.from({ length: n }, (_, i) => step(`s${i}`));
@@ -61,6 +61,20 @@ describe('a card', () => {
     // 28 + 20 characters at 7 px + 24
     expect(cardSize(job({ label: 'a'.repeat(20) }), tableMetrics).width).toBe(192);
     expect(cardSize(job({ label: 'a'.repeat(60) }), tableMetrics).width).toBe(CARD.maxWidth);
+  });
+
+  it('rounds its title up to a whole 8 px step, never into the title, so a label within a step keeps its size', () => {
+    const metrics: Metrics = { width: (text) => 3 * text.length };
+    const width = (n: number) => cardSize(job({ label: 'a'.repeat(n) }), metrics).width;
+    // 28 + 3 px a character + 24: 40 characters are 172 px and 41 are 175, both 176; 42 are 178, a step on.
+    expect([width(40), width(41), width(42)]).toEqual([176, 176, 184]);
+    expect(callFrame(job({ label: 'a'.repeat(41) }), metrics).min.width).toBe(176);
+    for (let n = 0; n <= 120; n++) {
+      const title = 28 + 3 * n + 24;
+      expect(width(n) % 8, `${n} characters`).toBe(0);
+      expect(width(n), `${n} characters`).toBeGreaterThanOrEqual(Math.min(title, CARD.maxWidth));
+      expect(width(n), `${n} characters`).toBeLessThan(Math.max(title + 8, CARD.minWidth + 1));
+    }
   });
 
   it('grows a strip row per 26 marks, and the open list a row per step and inner step up to 40 and "+n"', () => {

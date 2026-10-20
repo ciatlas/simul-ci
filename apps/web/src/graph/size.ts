@@ -9,8 +9,9 @@ import {
 } from './types';
 
 /**
- * Card sizes from labels and counts, never from verdicts, so a recolour never moves a card. A card is, top to
- * bottom: the header, the subline, the strip of step marks, the leg grid, the open step list and the padding; a call
+ * Card sizes from labels and counts, never from verdicts, so a recolour never moves a card. A title's width goes up
+ * in steps of 8 px, so a label typed or renamed within a step keeps the card's size, and with it the layout cached
+ * for that size. A card is, top to bottom: the header, the subline, the strip of step marks, the leg grid, the open step list and the padding; a call
  * job's card then holds its callee, inset by `callPadding` on the left, the right and below.
  *
  * A skipped job has no legs and no steps in the plan, so the room is kept from what does not depend on the verdict:
@@ -22,6 +23,8 @@ import {
 /** Room in the header besides the title: the mark and its gap before it, the badges after it. */
 const TITLE_LEAD = 28;
 const TITLE_TRAIL = 24;
+/** The step a header's width goes up in: the narrowest and the widest card are whole steps. */
+const TITLE_STEP = 8;
 const VALUE_CELL: Size = { width: 72, height: 20 };
 const INDEX_CELL: Size = { width: 26, height: 18 };
 /** Cells show the values up to this many legs, a mark and an index above it. */
@@ -59,7 +62,7 @@ export function cardSize(job: JobModel, metrics: Metrics, callee?: Size): Size {
  * layout worker applies the same rule to a callee it lays out in the same request.
  */
 export function callFrame(job: JobModel, metrics: Metrics): { min: Size; extra: Size } {
-  const title = TITLE_LEAD + metrics.width(job.label, 'title') + TITLE_TRAIL;
+  const title = stepUp(TITLE_LEAD + metrics.width(job.label, 'title') + TITLE_TRAIL);
   const cells = gridCells(job);
   const grid = cells > 0 ? legGrid(cells).width + 2 * CARD.padding : 0;
   const width = Math.max(clamp(title, CARD.minWidth, CARD.maxWidth), grid);
@@ -105,3 +108,6 @@ function listHeight(steps: readonly StepMark[]): number {
 const rows = (steps: readonly StepMark[]): number => steps.reduce((n, s) => n + 1 + rows(s.inner), 0);
 
 const clamp = (n: number, min: number, max: number): number => Math.min(max, Math.max(min, n));
+
+/** The width rounded up to the next whole title step, so it never cuts into the title. */
+const stepUp = (width: number): number => Math.ceil(width / TITLE_STEP) * TITLE_STEP;
