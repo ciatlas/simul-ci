@@ -5,6 +5,8 @@
  * job's text, so the engine's leg selector is not the document's to say. The document zone may not import the
  * engine, so the parity lives here, where both are the web app's.
  */
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { loadFiles, simulate } from '@simulci/engine';
 import { unitPaths } from '@simulci/engine/plan';
 import { unitPathAt, WorkflowDocument, yamlPathOf } from '@simulci/document';
@@ -32,14 +34,41 @@ jobs:
 `,
 };
 
+const ROOT = join(import.meta.dirname, '../../..');
+
+/** A checkout's workflows and actions by repository path, as the folder walk reads them. */
+function checkout(dir: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  const walk = (at: string): void => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const path = join(at, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.ya?ml$/.test(entry.name)) files[relative(dir, path)] = readFileSync(path, 'utf8');
+    }
+  };
+  for (const sub of ['.github/workflows', '.github/actions'])
+    if (existsSync(join(dir, sub))) walk(join(dir, sub));
+  return files;
+}
+
+/** The samples, a file of every step shape, the routes lab and simulci's own workflows (the corpus of § 2.9). */
+const CORPUS = [
+  ...SAMPLES.map((s) => [s.name, s.files] as const),
+  ['steps', EXTRA] as const,
+  ['routes lab', checkout(join(ROOT, 'fixtures/routes-lab/repo'))] as const,
+  ['simulci', checkout(ROOT)] as const,
+];
+
 describe('unit paths, in the document and in the engine', () => {
-  for (const [name, files] of [...SAMPLES.map((s) => [s.name, s.files] as const), ['steps', EXTRA] as const])
+  for (const [name, files] of CORPUS)
     it(`agree on every job and step of the ${name} files`, () => {
       const loaded = loadFiles(files);
       const plan = simulate({
         project: loaded,
         scenario: { event: 'push', branch: 'main' },
         detail: 'steps',
+        // The jobs of a workflow push does not trigger are planned too, so every job is compared.
+        planUntriggered: Object.keys(files).filter((p) => p.startsWith('.github/workflows/')),
       });
       let compared = 0;
       for (const wf of plan.workflows.filter((w) => w.depth === 0)) {

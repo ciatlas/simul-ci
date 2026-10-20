@@ -5,6 +5,7 @@
 export { WorkflowDocument, PARSE_OPTIONS, unitPathAt, yamlPathOf } from './document';
 export type { OpenOptions, Status, YamlProblem } from './document';
 export type { AnchorDef, AnchorIndex, AliasUse, MergeKey } from './anchors';
+export { composeEdits } from './compose';
 export type { TextEdit } from './edits';
 export type { InsertOptions } from './insert';
 export type { JobInfo, NodeInfo, StepInfo } from './paths';
@@ -12,7 +13,7 @@ export { freeId, ID, sameId, stepIdFor } from './ops/ids';
 export { ORDER, orderFor } from './ops/order';
 export { planOp } from './ops/plan';
 export { fingerprint } from './ops/steps';
-export { caseFileText } from './ops/cases';
+export { caseFileText, kindOf } from './ops/cases';
 export type {
   CaseJson,
   DispatchInput,

@@ -8,7 +8,9 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
  * edit that stops the workflow from being triggered keeps its jobs on the canvas, dimmed under a banner; a
  * CRLF file with a BOM edited by one character downloads with exactly that character changed, its BOM and its CRLF
  * kept; a generated file refuses edits until the author unlocks it; an edit survives a reload; opening another
- * source while a file has unsaved edits asks first; and the status line says what an edit changed, with Details.
+ * source while a file has unsaved edits asks first; and the status line says what an edit changed, with Details. The
+ * edit runtime (the `edit-*` chunk, synthesis § 2.1) is fetched when the author turns edit mode on, or on idle once
+ * dropped files have a plan, and not for a sample looked at.
  */
 
 const CI = '.github/workflows/ci.yml';
@@ -277,4 +279,35 @@ test('opening a sample or pasting over a file with unsaved edits asks first: Can
   await sample.selectOption('monorepo');
   await dialog.getByRole('button', { name: 'Discard edits' }).click();
   await expect(page.getByRole('navigation', { name: 'Source' })).toContainText('sample: monorepo');
+});
+
+/** The edit runtime's chunk, each time the page asks the server for it. */
+function editFetches(page: Page): string[] {
+  const fetched: string[] = [];
+  page.on('request', (request) => {
+    if (/\/assets\/edit-[\w-]+\.js$/.test(new URL(request.url()).pathname)) fetched.push(request.url());
+  });
+  return fetched;
+}
+
+test('a sample looked at fetches no edit runtime; turning edit mode on fetches it once', async ({ page }) => {
+  const fetched = editFetches(page);
+  await openStarter(page);
+  // Past the idle callback's timeout: a folder or dropped files would have fetched it by now.
+  await page.waitForTimeout(2500);
+  expect(fetched).toEqual([]);
+  await page.getByRole('switch', { name: /^Edit/ }).click();
+  await expect.poll(() => fetched.length).toBe(1);
+  await page.getByRole('switch', { name: /^Edit/ }).click();
+  await page.getByRole('switch', { name: /^Edit/ }).click();
+  await page.waitForTimeout(300);
+  expect(fetched).toHaveLength(1);
+});
+
+test('dropped files fetch the edit runtime on idle once their plan is on screen', async ({ page }) => {
+  const fetched = editFetches(page);
+  await page.goto('/');
+  await dropFiles(page, { 'ci.yml': bytesOf(STARTER_CI) });
+  await expect(jobNode(page, 'deploy')).toBeVisible();
+  await expect.poll(() => fetched.length, { timeout: 5000 }).toBe(1);
 });

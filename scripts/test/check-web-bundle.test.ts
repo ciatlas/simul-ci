@@ -99,7 +99,30 @@ describe('the chunk rules', () => {
     expect(chunkProblems('YamlPane-abc.js', pane)).toEqual([]);
     const yaml = '../../../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/index.js';
     expect(chunkProblems('index-abc.js', [...PAGE, yaml])).toEqual([
-      `index-abc.js holds ${yaml}, which only the engine worker may`,
+      `index-abc.js holds ${yaml}, which only the engine worker and the edit runtime may`,
+    ]);
+    expect(chunkProblems('YamlPane-abc.js', [...pane, yaml])).toHaveLength(1);
+    expect(chunkProblems('layout.worker-abc.js', [...LAYOUT, yaml])).toEqual([
+      `layout.worker-abc.js holds ${yaml}, which only the engine worker may`,
+    ]);
+  });
+
+  it('let the edit runtime hold the YAML parser and the whole document model, and nothing else the page may not', () => {
+    const yaml = '../../../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/composer.js';
+    const document = '../../../../packages/document/src/document.ts';
+    const edit = ['../../src/edit/edit.ts', '../../src/edit/dispatch.ts', document, yaml];
+    expect(chunkProblems('edit-abc.js', edit)).toEqual([]);
+    expect(chunkProblems('YamlPane-abc.js', [document])).toEqual([
+      `YamlPane-abc.js holds ${document}: the page may use only @simulci/document/edits`,
+    ]);
+    const core =
+      '../../../../node_modules/.pnpm/@ciatlas+core@x/node_modules/@ciatlas/core/src/project-browser.ts';
+    const push = '../../../../packages/engine/src/trigger/push.ts';
+    expect(chunkProblems('edit-abc.js', [...edit, core, ZOD, ELKJS, push])).toEqual([
+      `edit-abc.js holds ${core}, which only the engine worker may`,
+      `edit-abc.js holds ${ZOD}, which only the engine worker may`,
+      `edit-abc.js holds ${ELKJS}, which only the layout worker may`,
+      `edit-abc.js holds ${push}: the page may use only plan/ and render/`,
     ]);
   });
 
@@ -118,6 +141,57 @@ describe('the chunk rules', () => {
     expect(chunkProblems('layout.worker-abc.js', LAYOUT.slice(0, 2))).toEqual([
       'layout.worker-abc.js holds no elkjs, so nothing lays the graph out',
     ]);
+  });
+});
+
+describe('the web app as it builds', () => {
+  let dir = '';
+  let chunks: string[] = [];
+  const sourcesOf = (chunk: string): string[] =>
+    JSON.parse(readFileSync(join(dir, 'assets', `${chunk}.map`), 'utf8')).sources;
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'simulci-web-app-'));
+    const vite = await import(pathToFileURL(createRequire(join(web, 'package.json')).resolve('vite')).href);
+    const env = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      await vite.build({
+        root: web,
+        configFile: join(web, 'vite.config.ts'),
+        logLevel: 'silent',
+        build: { outDir: dir, emptyOutDir: true },
+      });
+    } finally {
+      process.env.NODE_ENV = env;
+    }
+    chunks = readdirSync(join(dir, 'assets')).filter((f) => f.endsWith('.js'));
+  }, 60_000);
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('splits the page, the YAML pane, the edit runtime and the two workers, and no chunk they share', () => {
+    // A module two lazy chunks share that the page does not hold goes to a chunk of its own, named after it; so does
+    // the page's when rolldown cannot leave it there: a name outside this list is that.
+    expect(chunks.map((f) => f.replace(/-[\w-]{8}\.js$/, '')).sort()).toEqual([
+      'YamlPane',
+      'edit',
+      'engine.worker',
+      'index',
+      'layout.worker',
+    ]);
+    for (const chunk of chunks) expect(chunkProblems(chunk, sourcesOf(chunk))).toEqual([]);
+  });
+
+  it('puts the YAML parser and the document model in the edit runtime, and the page loads it only on demand', () => {
+    const edit = chunks.find((f) => f.startsWith('edit-'))!;
+    const sources = sourcesOf(edit);
+    expect(sources.some((s) => s.includes('/node_modules/yaml/'))).toBe(true);
+    expect(sources.some((s) => s.endsWith('packages/document/src/document.ts'))).toBe(true);
+    expect(sources.some((s) => s.endsWith('src/edit/dispatch.ts'))).toBe(true);
+    const page = chunks.find((f) => f.startsWith('index-'))!;
+    const code = readFileSync(join(dir, 'assets', page), 'utf8');
+    expect(code).toContain(`import(\`./${edit}\`)`);
+    expect(code).not.toMatch(new RegExp(`from\\s*["'\`]\\./${edit.replace('.', '\\.')}`));
   });
 });
 

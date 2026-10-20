@@ -2,7 +2,15 @@
 import { ACTIVITY_TYPES, type LoadedProject, readSettings, type WorkflowSettings } from '@simulci/engine';
 import { isMap, isScalar, isSeq, LineCounter, parseDocument } from 'yaml';
 import type { EventLines, FileCache, OnLines } from './cache';
-import type { Outline, OutlineEvent, OutlineFile, OutlineJob, OutlineWorkflow } from './protocol';
+import type {
+  Outline,
+  OutlineAction,
+  OutlineEvent,
+  OutlineFile,
+  OutlineInput,
+  OutlineJob,
+  OutlineWorkflow,
+} from './protocol';
 
 /**
  * The Outline of a loaded project: what the form, the tree and the pane need to know, from core's declarations. What
@@ -31,25 +39,56 @@ export function outlineOf(loaded: LoadedProject, cache: FileCache): Outline {
       };
       if (wf.name !== undefined) out.name = wf.name;
       if (wf.generated !== undefined) out.generated = wf.generated;
-      if (wf.dispatch) {
-        out.dispatch = Object.values(wf.dispatch.inputs).map((i) => {
-          const input: NonNullable<OutlineWorkflow['dispatch']>[number] = {
-            name: i.name,
-            required: i.required,
-          };
-          if (i.type !== undefined) input.type = i.type;
-          if (i.default !== undefined) input.default = i.default;
-          if (i.options) input.options = i.options;
-          if (i.description !== undefined) input.description = i.description;
-          return input;
-        });
-      }
+      if (wf.dispatch) out.dispatch = Object.values(wf.dispatch.inputs).map(inputOf);
+      if (wf.call)
+        out.call = {
+          inputs: Object.values(wf.call.inputs).map(inputOf),
+          outputs: Object.keys(wf.call.outputs),
+          secrets: Object.keys(wf.call.secrets),
+        };
       return out;
     });
   const events: Outline['events'] = {};
   for (const wf of workflows)
     for (const e of wf.events) if (ACTIVITY_TYPES[e.event]) events[e.event] = ACTIVITY_TYPES[e.event]!;
-  return { files, workflows, events };
+  const actions = actionsOf(loaded);
+  return actions.length > 0 ? { files, workflows, events, actions } : { files, workflows, events };
+}
+
+type InputDecl = NonNullable<
+  LoadedProject['index']['project']['workflows'] extends Map<string, infer W>
+    ? W extends { dispatch?: { inputs: Record<string, infer I> } }
+      ? I
+      : never
+    : never
+>;
+
+/** An input of a dispatch, a call or an action, as the form and Properties show it. */
+function inputOf(i: InputDecl): OutlineInput {
+  const input: OutlineInput = { name: i.name, required: i.required };
+  if (i.type !== undefined) input.type = i.type;
+  if (i.default !== undefined) input.default = i.default;
+  if (i.options) input.options = i.options;
+  if (i.description !== undefined) input.description = i.description;
+  return input;
+}
+
+/** The local actions the project loaded, from core's declarations: what Properties offers as a step's `with:`. */
+function actionsOf(loaded: LoadedProject): OutlineAction[] {
+  return [...loaded.index.project.actions.values()]
+    .filter((a) => a.external === undefined)
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map((a) => {
+      const action: OutlineAction = {
+        dir: a.path,
+        file: a.file,
+        inputs: Object.values(a.inputs).map(inputOf),
+        outputs: Object.keys(a.outputs),
+      };
+      if (a.name !== undefined) action.name = a.name;
+      if (a.using !== undefined) action.using = a.using;
+      return action;
+    });
 }
 
 const FILTERS: [keyof OutlineEvent, string][] = [
@@ -132,6 +171,8 @@ function jobOf(
   };
   if (job.name !== undefined) out.name = job.name;
   if (job.uses) out.uses = job.uses.raw;
+  const outputs = Object.keys(job.outputs);
+  if (outputs.length > 0) out.outputs = outputs;
   return out;
 }
 
