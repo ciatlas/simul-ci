@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSaver } from '../src/app/saver';
 import { readFolder } from '../src/input/folder';
 import { textMeta } from '../src/input/read';
-import { type Choices, diskStamp, type DiskConflict } from '../src/input/save';
+import type { Choices, DiskConflict } from '../src/input/save';
 import { createSources } from '../src/input/sources';
 import { memoryStore } from '../src/lib/idb';
 import { sourceStore } from '../src/state/persist';
@@ -124,8 +124,9 @@ describe('the three-way reload', () => {
       },
       take: ['t'],
       conflicts: [conflict('a'), conflict('b'), conflict('c')],
+      from: { a: 'm\n', b: 'm\n', c: 'm\n', t: 'a\n' },
     };
-    const stamp = diskStamp({ text: 'd\n', meta });
+    const stamp = '';
     const choices: Choices = {
       a: { choice: 'disk', stamp },
       b: { choice: 'mine', stamp },
@@ -134,6 +135,7 @@ describe('the three-way reload', () => {
     expect(settledReload(plan, choices)).toEqual({
       disk: { a: { text: 'd\n', meta }, b: { text: 'd\n', meta }, t: { text: 'd\n', meta } },
       take: ['t', 'a'],
+      from: { a: 'm\n', b: 'm\n', c: 'm\n', t: 'a\n' },
     });
   });
 });
@@ -223,7 +225,7 @@ describe('Reload from disk', () => {
     }
     const reloading = sources.reload();
     const conflicts = await asked(store);
-    const stamp = (c: DiskConflict) => diskStamp(c.disk);
+    const stamp = (c: DiskConflict) => c.stamp ?? '';
     const [ci, deploy, lint] = conflicts;
     saver.answer({
       [CI]: { choice: 'mine', stamp: stamp(ci!) },

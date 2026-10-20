@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { type Choice, type DiskConflict, diskStamp, failure, type FileOutcome } from '../input/save';
+import { type Choice, type DiskConflict, failure, type FileOutcome } from '../input/save';
 import { fileLabel } from '../lib/file-label';
 import { downloadOne, downloadPatch } from '../state/changes';
 import { dirtyPaths, type Saving, type Settling } from '../state/store';
@@ -131,13 +131,14 @@ function ConflictsDialog({ settling }: { settling: Settling }) {
   const dialog = useModal(cancel);
   const { conflicts, mode } = settling;
   const ready = conflicts.every((c) => chosen[c.path]);
-  const go = (): void =>
+  // The answer, then the dialog closes, which gives the focus back to where it was (the pane, a field).
+  const go = (): void => {
     saver.answer(
-      Object.fromEntries(
-        conflicts.map((c) => [c.path, { choice: chosen[c.path]!, stamp: diskStamp(c.disk) }]),
-      ),
+      Object.fromEntries(conflicts.map((c) => [c.path, { choice: chosen[c.path]!, stamp: c.stamp ?? '-' }])),
       settling.seq,
     );
+    dialog.current?.close();
+  };
   return (
     <dialog
       ref={dialog}
@@ -237,7 +238,10 @@ const STATUS: Record<FileOutcome['status'], string> = {
   'not-attempted': 'not attempted',
   skipped: 'skipped',
   conflict: 'changed on disk, not written',
-  kept: 'removed here, still in the folder: a save deletes nothing',
+  disk: 'kept the disk version',
+  encoding: 'not UTF-8, never written',
+  kept: 'removed here, not from the folder: a save deletes nothing',
+  gone: 'removed here and from the folder',
 };
 
 const statusOf = (f: FileOutcome): string =>
@@ -295,7 +299,11 @@ function ReportDialog({ saving }: { saving: Extract<Saving, { status: 'done' }> 
             type="button"
             className={primary}
             disabled={unsaved === 0}
-            onClick={() => void saver.save()}
+            onClick={() => {
+              // The save first, while the click's activation lasts; closing gives the focus back.
+              void saver.save();
+              dialog.current?.close();
+            }}
           >
             Retry
           </button>

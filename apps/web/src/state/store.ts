@@ -156,6 +156,12 @@ export interface SessionState {
     /** Per file, its text when the epoch began. */
     opened: Record<string, string>;
     /**
+     * Per file whose text was once read from bytes that are not UTF-8 within the epoch, the stamps (`stampOf`) of those
+     * texts: whenever the history brings one of them back, the file is not UTF-8 again, and whenever it leaves them, it
+     * is. Undoing a reload or a "Keep the disk version" that changed a file's encoding gives back the encoding too.
+     */
+    lenient?: Record<string, string[]>;
+    /**
      * The edits of the last commit of the history, per file, with each file's rev before it: a view that shows the
      * text of that rev maps the edits instead of comparing texts (`yaml/bridge.ts`).
      */
@@ -408,20 +414,23 @@ export interface SessionActions {
   /** The replace prompt shows, or goes. */
   setReplacing: (replacing: Replacing | undefined) => void;
   /**
-   * Files saved to the folder of `epoch`: each one's base becomes the text written, so it is no longer unsaved unless
-   * it changed since. The history and the texts stay; files of another epoch are not these, and nothing moves.
+   * Files saved to the folder of `epoch`: each one's base becomes the text written (`null`: the folder has no such
+   * file, as here), so it is no longer unsaved unless it changed since. The history and the texts stay; files of
+   * another epoch are not these, and nothing moves.
    */
-  saved: (epoch: number, texts: Readonly<Record<string, string>>) => void;
+  saved: (epoch: number, texts: Readonly<Record<string, string | null>>) => void;
   /**
    * The folder's files, as a save's conflict or a reload read them, become the base of their paths (`null`: not in
    * the folder), with their BOM; the paths in `take` also take the folder's text, as one undoable `disk` transaction
-   * (§ 5.4, § 5.7). Nothing happens for files of another epoch, or when the transaction is refused.
+   * (§ 5.4, § 5.7), planned over the texts `from` gives (`null`: no file), else over the texts now. Nothing happens for
+   * files of another epoch, or when the transaction is refused: a text that moved since it was planned over.
    */
   fromDisk: (
     epoch: number,
     label: string,
     disk: Readonly<Record<string, DiskFile | null>>,
     take: readonly string[],
+    from?: Readonly<Record<string, string | null>>,
   ) => EditOutcome;
   setSaving: (saving: Saving | undefined) => void;
   setSettling: (settling: Settling | undefined) => void;
@@ -547,16 +556,32 @@ function restoreOf(s: SessionState, conflict: RestoreConflict): history.TxInput 
 /** Per path whose text is not its base: the base, or `null` when it has none (a file created since). */
 export type BaseDiff = Record<string, string | null>;
 
-/** The transaction that gives each path of `take` the folder's text: a region edit, a creation or a removal. */
+/** The files with each saved path's base moved to the text written, or gone where the folder has no file. */
+function savedFiles(
+  files: SessionState['files'],
+  texts: Readonly<Record<string, string | null>>,
+): SessionState['files'] {
+  const base = { ...files.base };
+  for (const [path, text] of Object.entries(texts))
+    if (text === null) delete base[path];
+    else base[path] = text;
+  return { ...files, base };
+}
+
+/**
+ * The transaction that gives each path of `take` the folder's text: a region edit, a creation or a removal, each over
+ * the text it was planned over, so a text that moved since refuses it.
+ */
 function diskTx(
   byPath: Record<string, string>,
   label: string,
   disk: Readonly<Record<string, DiskFile | null>>,
   take: readonly string[],
+  from: Readonly<Record<string, string | null>> = {},
 ): history.TxInput {
   const files: history.TxFile[] = [];
   for (const path of take) {
-    const now = byPath[path];
+    const now = Object.hasOwn(from, path) ? (from[path] ?? undefined) : byPath[path];
     const then = disk[path]?.text;
     if (now === then) continue;
     if (then === undefined) files.push({ path, edits: [], remove: true, expect: history.stampOf(now!) });
@@ -575,6 +600,7 @@ function rebased(
   files: SessionState['files'],
   disk: Readonly<Record<string, DiskFile | null>>,
   take: ReadonlySet<string>,
+  lenient: Readonly<Record<string, string[]>>,
 ): SessionState['files'] {
   const base = { ...files.base };
   const meta = { ...files.meta };
@@ -587,8 +613,39 @@ function rebased(
     const own = meta[path];
     meta[path] = take.has(path) || !own ? d.meta : { ...own, bom: d.meta.bom };
   }
-  return { ...files, base, meta };
+  return { ...files, base, meta, ...withLenient(files.lenient, lenient) };
 }
+
+/**
+ * The texts a disk take involves that were read from bytes that are not UTF-8: the text it replaces and the text it
+ * takes, so an undo or a redo across it brings the encoding back with the text.
+ */
+function lenientOf(
+  files: SessionState['files'],
+  disk: Readonly<Record<string, DiskFile | null>>,
+  take: readonly string[],
+): Record<string, string[]> {
+  const found: Record<string, string[]> = {};
+  for (const path of take) {
+    const stamps: string[] = [];
+    const now = files.byPath[path];
+    if (now !== undefined && files.meta[path]?.utf8 === false) stamps.push(history.stampOf(now));
+    const d = disk[path];
+    if (d && !d.meta.utf8) stamps.push(history.stampOf(d.text));
+    if (stamps.length > 0) found[path] = stamps;
+  }
+  return found;
+}
+
+const withLenient = (
+  known: Readonly<Record<string, string[]>> | undefined,
+  more: Readonly<Record<string, string[]>>,
+): Pick<SessionState['files'], 'lenient'> => {
+  if (Object.keys(more).length === 0) return known ? { lenient: known } : {};
+  const lenient = { ...known };
+  for (const [path, stamps] of Object.entries(more)) lenient[path] = [...(lenient[path] ?? []), ...stamps];
+  return { lenient };
+};
 
 /**
  * The files whose text is not what was read or last saved: edited, created since, or removed since. A selector, never
@@ -816,19 +873,18 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       },
       setReplacing: (replacing) => set({ replacing }),
       saved: (epoch, texts) =>
-        set((s) =>
-          s.files.epoch === epoch ? { files: { ...s.files, base: { ...s.files.base, ...texts } } } : s,
-        ),
-      fromDisk: (epoch, label, disk, take) => {
+        set((s) => (s.files.epoch === epoch ? { files: savedFiles(s.files, texts) } : s)),
+      fromDisk: (epoch, label, disk, take, from) => {
         const s = get();
         if (s.files.epoch !== epoch) return { ok: false };
-        const input = diskTx(s.files.byPath, label, disk, take);
+        const input = diskTx(s.files.byPath, label, disk, take, from);
+        const lenient = lenientOf(s.files, disk, take);
         return commit(
           (now) => history.transact(now.edit, now.files.byPath, input, contextOf(now)),
           () => ({ label }),
           undefined,
           undefined,
-          (files) => rebased(files, disk, new Set(take)),
+          (files) => rebased(files, disk, new Set(take), lenient),
         );
       },
       setSaving: (saving) => set({ saving }),
@@ -1102,12 +1158,19 @@ export function withTexts(
     }
     files.byPath[path] = text;
     const meta = files.meta[path];
-    files.meta[path] = meta ? withEol(meta, text) : textMeta(text);
+    files.meta[path] = encodingOf(meta ? withEol(meta, text) : textMeta(text), files.lenient?.[path], text);
     files.revs[path] = version;
   }
   // Only a project file's text is in the plan; a test file (C10) leaves it current.
   const planned = changed.some(([path]) => isProjectFile(path));
   return { files, stale: s.plan === undefined ? false : planned ? 'edit' : s.stale };
+}
+
+/** A file's meta for its new text as to its encoding: not UTF-8 exactly while the text is one read from such bytes. */
+function encodingOf(meta: FileMeta, lenient: readonly string[] | undefined, text: string): FileMeta {
+  if (!lenient) return meta;
+  const utf8 = !lenient.includes(history.stampOf(text));
+  return utf8 === meta.utf8 ? meta : { ...meta, utf8 };
 }
 
 /** A file's meta for its new text: its line endings as the text has them, the ones it had while it has no break. */

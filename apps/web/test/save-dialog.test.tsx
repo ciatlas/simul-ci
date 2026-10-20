@@ -8,7 +8,7 @@ import { createReplacePrompt } from '../src/app/replace';
 import { ReplacePrompt } from '../src/app/ReplaceDialog';
 import { SaveButton, SaveDialogs, SaveLine } from '../src/app/SaveDialog';
 import { COPY_NOTE, createSaver, type Saver } from '../src/app/saver';
-import { type Choices, diskStamp, type DiskConflict } from '../src/input/save';
+import type { Choices, DiskConflict } from '../src/input/save';
 import type { ReplaceChoice } from '../src/input/sources';
 import { createSessionStore, type SessionStore } from '../src/state/store';
 import { fakeFolder } from './fake-folder';
@@ -115,6 +115,7 @@ describe('the conflicts dialog', () => {
       base: 'on: push\n',
       mine: '#on: push\n',
       disk: { text: 'on: pull_request\n', meta: { bom: false, eol: 'lf', utf8: true } },
+      stamp: 'abc',
     },
     { path: RELEASE, reason: 'deleted-on-disk', base: 'on: release\n', mine: '#on: release\n' },
   ];
@@ -147,7 +148,7 @@ describe('the conflicts dialog', () => {
     expect(go.disabled).toBe(false);
     await userEvent.click(go);
     expect(await answer).toEqual({
-      [CI]: { choice: 'mine', stamp: diskStamp(conflicts[0]!.disk) },
+      [CI]: { choice: 'mine', stamp: 'abc' },
       [RELEASE]: { choice: 'disk', stamp: '-' },
     });
     expect(screen.queryByRole('dialog')).toBeNull();

@@ -1,7 +1,6 @@
 import { fileLabel } from '../lib/file-label';
-import { stampOf } from '../state/history';
 import { isProjectFile } from './filter';
-import { asWritten, type FileMeta, readExact } from './read';
+import { asWritten, decodeExact, type FileMeta } from './read';
 
 /**
  * Saving the edits back to the folder (synthesis § 5.3), over the few calls of the File System Access API it needs,
@@ -10,8 +9,9 @@ import { asWritten, type FileMeta, readExact } from './read';
  * A file that is not is a conflict, and nothing is written until the author has chosen for each one (§ 5.4). Then the
  * files are written one at a time, updates first and created files after them, workflows before tests, each through
  * a swap file the browser puts in place on `close()`; the first failure stops the save, and every file written is read
- * back before it counts as saved. Write permission is not asked here: it has to be asked first thing in the click or
- * the key that saves (`app/saver.ts`).
+ * back before it counts as saved. Files are compared as written, BOM in front, so a text that starts with U+FEFF and a
+ * BOM read off the bytes are the same file. A file removed here is never deleted from the folder. Write permission is
+ * not asked here: it has to be asked first thing in the click or the key that saves (`app/saver.ts`).
  */
 
 /** What the save reads of a directory handle: Chromium's `FileSystemDirectoryHandle`, or a test's fake. */
@@ -50,7 +50,8 @@ export interface DiskFile {
  * A file the folder does not hold as the edits expect: `changed-on-disk` and `deleted-on-disk` for an edited file
  * whose text, BOM or encoding is not the one it was read with, or that is gone; `exists` for a file to create that is
  * there. `mine` is the text here (none for a file removed here); `base` the text it was read with (none for a file
- * created here); `disk` what the folder holds now.
+ * created here); `disk` what the folder holds now, and `stamp` a SHA-256 of its bytes (`-` when there is none), which
+ * a choice is made against.
  */
 export interface DiskConflict {
   path: string;
@@ -58,12 +59,13 @@ export interface DiskConflict {
   mine?: string;
   base?: string;
   disk?: DiskFile;
+  stamp?: string;
 }
 
 /**
  * What the author chose for a conflict: write `mine` over the folder, keep the `disk` version (the caller takes it
  * into the files first), or `skip` the file. A choice holds for the folder's file as it was when the author chose:
- * `stamp` is `diskStamp` of it, and a file that changed again is a conflict again.
+ * `stamp` is the conflict's, and a file whose bytes changed again is a conflict again.
  */
 export type Choice = 'mine' | 'disk' | 'skip';
 
@@ -71,12 +73,17 @@ export type Choices = Readonly<Record<string, { choice: Choice; stamp: string }>
 
 /**
  * What happened to one file: `saved` once read back, `failed` with the error's name, or why it was not written: after
- * a failure, skipped by the author, in a conflict the author cancelled, or `kept` in the folder though removed here.
+ * a failure, skipped by the author, in a conflict the author cancelled, settled by keeping the `disk` version, not
+ * UTF-8 (`encoding`, never written). A file removed here is `kept` while the folder still has it, `gone` once the
+ * folder has not either.
  */
 export type FileOutcome =
   | { path: string; status: 'saved' }
   | { path: string; status: 'failed'; error: string }
-  | { path: string; status: 'not-attempted' | 'skipped' | 'conflict' | 'kept' };
+  | {
+      path: string;
+      status: 'not-attempted' | 'skipped' | 'conflict' | 'disk' | 'encoding' | 'kept' | 'gone';
+    };
 
 export type SaveRun =
   | { kind: 'conflicts'; conflicts: DiskConflict[] }
@@ -85,10 +92,12 @@ export type SaveRun =
 /** The name a read-back that does not give the bytes written fails with. */
 const VERIFY_FAILED = 'VerifyFailed';
 
-/** The fingerprint a choice is made against: the folder's file, text, BOM and encoding, or its absence. */
-export function diskStamp(disk: DiskFile | undefined): string {
-  if (!disk) return '-';
-  return `${disk.meta.bom ? 'b' : ''}${disk.meta.utf8 ? '' : 'x'}:${stampOf(disk.text)}`;
+const encoder = new TextEncoder();
+
+/** The hex SHA-256 of a file's bytes: what a choice is made against. */
+async function digestOf(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return Array.from(hash, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** A file to write, and whether the folder holds a file at its path now. */
@@ -101,12 +110,37 @@ interface Write {
  * Checks every target, then writes them. Conflicts the choices do not settle (each for the folder's file as it is now)
  * come back and nothing is written; else every file is written in turn until one fails, and each is said: saved,
  * failed, not attempted after a failure, or skipped by the author's choice. A check that fails for another reason than
- * a missing file writes nothing either: that file failed, the others were not attempted.
+ * a missing file writes nothing either: that file failed, the others were not attempted. The files removed here are
+ * only looked for: `kept` when the folder has one, `gone` when it has not.
  */
 export async function saveTo(
   root: DirectoryLike,
   targets: readonly SaveTarget[],
   choices: Choices = {},
+  removed: readonly string[] = [],
+): Promise<SaveRun> {
+  const left = await removedOutcomes(root, removed);
+  const run = await checkAndWrite(root, targets, choices);
+  return run.kind === 'done' ? { kind: 'done', files: [...run.files, ...left] } : run;
+}
+
+/** Whether the folder still has each file removed here; one that cannot be read is taken as there. */
+async function removedOutcomes(root: DirectoryLike, removed: readonly string[]): Promise<FileOutcome[]> {
+  const outcomes: FileOutcome[] = [];
+  for (const path of removed) {
+    const there = await readAt(root, path).then(
+      (read) => read !== undefined,
+      () => true,
+    );
+    outcomes.push({ path, status: there ? 'kept' : 'gone' });
+  }
+  return outcomes;
+}
+
+async function checkAndWrite(
+  root: DirectoryLike,
+  targets: readonly SaveTarget[],
+  choices: Choices,
 ): Promise<SaveRun> {
   const writes: Write[] = [];
   const skipped: string[] = [];
@@ -124,7 +158,7 @@ export async function saveTo(
       continue;
     }
     const chosen = choices[target.path];
-    if (!chosen || chosen.stamp !== diskStamp(checked.disk)) conflicts.push(checked);
+    if (!chosen || chosen.stamp !== checked.stamp) conflicts.push(checked);
     else if (chosen.choice === 'mine') writes.push({ target, exists: checked.disk !== undefined });
     else skipped.push(target.path);
   }
@@ -153,37 +187,54 @@ type Checked = { exists: boolean } | DiskConflict;
  * conflict either.
  */
 async function check(root: DirectoryLike, target: SaveTarget): Promise<Checked> {
-  const disk = await readAt(root, target.path);
-  if (!disk) return target.kind === 'create' ? { exists: false } : conflictOf(target, 'deleted-on-disk');
+  const read = await readAt(root, target.path);
+  if (!read) return target.kind === 'create' ? { exists: false } : conflictOf(target, 'deleted-on-disk');
   if (
-    holds(disk, target.text, target.bom) ||
-    (target.kind === 'update' && holds(disk, target.base, target.bom))
+    holds(read, target.text, target.bom) ||
+    (target.kind === 'update' && holds(read, target.base, target.bom))
   )
     return { exists: true };
-  return conflictOf(target, target.kind === 'create' ? 'exists' : 'changed-on-disk', disk);
+  return conflictOf(target, target.kind === 'create' ? 'exists' : 'changed-on-disk', read);
 }
 
-const holds = (disk: DiskFile, text: string, bom: boolean): boolean =>
-  disk.text === text && disk.meta.bom === bom && disk.meta.utf8;
+/** Whether the folder's file is, byte for byte, this text written with or without a BOM. */
+const holds = (read: Read, text: string, bom: boolean): boolean =>
+  read.meta.utf8 && asWritten(read.text, read.meta) === asWritten(text, { bom });
 
-const conflictOf = (target: SaveTarget, reason: DiskConflict['reason'], disk?: DiskFile): DiskConflict => ({
-  path: target.path,
-  reason,
-  mine: target.text,
-  ...(target.kind === 'update' ? { base: target.base } : {}),
-  ...(disk ? { disk } : {}),
-});
+async function conflictOf(
+  target: SaveTarget,
+  reason: DiskConflict['reason'],
+  read?: Read,
+): Promise<DiskConflict> {
+  const conflict: DiskConflict = { path: target.path, reason, mine: target.text, stamp: '-' };
+  if (target.kind === 'update') conflict.base = target.base;
+  if (read) {
+    conflict.disk = { text: read.text, meta: read.meta };
+    conflict.stamp = await digestOf(read.bytes);
+  }
+  return conflict;
+}
+
+/** A file as the folder holds it: its bytes, and their text as `readExact` gives it. */
+interface Read extends DiskFile {
+  bytes: Uint8Array<ArrayBuffer>;
+}
 
 /** The folder's file at a path, read byte-exact, or nothing when it (or a directory on its way) is not there. */
-async function readAt(root: DirectoryLike, path: string): Promise<DiskFile | undefined> {
+async function readAt(root: DirectoryLike, path: string): Promise<Read | undefined> {
   try {
-    const { dir, name } = await parentOf(root, path, false);
-    return await readExact(await (await dir.getFileHandle(name)).getFile());
+    const dir = await parentOf(root, path, false, []);
+    const bytes = new Uint8Array(
+      await (await (await dir.getFileHandle(nameIn(path))).getFile()).arrayBuffer(),
+    );
+    return { ...decodeExact(bytes), bytes };
   } catch (e) {
     if (nameOf(e) === 'NotFoundError') return undefined;
     throw e;
   }
 }
+
+const nameIn = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
 /** Updates first, then created files; project files (workflows, actions) before tests; by path within each. */
 function order(writes: Write[]): Write[] {
@@ -211,24 +262,28 @@ async function writeAll(root: DirectoryLike, writes: Write[]): Promise<FileOutco
 
 /**
  * One file through a swap file: `createWritable` without the old data, the whole text with its BOM, `close()`, which
- * puts it in place; then read back. A failure before `close()` aborts the swap file, so the old bytes stay. A file
- * this write created, and the directories it made, go again when it fails, if they are still empty.
+ * puts it in place; then read back, byte for byte. A failure before `close()` aborts the swap file, so the old bytes
+ * stay. A file this write created, and the directories it made, go again when it fails, if they are still empty.
  */
 async function writeOne(root: DirectoryLike, { target, exists }: Write): Promise<void> {
-  const { dir, name, made } = await parentOf(root, target.path, !exists);
+  const made: Made[] = [];
+  const name = nameIn(target.path);
+  let dir: DirectoryLike | undefined;
   let handle: FileHandleLike | undefined;
   try {
+    dir = await parentOf(root, target.path, !exists, made);
     handle = await dir.getFileHandle(name, { create: !exists });
+    const written = asWritten(target.text, target);
     const writable = await handle.createWritable({ keepExistingData: false });
     try {
-      await writable.write(asWritten(target.text, target));
+      await writable.write(written);
       await writable.close();
     } catch (e) {
       await writable.abort().catch(() => undefined);
       throw e;
     }
-    const back = await readExact(await handle.getFile());
-    if (back.text !== target.text || back.meta.bom !== target.bom)
+    const back = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    if (!sameBytes(back, encoder.encode(written)))
       throw new DOMException(`${target.path} reads back other bytes`, VERIFY_FAILED);
   } catch (e) {
     if (!exists && nameOf(e) !== VERIFY_FAILED) await undoCreate(dir, name, handle, made);
@@ -236,15 +291,24 @@ async function writeOne(root: DirectoryLike, { target, exists }: Write): Promise
   }
 }
 
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** A directory a create made, in its parent. */
+interface Made {
+  parent: DirectoryLike;
+  name: string;
+}
+
 /** Removes the empty file a failed create left, then the directories it made, innermost first, while empty. */
 async function undoCreate(
-  dir: DirectoryLike,
+  dir: DirectoryLike | undefined,
   name: string,
   handle: FileHandleLike | undefined,
-  made: { parent: DirectoryLike; name: string }[],
+  made: Made[],
 ): Promise<void> {
   try {
-    if (handle && (await handle.getFile()).size === 0) await dir.removeEntry(name);
+    if (dir && handle && (await handle.getFile()).size === 0) await dir.removeEntry(name);
     // Without `recursive`, a directory that holds anything is refused, so only an empty one goes.
     for (const m of made.toReversed()) await m.parent.removeEntry(m.name);
   } catch {
@@ -252,17 +316,18 @@ async function undoCreate(
   }
 }
 
-/** The directory a path's file is in, and its name; with `create`, the directories missing on the way are made. */
+/**
+ * The directory a path's file is in; with `create`, the directories missing on the way are made, each recorded in
+ * `made` as it is, so a failure further on can take them back.
+ */
 async function parentOf(
   root: DirectoryLike,
   path: string,
   create: boolean,
-): Promise<{ dir: DirectoryLike; name: string; made: { parent: DirectoryLike; name: string }[] }> {
-  const parts = path.split('/');
-  const name = parts.pop()!;
-  const made: { parent: DirectoryLike; name: string }[] = [];
+  made: Made[],
+): Promise<DirectoryLike> {
   let dir = root;
-  for (const part of parts) {
+  for (const part of path.split('/').slice(0, -1)) {
     let next: DirectoryLike;
     try {
       next = await dir.getDirectoryHandle(part);
@@ -273,7 +338,7 @@ async function parentOf(
     }
     dir = next;
   }
-  return { dir, name, made };
+  return dir;
 }
 
 /** A thrown value's name, as a DOMException carries it: `NotFoundError`, `NoModificationAllowedError`. */
@@ -306,18 +371,26 @@ export function reportSentence(files: readonly FileOutcome[]): string {
   const parts: string[] = [];
   const saved = names('saved');
   if (saved.length) parts.push(`Saved ${listOf(saved)}`);
+  const disk = names('disk');
+  if (disk.length) parts.push(`${saved.length ? 'kept' : 'Kept'} the disk version of ${listOf(disk)}`);
   for (const f of files)
     if (f.status === 'failed') parts.push(`${fileLabel(f.path)} failed (${failure(f.error)})`);
-  const notAttempted = names('not-attempted');
-  if (notAttempted.length) parts.push(`not attempted: ${notAttempted.join(', ')}`);
-  const skipped = names('skipped');
-  if (skipped.length) parts.push(`skipped: ${skipped.join(', ')}`);
-  const conflicts = names('conflict');
-  if (conflicts.length) parts.push(`changed on disk: ${conflicts.join(', ')}`);
-  const kept = names('kept');
-  if (kept.length) parts.push(`still in the folder, since a save deletes nothing: ${kept.join(', ')}`);
+  for (const [status, words] of LISTED) {
+    const listed = names(status);
+    if (listed.length) parts.push(`${words}: ${listed.join(', ')}`);
+  }
   return parts.length ? parts.join('; ') : 'Nothing to save';
 }
+
+/** The statuses the sentence lists after the saved, kept and failed files, and how it introduces them. */
+const LISTED: readonly [FileOutcome['status'], string][] = [
+  ['not-attempted', 'not attempted'],
+  ['skipped', 'skipped'],
+  ['conflict', 'changed on disk'],
+  ['encoding', 'not UTF-8, never written'],
+  ['kept', 'removed here, not from the folder (a save deletes nothing)'],
+  ['gone', 'removed here and from the folder'],
+];
 
 /** "a", "a and b", "a, b and c". */
 export const listOf = (items: readonly string[]): string =>

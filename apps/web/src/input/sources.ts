@@ -2,7 +2,7 @@ import { downloadText } from '../lib/download';
 import { fileLabel } from '../lib/file-label';
 import { downloadPatch } from '../state/changes';
 import type { SourceStore, StoredSource } from '../state/persist';
-import { reloadPlan, settledReload } from '../state/reload';
+import { type ReloadPlan, reloadPlan, settledReload } from '../state/reload';
 import { type BaseDiff, dirtyPaths, type SessionStore, type Settling, type Source } from '../state/store';
 import { type Dropped, filesFromDrop } from './drop';
 import { filterFiles } from './filter';
@@ -102,12 +102,10 @@ export function createSources({
     const lost = dirtyPaths(store.getState().files).filter((p) => !kept.has(p));
     if (lost.length === 0 || !ask) return true;
     return ask(what, lost).then((choice) => {
-      // The edits go only once every one of them is in the folder: a save that stopped keeps them all.
-      if (choice === 'save')
-        return (save?.() ?? Promise.resolve(false)).then(() => {
-          const left = new Set(dirtyPaths(store.getState().files));
-          return lost.every((p) => !left.has(p));
-        });
+      // The files go only once every edit is in the folder: a save that stopped, met an edit typed meanwhile, or kept
+      // the folder's version of a file (the author's text then lives only in the history the replacement clears)
+      // keeps them all.
+      if (choice === 'save') return save?.() ?? false;
       if (choice === 'download') downloadAll(lost);
       if (choice === 'patch') downloadPatch(store.getState().files, lost, 'base', download);
       return choice !== 'cancel';
@@ -299,17 +297,29 @@ export function createSources({
     if (limit) return fail(`${where} is too big: ${limit}`);
     const plan = reloadPlan(store.getState().files, read);
     if (Object.keys(plan.disk).length === 0) actions.notify(`${name}: no changes`);
-    else {
-      // Without anyone to ask, the files both sides changed stay as they are.
-      const asking = plan.conflicts.length > 0 && settle;
-      const choices = asking ? await settle('reload', name, plan.conflicts) : {};
-      if (!choices || store.getState().files.epoch !== epoch) return;
-      const { disk, take } = settledReload(plan, choices);
-      const outcome = actions.fromDisk(epoch, `Reloaded ${name}`, disk, take);
-      if (!outcome.ok && outcome.refusal)
-        return fail(`reloading ${name} stopped: ${fileLabel(outcome.refusal.path)} changed meanwhile`);
-    }
+    else if (!(await takeIn(name, epoch, plan))) return;
     tellLeftOut(where, read.skipped);
+  };
+
+  /**
+   * The reload's plan taken in once the author chose for the files both sides changed (without anyone to ask, they
+   * stay as they are); false when nothing was taken: cancelled, new files, a save meanwhile, or a text moved since.
+   */
+  const takeIn = async (name: string, epoch: number, plan: ReloadPlan): Promise<boolean> => {
+    const { base } = store.getState().files;
+    const asking = plan.conflicts.length > 0 && settle;
+    const choices = asking ? await settle('reload', name, plan.conflicts) : {};
+    const now = store.getState().files;
+    if (!choices || now.epoch !== epoch) return false;
+    if (now.base !== base) {
+      fail(`reloading ${name} stopped: the files were saved meanwhile`);
+      return false;
+    }
+    const { disk, take, from } = settledReload(plan, choices);
+    const outcome = actions.fromDisk(epoch, `Reloaded ${name}`, disk, take, from);
+    if (outcome.ok || !outcome.refusal) return true;
+    fail(`reloading ${name} stopped: ${fileLabel(outcome.refusal.path)} changed meanwhile`);
+    return false;
   };
 
   /** What the last visit stored, set again; a kind this page does not know is nothing stored. */
@@ -347,7 +357,17 @@ export function createSources({
       guarded(async () => {
         const go = mayReplace('Opening another folder');
         if (go !== true && !(await go)) return;
-        const picked = await pickFolder();
+        let picked: Awaited<ReturnType<typeof pickFolder>>;
+        try {
+          picked = await pickFolder();
+        } catch (e) {
+          // The picker opens only right after a click, and a save or the prompt may have taken longer.
+          if (go === true || !(e instanceof DOMException) || e.name !== 'SecurityError') throw e;
+          actions.notify(
+            'Choose Open folder again: the browser opens its folder picker only right after a click.',
+          );
+          return;
+        }
         if (!picked) return;
         accept(
           picked,
@@ -406,8 +426,14 @@ export function createSources({
         const s = store.getState();
         if (s.source.kind !== 'folder') return;
         const epoch = s.files.epoch;
-        const read = await readAgain(s.source, 'open it again');
-        if (read && store.getState().files.epoch === epoch) await merge(s.source.name, epoch, read);
+        // A save that moves the base while the folder is read leaves the read behind the base: it is read again.
+        for (let tries = 0; tries < 3; tries++) {
+          const { base } = store.getState().files;
+          const read = await readAgain(s.source, 'open it again');
+          if (!read || store.getState().files.epoch !== epoch) return;
+          if (store.getState().files.base === base) return merge(s.source.name, epoch, read);
+        }
+        fail(`reloading ${s.source.name} stopped: the files were saved while it read them; reload again`);
       }),
 
     reopen: () =>

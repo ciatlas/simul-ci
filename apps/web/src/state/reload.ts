@@ -1,6 +1,6 @@
 import { isProjectFile } from '../input/filter';
 import type { Walked } from '../input/limits';
-import { type FileMeta, textMeta } from '../input/read';
+import { asWritten, type FileMeta, textMeta } from '../input/read';
 import type { Choices, DiskConflict, DiskFile } from '../input/save';
 import type { SessionState } from './store';
 
@@ -20,6 +20,8 @@ export interface ReloadPlan {
   take: string[];
   /** The paths both the folder and the author changed. */
   conflicts: DiskConflict[];
+  /** Per path of `disk`, the author's text the plan was made over (`null`: none), so a take refuses a text moved since. */
+  from: Record<string, string | null>;
 }
 
 type Files = Pick<SessionState['files'], 'byPath' | 'base' | 'meta'>;
@@ -29,7 +31,7 @@ type Files = Pick<SessionState['files'], 'byPath' | 'base' | 'meta'>;
  * the walk left out for its size is not taken for gone.
  */
 export function reloadPlan(files: Files, read: Pick<Walked, 'files' | 'meta' | 'skipped'>): ReloadPlan {
-  const plan: ReloadPlan = { disk: {}, take: [], conflicts: [] };
+  const plan: ReloadPlan = { disk: {}, take: [], conflicts: [], from: {} };
   const left = new Set(read.skipped.map((s) => s.path));
   const here = [...Object.keys(files.base), ...Object.keys(files.byPath)].filter(
     (p) => isProjectFile(p) && !left.has(p),
@@ -41,6 +43,7 @@ export function reloadPlan(files: Files, read: Pick<Walked, 'files' | 'meta' | '
     if (unchanged(disk, base, files.meta[path])) continue;
     plan.disk[path] = disk ?? null;
     const mine = files.byPath[path];
+    plan.from[path] = mine ?? null;
     if (mine === base || mine === disk?.text) plan.take.push(path);
     else plan.conflicts.push(conflictOf(path, mine, base, disk));
   }
@@ -62,14 +65,17 @@ function conflictOf(
   return conflict;
 }
 
-/** Whether the folder still holds the file as it was read or last saved: its text, its BOM, its encoding. */
+/**
+ * Whether the folder still holds the file as it was read or last saved: its text as written, BOM in front, and its
+ * encoding.
+ */
 function unchanged(
   disk: DiskFile | undefined,
   base: string | undefined,
   meta: FileMeta | undefined,
 ): boolean {
   if (disk === undefined || base === undefined) return disk === undefined && base === undefined;
-  return disk.text === base && disk.meta.bom === meta?.bom && disk.meta.utf8 === meta?.utf8;
+  return asWritten(disk.text, disk.meta) === asWritten(base, meta) && disk.meta.utf8 === meta?.utf8;
 }
 
 /**
@@ -77,7 +83,10 @@ function unchanged(
  * folder's new base, so the next save writes it without asking; `skip` leaves the file as it was, base and all, so the
  * next save asks again. A conflict with no choice is skipped.
  */
-export function settledReload(plan: ReloadPlan, choices: Choices): Pick<ReloadPlan, 'disk' | 'take'> {
+export function settledReload(
+  plan: ReloadPlan,
+  choices: Choices,
+): Pick<ReloadPlan, 'disk' | 'take' | 'from'> {
   const disk = { ...plan.disk };
   const take = [...plan.take];
   for (const { path } of plan.conflicts) {
@@ -85,5 +94,5 @@ export function settledReload(plan: ReloadPlan, choices: Choices): Pick<ReloadPl
     if (choice === 'disk') take.push(path);
     else if (choice !== 'mine') delete disk[path];
   }
-  return { disk, take };
+  return { disk, take, from: plan.from };
 }

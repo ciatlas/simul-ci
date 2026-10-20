@@ -47,11 +47,11 @@ test.afterEach(() => {
 
 /** The OPFS folder `repo` holding exactly these files, written as bytes. */
 async function folderWith(page: Page, files: Record<string, number[]>): Promise<void> {
-  await page.evaluate(async (files) => {
+  await page.evaluate(async (tree) => {
     const root = await navigator.storage.getDirectory();
     await root.removeEntry('repo', { recursive: true }).catch(() => undefined);
     const repo = await root.getDirectoryHandle('repo', { create: true });
-    for (const [path, content] of Object.entries(files)) {
+    for (const [path, content] of Object.entries(tree)) {
       const parts = path.split('/');
       const name = parts.pop()!;
       let dir = repo;
@@ -65,9 +65,9 @@ async function folderWith(page: Page, files: Record<string, number[]>): Promise<
 
 /** A file of `repo` as bytes, and when it was last written; nothing when it is not there. */
 async function fileOf(page: Page, path: string): Promise<{ bytes: number[]; modified: number } | undefined> {
-  return page.evaluate(async (path) => {
+  return page.evaluate(async (where) => {
     let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('repo');
-    const parts = path.split('/');
+    const parts = where.split('/');
     const name = parts.pop()!;
     try {
       for (const part of parts) dir = await dir.getDirectoryHandle(part);
@@ -170,6 +170,10 @@ test('a file changed on disk is a conflict: keep the disk version, then undo and
   await dialog.getByLabel('Keep the disk version').check();
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(dialog).toHaveCount(0);
+  // Closing the dialog gives the focus back to the Save that opened it, not to the page's body.
+  await expect(
+    page.getByRole('navigation', { name: 'Source' }).getByRole('button', { name: 'Save' }),
+  ).toBeFocused();
   await expect(editor(page)).toContainText('echo theirs');
   expect((await fileOf(page, CI))?.bytes).toEqual(bytes(theirs));
   await expect(page.getByRole('navigation', { name: 'Source' })).not.toContainText('unsaved');

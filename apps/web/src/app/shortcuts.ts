@@ -153,18 +153,26 @@ export function changesKey(event: HistoryKey, s: SessionState & SessionActions):
 }
 
 /**
- * Mod+S: true whenever it is the chord, so the browser's Save Page never opens. Outside a dialog it saves when the
- * files came from a folder with a handle, and otherwise opens Changes while something is unsaved. A field commits its
- * text on the way (`edit/property/Field.tsx`); the pane's typing is in the files already.
+ * Mod+S: true whenever it is the chord, so the browser's Save Page never opens. While no dialog is open it saves when
+ * the files came from a folder with a handle, and otherwise opens Changes while something is unsaved; under an open
+ * dialog (a modal keeps the focus, but a click on its text leaves it on the page's body) it does nothing more. A field
+ * commits its text on the way (`edit/property/Field.tsx`); the pane's typing is in the files already.
  */
 export function saveKey(event: HistoryKey, s: SessionState & SessionActions, save: () => void): boolean {
   const chord = (event.metaKey || event.ctrlKey) && event.shiftKey !== true && !event.altKey;
   if (!chord || event.defaultPrevented || letterOf(event) !== 's') return false;
-  const el = event.target as Partial<HTMLElement> | null;
-  if (typeof el?.closest === 'function' && el.closest('dialog, [role="dialog"]') !== null) return true;
+  if (dialogAround(event.target)) return true;
   if (canSave(s)) save();
   else if (dirtyPaths(s.files).length > 0) s.setChangesOpen(true);
   return true;
+}
+
+/** Whether a key comes from inside a dialog, or while one is open anywhere on the page. */
+function dialogAround(target: EventTarget | null): boolean {
+  const el = target as (Partial<HTMLElement> & { ownerDocument?: Document | null }) | null;
+  if (typeof el?.closest === 'function' && el.closest('dialog, [role="dialog"]') !== null) return true;
+  const doc = el?.ownerDocument ?? (typeof document === 'undefined' ? undefined : document);
+  return doc?.querySelector('dialog[open], [role="dialog"]') != null;
 }
 
 /** Runs a command; false when it has nothing to act on, so the key goes on as if unheard. */

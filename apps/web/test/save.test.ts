@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSaver, targetsOf } from '../src/app/saver';
 import { readFolder } from '../src/input/folder';
-import { type Choice, type Choices, diskStamp, type DiskConflict, saveTo } from '../src/input/save';
+import { type Choice, type Choices, type DiskConflict, saveTo } from '../src/input/save';
 import { memoryStore } from '../src/lib/idb';
 import { snapshotStore } from '../src/state/snapshot';
 import { createSnapshotKeeper } from '../src/state/snapshot-keeper';
@@ -58,7 +58,7 @@ const asked = (store: SessionStore): Promise<Settling> =>
 
 /** The author's answer: one choice per conflict, made against the folder's file as it was asked about. */
 const choose = (conflicts: DiskConflict[], pick: Record<string, Choice>): Choices =>
-  Object.fromEntries(conflicts.map((c) => [c.path, { choice: pick[c.path]!, stamp: diskStamp(c.disk) }]));
+  Object.fromEntries(conflicts.map((c) => [c.path, { choice: pick[c.path]!, stamp: c.stamp! }]));
 
 const report = (store: SessionStore) => store.getState().saving;
 
@@ -157,6 +157,7 @@ describe('saving to the folder', () => {
         mine: '# edited\na\n',
         base: 'a\n',
         disk: { text: 'changed elsewhere\n', meta: { bom: false, eol: 'lf', utf8: true } },
+        stamp: expect.stringMatching(/^[0-9a-f]{64}$/),
       },
     ]);
     expect(fake.written).toEqual([]);
@@ -189,7 +190,10 @@ describe('saving to the folder', () => {
     expect(s().files.byPath[DEPLOY]).toBe(`disk ${DEPLOY}\n`);
     expect(s().files.base[DEPLOY]).toBe(`disk ${DEPLOY}\n`);
     expect(dirtyPaths(s().files)).toEqual([LINT]);
-    expect(report(store)).toMatchObject({ sentence: 'Saved ci.yml; skipped: lint.yml', open: true });
+    expect(report(store)).toMatchObject({
+      sentence: 'Saved ci.yml; kept the disk version of deploy.yml; skipped: lint.yml',
+      open: false,
+    });
     // Keep the disk version is one undo away from the author's text, which is then unsaved against the disk.
     expect(s().undo()).toBe(true);
     expect(s().files.byPath[DEPLOY]).toBe('# edited\nb\n');
@@ -227,11 +231,12 @@ describe('saving to the folder', () => {
     const saving = saver.save();
     const { conflicts } = await asked(store);
     expect(conflicts).toEqual([
-      { path: CI, reason: 'deleted-on-disk', mine: '# edited\na\n', base: 'a\n' },
-      { path: DEPLOY, reason: 'deleted-on-disk', mine: '# edited\nb\n', base: 'b\n' },
+      { path: CI, reason: 'deleted-on-disk', mine: '# edited\na\n', base: 'a\n', stamp: '-' },
+      { path: DEPLOY, reason: 'deleted-on-disk', mine: '# edited\nb\n', base: 'b\n', stamp: '-' },
     ]);
     saver.answer(choose(conflicts, { [CI]: 'mine', [DEPLOY]: 'disk' }));
-    expect(await saving).toBe(true);
+    expect(await saving).toBe(false);
+    // A file settled by keeping the folder's version is not in the folder as the author wrote it.
     expect(fake.text(CI)).toBe('# edited\na\n');
     // Keeping the folder's version of a deleted file removes it here, undoably.
     expect(s().files.byPath[DEPLOY]).toBeUndefined();
@@ -253,6 +258,7 @@ describe('saving to the folder', () => {
         reason: 'exists',
         mine: 'cases: []\n',
         disk: { text: 'cases: [theirs]\n', meta: { bom: false, eol: 'lf', utf8: true } },
+        stamp: expect.any(String),
       },
     ]);
     saver.answer(undefined);
@@ -445,7 +451,7 @@ describe('saving to the folder', () => {
     store
       .getState()
       .transact({ label: 'Rm', origin: 'op', files: [{ path: DEPLOY, edits: [], remove: true }] });
-    expect(targetsOf(store.getState().files)).toEqual({ targets: [], removed: [DEPLOY] });
+    expect(targetsOf(store.getState().files)).toEqual({ targets: [], removed: [DEPLOY], encoding: [CI] });
   });
 });
 
