@@ -1,5 +1,5 @@
 import type { NodeId, RunPlan, UnknownId } from '@simulci/engine';
-import type { Pin, PlanState } from '../state/store';
+import type { Change, PlanState } from '../state/store';
 import { cardOf } from './navigate';
 import type { GraphModel, GraphState } from './types';
 
@@ -7,8 +7,9 @@ import type { GraphModel, GraphState } from './types';
  * What the canvas lights up besides the selection (synthesis § 7 and § 11), as functions of the plan, the model, the
  * store and, for the flash, the author's motion preference (`prefers-reduced-motion`, read when it is asked): while
  * an unknown's "affects n" is hovered, the cards that show what it affects and the cards that hold those stay lit and
- * every other card fades; once a pin's plan is on the canvas, the cards it changed flash once. The flash is motion,
- * so an author who asked for less motion never gets it.
+ * every other card fades; once the plan that answers a pin or an edit is on the canvas, the cards it changed flash
+ * once and the cards it added get the added ring. Both are motion, so an author who asked for less motion gets
+ * neither.
  */
 
 /**
@@ -38,37 +39,46 @@ const holderOf = (model: GraphModel, card: NodeId): NodeId | undefined =>
 
 /** How long a card flashes; canvas.css's `sc-flash-a` and `sc-flash-b` keyframes run as long. */
 export const FLASH_MS = 1000;
+/** How long an added card keeps its ring; canvas.css's `sc-added-a` and `sc-added-b` keyframes run as long. */
+export const RING_MS = 2000;
 
-/** The cards a pin changed, which flash once. */
+/** The cards a change changed, which flash once, and the cards it added, which get the ring. */
 export interface Flash {
-  /** The pin's `seq`. */
+  /** The change's `seq`. */
   seq: number;
   /**
-   * `a` for an even pin, `b` for an odd one: the attribute's value changes from one pin to the next, so a card the
-   * next pin changes again flashes again.
+   * `a` for an even change, `b` for an odd one: the attribute's value changes from one change to the next, so a card
+   * the next change changes again flashes again.
    */
   parity: 'a' | 'b';
-  /** The cards that show a node whose verdict the pin changed. */
+  /** The cards that show a node or a check the change added inside them, removed from them or turned. */
   cards: ReadonlySet<NodeId>;
+  /** The cards of the workflows and jobs the change added. */
+  ring: ReadonlySet<NodeId>;
 }
 
 /**
- * The flash of the last pin while the canvas shows the plan that answered it: not before that plan's picture is
- * committed (the cards would flash in their old colours), and not once a later plan came without a pin. None at all
- * when the author asked for less motion.
+ * The flash of the last change while the canvas shows the plan that answered it: not before that plan's picture is
+ * committed (the cards would flash in their old colours), and not once a later plan came that it did not answer. A
+ * check a job's row already says flashes nothing more. None at all when the author asked for less motion.
  */
 export function flashOf(
-  pin: Pin | undefined,
+  change: Change | undefined,
   plan: PlanState | undefined,
   graph: GraphState,
 ): Flash | undefined {
-  if (!pin?.after || !showsPlan(graph, plan, pin.after.plan) || reducedMotion()) return undefined;
+  if (!change?.after || !showsPlan(graph, plan, change.after.plan) || reducedMotion()) return undefined;
   const cards = new Set<NodeId>();
-  for (const change of pin.after.changes) {
-    const card = cardOf(graph.model, change.id);
-    if (card !== undefined) cards.add(card);
+  const ring = new Set<NodeId>();
+  for (const row of change.after.rows) {
+    const card = row.card === undefined || row.implied ? undefined : cardOf(graph.model, row.card);
+    if (card === undefined) continue;
+    const added =
+      row.change === 'added' && (row.kind === 'workflow' || row.kind === 'job') && card === row.id;
+    (added ? ring : cards).add(card);
   }
-  return { seq: pin.seq, parity: pin.seq % 2 === 0 ? 'a' : 'b', cards };
+  for (const card of ring) cards.delete(card);
+  return { seq: change.seq, parity: change.seq % 2 === 0 ? 'a' : 'b', cards, ring };
 }
 
 /**

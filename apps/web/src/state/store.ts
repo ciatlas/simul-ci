@@ -1,11 +1,12 @@
-import type { AssumeEntry, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
+import type { AssumeEntry, NodeId, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { regionEdit, type TextEdit, touched } from '@simulci/document/edits';
 import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
 import { fileLabel } from '../lib/file-label';
 import { classifyEol, type FileMeta, textMeta } from '../input/read';
-import { pinSentence, type VerdictChange, verdictChanges } from '../plan/changes';
+import { type ChangeRow, changeRows, changeSentence } from '../plan/change-rows';
+import { diffOf, pinSentence, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
 import * as history from './history';
 import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
@@ -48,25 +49,50 @@ export interface PlanState {
    * The files version the plan was simulated from, which may be older than the store's while an edit is answered,
    * the epoch of those files, the project version it answers, and the case layer it was simulated with: the plan
    * names the assume entries by position, so it speaks of the list it was given and of no other. The scenario is the
-   * store's object it was simulated from, so a pin can tell the plan that answers it.
+   * store's object it was simulated from, so a change can tell the plan that answers it.
    */
   for: { files: number; epoch: number; project: number; assume?: AssumeEntry[]; scenario?: ScenarioInput };
 }
 
 /**
- * The last pin (a scenario field or an assume entry written from the Unknowns tab) and, once the plan that answers
- * it came, what it changed: the status line says it ("pinned; deploy now runs") and the cards it changed flash. A pin
- * belongs to the files it was made over: new files, or none, drop it.
+ * The last change the author made to the plan and, once the plan that answers it came, what it changed (synthesis
+ * § 7.4): the status line says it ("pinned; deploy now runs", "Edited ci.yml: CI is no longer triggered"), Details
+ * lists it, the cards it changed flash and the cards it added get a ring. A pin is a scenario field or an assume entry
+ * written from the Unknowns tab; an edit is any commit of the history that changed a project file. A change belongs
+ * to the files it was made over: new files, or none, drop it.
  */
-export interface Pin {
+export interface Change {
   seq: number;
-  /** The plan the pin was made over, until the answering plan settled it: then only what it changed is kept. */
-  before?: Pick<PlanState, 'plan' | 'derived'>;
-  /** The inputs the pin left in the store: the plan simulated from exactly these objects answers it. */
-  scenario: ScenarioInput;
-  assume: AssumeEntry[];
+  cause: 'pin' | 'edit';
+  /** What the author did, as the sentence opens: `pinned`, `Edited ci.yml`, `Undo Typing in ci.yml`, an op's label. */
+  label: string;
+  /**
+   * The plan the change was made over, until the answering plan settled it: then only what it changed is kept. While
+   * an edit is unanswered, the edits after it keep the plan from before the first one of the burst.
+   */
+  before?: Before;
+  /**
+   * What answers it: for an edit, the first plan of these files or newer ones; for a pin, the plan simulated from
+   * exactly the inputs it left in the store, these very objects.
+   */
+  waitFor: { files?: number; scenario?: ScenarioInput; assume?: AssumeEntry[] };
+  /** Old id prefixes and their new ids, for a rename (C11); none until a transaction supplies them. */
+  renames?: Readonly<Record<NodeId, NodeId>>;
+  /** Only keys typed in the pane: a burst whose plan changed nothing says nothing. */
+  quiet?: true;
   /** What the answering plan changed; absent until it comes. */
-  after?: { plan: RunPlan; changes: VerdictChange[]; sentence: string };
+  after?: ChangeAnswer;
+}
+
+/** The plan a change was made over, with the inputs and the files it was simulated from. */
+export type Before = Pick<PlanState, 'plan' | 'derived' | 'for'>;
+
+export interface ChangeAnswer {
+  plan: RunPlan;
+  /** Every node and check it added, removed or turned, in the order Details lists them. */
+  rows: ChangeRow[];
+  /** The status line's sentence; absent when a quiet change changed nothing. */
+  sentence?: string;
 }
 
 /** A request to put the focus on an unknown's row in the Unknowns tab: "Show X in Unknowns" in a reason. */
@@ -196,7 +222,7 @@ export interface SessionState {
   hoveredUnknown?: UnknownId;
   /** The unknown whose row the Unknowns tab was asked to focus, until the tab takes it. */
   unknownFocus?: UnknownFocus;
-  pin?: Pin;
+  change?: Change;
   ui: Omit<GraphUi, 'hideUntriggered' | 'only'> & {
     view: 'graph' | 'text';
     hideUntriggered: boolean;
@@ -466,14 +492,14 @@ export function dirtyPaths(files: Pick<SessionState['files'], 'byPath' | 'base'>
 
 let noticeId = 0;
 let requestSeq = 0;
-/** Pins count apart from the pin the store holds, which new files drop (`pinOver`). */
-let pinSeq = 0;
+/** Changes count apart from the change the store holds, which new files drop (`pinOver`, `editOver`). */
+let changeSeq = 0;
 
 /**
- * What belongs to the files that were there: the pin made over their plan, and the unknown hovered or asked for,
- * which the next files' plan may not have. New files, or none, clear it all, so no plan of theirs settles that pin.
+ * What belongs to the files that were there: the change made over their plan, and the unknown hovered or asked for,
+ * which the next files' plan may not have. New files, or none, clear it all, so no plan of theirs settles that change.
  */
-const UNPINNED = { pin: undefined, hoveredUnknown: undefined, unknownFocus: undefined } as const;
+const UNCHANGED = { change: undefined, hoveredUnknown: undefined, unknownFocus: undefined } as const;
 
 /** What a new source starts from: nothing loaded, simulated or drawn, and nothing pinned over the files before. */
 const UNLOADED = {
@@ -482,16 +508,23 @@ const UNLOADED = {
   graph: undefined,
   generated: undefined,
   stale: false,
-  ...UNPINNED,
+  ...UNCHANGED,
 } as const;
 
 export function createSessionStore(initial: SessionState = initialSessionState()): SessionStore {
   return createStore<SessionState & SessionActions>((set, get) => {
-    /** Commits a step of the history in one `set()` with the texts it changes (`committed`). */
-    const commit = (step: (s: SessionState) => StepOutcome, verb?: 'undo' | 'redo'): EditOutcome => {
+    /**
+     * Commits a step of the history in one `set()` with the texts it changes (`committed`), and the change it leaves
+     * for the status line, said as `said` words it from the state before the step.
+     */
+    const commit = (
+      step: (s: SessionState) => StepOutcome,
+      said: (s: SessionState) => Said,
+      verb?: 'undo' | 'redo',
+    ): EditOutcome => {
       let outcome: EditOutcome = { ok: false };
       set((s) => {
-        const result = committed(s, step(s), verb && { verb, id: ++noticeId });
+        const result = committed(s, step(s), said(s), verb && { verb, id: ++noticeId });
         outcome = result.outcome;
         return result.patch;
       });
@@ -548,7 +581,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           stale: inputsStale(s),
           error: authorsErrorCleared(s.error, 'scenario'),
           fieldFocus: { ...focus, seq: ++requestSeq },
-          pin: pinOver(s, scenario, s.assume),
+          change: pinOver(s, scenario, s.assume),
         })),
       focusField: (focus) => set({ fieldFocus: { ...focus, seq: ++requestSeq } }),
       fieldFocused: (seq) => set((s) => (s.fieldFocus?.seq === seq ? { fieldFocus: undefined } : {})),
@@ -559,7 +592,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           assume,
           stale: inputsStale(s),
           error: authorsErrorCleared(s.error, 'assume'),
-          pin: pinOver(s, s.scenario, assume),
+          change: pinOver(s, s.scenario, assume),
         })),
       setDetail: (detail) => set((s) => ({ detail, stale: inputsStale(s) })),
       setFocus: (focus) => set({ focus }),
@@ -604,16 +637,28 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           },
         })),
       unknownFocused: (seq) => set((s) => (s.unknownFocus?.seq === seq ? { unknownFocus: undefined } : {})),
-      transact: (input) => commit((s) => history.transact(s.edit, s.files.byPath, input, contextOf(s))),
+      transact: (input) =>
+        commit(
+          (s) => history.transact(s.edit, s.files.byPath, input, contextOf(s)),
+          () => ({ label: input.label }),
+        ),
       typed: (path, splices, alone) =>
-        commit((s) => history.typed(s.edit, s.files.byPath, path, splices, contextOf(s), alone)),
+        commit(
+          (s) => history.typed(s.edit, s.files.byPath, path, splices, contextOf(s), alone),
+          () => ({ label: `Edited ${fileLabel(path)}`, quiet: true }),
+        ),
       closeGroup: () => set((s) => (s.edit.group ? { edit: { ...s.edit, ...history.close(s.edit) } } : s)),
       offerRestore: (restore) => set((s) => ({ edit: { ...s.edit, restore } })),
       settleRestore: (path, keep) => {
         const conflict = get().edit.restore?.conflicts.find((c) => c.path === path);
         if (!conflict) return;
-        if (keep === 'mine')
-          commit((s) => history.transact(s.edit, s.files.byPath, restoreOf(s, conflict), contextOf(s)));
+        if (keep === 'mine') {
+          const input = restoreOf(get(), conflict);
+          commit(
+            (s) => history.transact(s.edit, s.files.byPath, input, contextOf(s)),
+            () => ({ label: input.label }),
+          );
+        }
         set((s) => ({ edit: withoutConflict(s.edit, path) }));
       },
       setReplacing: (replacing) => set({ replacing }),
@@ -627,8 +672,22 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         set((s) =>
           s.edit.unlocked.includes(path) ? s : { edit: { ...s.edit, unlocked: [...s.edit.unlocked, path] } },
         ),
-      undo: () => revealed(commit((s) => history.undo(s.edit, s.files.byPath), 'undo')),
-      redo: () => revealed(commit((s) => history.redo(s.edit, s.files.byPath), 'redo')),
+      undo: () =>
+        revealed(
+          commit(
+            (s) => history.undo(s.edit, s.files.byPath),
+            (s) => ({ label: `Undo ${history.undoLabel(s.edit)}` }),
+            'undo',
+          ),
+        ),
+      redo: () =>
+        revealed(
+          commit(
+            (s) => history.redo(s.edit, s.files.byPath),
+            (s) => ({ label: `Redo ${history.redoLabel(s.edit)}` }),
+            'redo',
+          ),
+        ),
       projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
       // A new project of the newest texts: whatever was held is released.
       projectReady: (version, outline, files) =>
@@ -657,7 +716,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           // A plan of older texts (an input changed while an edit was loading) is still behind the edit.
           stale: plan.for.files < s.files.version ? 'edit' : false,
           error: replaceError(s.error, undefined),
-          pin: answered(s.pin, plan),
+          change: answered(s.change, plan),
         })),
       rejected: (error) => set((s) => ({ error: replaceError(s.error, error) })),
       clearError: () => set((s) => ({ error: replaceError(s.error, undefined) })),
@@ -681,6 +740,7 @@ type StepOutcome = history.Step | history.Refusal | undefined;
 function committed(
   s: SessionState,
   outcome: StepOutcome,
+  said: Said,
   stopped?: { verb: string; id: number },
 ): { patch: Partial<SessionState>; outcome: EditOutcome } {
   if (outcome === undefined) return { patch: s, outcome: { ok: false } };
@@ -705,8 +765,22 @@ function committed(
       eols: Object.fromEntries(Object.keys(outcome.edits).map((p) => [p, s.files.meta[p]?.eol ?? 'none'])),
     };
   if (!texts.files) return { patch, outcome: { ok: false } };
-  patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
-  return { patch, outcome: { ok: true } };
+  return { patch: { ...patch, ...besideTexts(s, outcome, texts.files, said) }, outcome: { ok: true } };
+}
+
+/**
+ * What a commit that changed the texts leaves besides them: the source's buffers that follow them, and the change it
+ * opens or goes on with. Only a project file's text is in the plan, so an edit of a test file (C10) says nothing.
+ */
+function besideTexts(
+  s: SessionState,
+  step: history.Step,
+  files: SessionState['files'],
+  said: Said,
+): Partial<SessionState> {
+  const source = writtenThrough(s.source, step.changes, files.byPath);
+  if (!Object.keys(step.changes).some(isProjectFile)) return { source };
+  return { source, change: editOver(s, files.version, said) };
 }
 
 /**
@@ -860,29 +934,100 @@ function withYamlFile(ui: SessionState['ui'], yamlFile: string | undefined): Ses
 const toggled = (list: readonly string[], item: string): string[] =>
   list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
 
-/**
- * A pin over the store as it is: the plan it is made over and the inputs it leaves. Its `seq` comes from `pinSeq`,
- * so one pin and the next always differ in parity, whatever cleared the pin between them.
- */
-const pinOver = (s: SessionState, scenario: ScenarioInput, assume: AssumeEntry[]): Pin => ({
-  seq: ++pinSeq,
-  ...(s.plan ? { before: { plan: s.plan.plan, derived: s.plan.derived } } : {}),
-  scenario,
-  assume,
-});
+/** The plan on screen as a change is made over it, if any. */
+const beforeOf = (plan: PlanState | undefined): { before?: Before } =>
+  plan ? { before: { plan: plan.plan, derived: plan.derived, for: plan.for } } : {};
 
 /**
- * The pin with what the plan answering it changed: the plan simulated from the very inputs the pin left. A plan for
- * other inputs (an older reply, an edit after the pin) leaves the pin waiting; one already answered stays as it is.
- * A settled pin drops the plan it was made over, which nothing reads once the changes are known, so the store does
- * not hold an old plan for as long as the pin stays.
+ * A pin over the store as it is: the plan it is made over and the inputs it leaves. Its `seq` comes from
+ * `changeSeq`, so one change and the next always differ in parity, whatever cleared the change between them.
  */
-function answered(pin: Pin | undefined, plan: PlanState): Pin | undefined {
-  if (!pin?.before || pin.after || plan.for.scenario !== pin.scenario || plan.for.assume !== pin.assume)
-    return pin;
-  const changes = verdictChanges(pin.before, plan);
-  const { seq, scenario, assume } = pin;
-  return { seq, scenario, assume, after: { plan: plan.plan, changes, sentence: pinSentence(changes) } };
+const pinOver = (s: SessionState, scenario: ScenarioInput, assume: AssumeEntry[]): Change => ({
+  seq: ++changeSeq,
+  cause: 'pin',
+  label: 'pinned',
+  ...beforeOf(s.plan),
+  waitFor: { scenario, assume },
+});
+
+/** What a commit of the history says it did, and whether it is only keys typed in the pane. */
+interface Said {
+  label: string;
+  quiet?: true;
+}
+
+/**
+ * The change a commit that changed a project file leaves (§ 7.4). An unanswered edit goes on: it waits for the newest
+ * files, takes the newest label and keeps the plan from before the burst's first edit. Anything else gives way, an
+ * unanswered pin included, to a new edit over the plan on screen; with no plan there is nothing to compare.
+ */
+function editOver(s: SessionState, files: number, said: Said): Change | undefined {
+  const open = s.change?.cause === 'edit' && !s.change.after ? s.change : undefined;
+  const quiet = said.quiet && (!open || open.quiet) ? { quiet: said.quiet } : {};
+  if (open) {
+    const { quiet: _, ...rest } = open;
+    return { ...rest, label: said.label, waitFor: { files }, ...quiet };
+  }
+  if (!s.plan) return undefined;
+  return {
+    seq: ++changeSeq,
+    cause: 'edit',
+    label: said.label,
+    ...beforeOf(s.plan),
+    waitFor: { files },
+    ...quiet,
+  };
+}
+
+/**
+ * The change with what the plan answering it changed; one already answered, or with no plan to compare, stays as it
+ * is. A settled change drops the plan it was made over, which nothing reads once the rows are known, so the store
+ * does not hold an old plan for as long as the change stays.
+ */
+function answered(change: Change | undefined, plan: PlanState): Change | undefined {
+  if (!change?.before || change.after) return change;
+  return change.cause === 'pin'
+    ? pinAnswered(change, change.before, plan)
+    : editAnswered(change, change.before, plan);
+}
+
+/**
+ * A pin is answered by the plan simulated from the very inputs it left. A plan for other inputs (an older reply, an
+ * edit after the pin) leaves it waiting.
+ */
+const pinAnswered = (pin: Change, before: Before, plan: PlanState): Change =>
+  plan.for.scenario === pin.waitFor.scenario && plan.for.assume === pin.waitFor.assume
+    ? settled(pin, before, plan)
+    : pin;
+
+/**
+ * An edit is answered by the first plan of its newest files or newer ones, which `run()` labels honestly. A plan of
+ * older files leaves it waiting; when that plan is for other inputs than the plan before (the scenario changed during
+ * the burst), it becomes the plan before, so the answer is compared with a plan of its own scenario. An answer for
+ * other inputs than the plan before can say nothing of the edit alone, and the change goes.
+ */
+function editAnswered(edit: Change, before: Before, plan: PlanState): Change | undefined {
+  const same = sameInputs(before, plan);
+  if (plan.for.files < (edit.waitFor.files ?? 0)) return same ? edit : { ...edit, ...beforeOf(plan) };
+  return same ? settled(edit, before, plan) : undefined;
+}
+
+/** Whether two plans were simulated from the same scenario, assume entries and detail. */
+const sameInputs = (a: Before, b: PlanState): boolean =>
+  a.for.scenario === b.for.scenario && a.for.assume === b.for.assume && a.plan.detail === b.plan.detail;
+
+/** The change settled by the plan that answers it: its rows and its sentence, the plan before let go. */
+function settled(change: Change, before: Before, plan: PlanState): Change {
+  const diff = diffOf(before.plan, plan.plan, change.renames);
+  const rows = changeRows(diff, before, plan);
+  const sentence =
+    change.cause === 'pin'
+      ? pinSentence(verdictChanges(before, plan, diff))
+      : change.quiet && !rows.length
+        ? undefined
+        : changeSentence(rows, change.label);
+  const { before: _, ...rest } = change;
+  return { ...rest, after: { plan: plan.plan, rows, ...(sentence === undefined ? {} : { sentence }) } };
 }
 
 /** Why the pane may not edit a file, or that it may. */
