@@ -1,0 +1,83 @@
+name: Deployment smoke
+# Each Vercel deployment of the web app (the Vercel project `simulci`, root apps/web), in Chromium as Vercel serves it
+# (apps/web/e2e/deploy.spec.ts): the headers vercel.json sets (the CSP, the worker scripts included, and the cache
+# rules), a deep link and a missing chunk, and the starter sample's plan with both workers running under the CSP.
+# Vercel sends a repository_dispatch event once a deployment is ready. GitHub runs this file as it is on main, and the
+# job checks out main: no code from the deployed commit runs here, a fork's included. The result goes on the deployed
+# commit as the `Deployment smoke` status, so a pull request shows it. Deployments are public, or the
+# VERCEL_AUTOMATION_BYPASS_SECRET secret (Vercel's Protection Bypass for Automation) gets the smoke past protection.
+on:
+  repository_dispatch:
+    types: [vercel.deployment.success]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Deployment smoke
+    # The docs site is another Vercel project on this repository.
+    if: github.event.client_payload.project.name == 'simulci'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The pending and final `Deployment smoke` status on the deployed commit.
+      statuses: write
+    steps:
+      - id: deployment
+        name: The deployment and its commit
+        env:
+          HOST: ${{ github.event.client_payload.url }}
+          SHA: ${{ github.event.client_payload.git.sha }}
+        run: |
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then echo "::error::not a commit SHA: $SHA"; exit 1; fi
+          HOST="${HOST#https://}"
+          if [[ ! "$HOST" =~ ^[A-Za-z0-9.-]+$ ]]; then echo "::error::not a deployment host: $HOST"; exit 1; fi
+          echo "url=https://$HOST" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+      - name: Pending on the deployed commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.deployment.outputs.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=pending -f context='Deployment smoke'
+          -f description='Checking the deployment in Chromium' -f target_url="$RUN"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The Chromium build the pinned @playwright/test drives, and the system libraries it needs.
+      - run: pnpm --filter @simulci/web exec playwright install --with-deps chromium
+      - name: The deployment as Vercel serves it
+        env:
+          BASE_URL: ${{ steps.deployment.outputs.url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: pnpm --filter @simulci/web e2e
+      - id: traces
+        # A failed test keeps its trace (apps/web/playwright.config.ts); `pnpm exec playwright show-trace` replays it.
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deployment-smoke-traces
+          path: apps/web/test-results/
+      - name: The result on the deployed commit
+        if: always() && steps.deployment.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.deployment.outputs.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULT: ${{ job.status }}
+        run: |
+          case "$RESULT" in
+            success) STATE=success DESCRIPTION='The deployment serves the app as vercel.json says' ;;
+            failure) STATE=failure DESCRIPTION='The deployment failed the smoke: see the run' ;;
+            *) STATE=error DESCRIPTION="The smoke did not finish ($RESULT)" ;;
+          esac
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$STATE" -f context='Deployment smoke' \
+            -f description="$DESCRIPTION" -f target_url="$RUN"

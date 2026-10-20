@@ -213,7 +213,10 @@ describe("what the web app's Vite config builds", () => {
     const copy = join(dir, 'dist/assets', 'layout-worker.mjs');
     copyFileSync(join(dir, 'dist/assets', chunk), copy);
     vi.stubGlobal('self', globalThis);
-    vi.stubGlobal('addEventListener', (_: string, l: (typeof listeners)[number]) => listeners.push(l));
+    // The worker's message listener; the CSP listener it adds first (worker/csp.ts) is not under test here.
+    vi.stubGlobal('addEventListener', (type: string, l: (typeof listeners)[number]) => {
+      if (type === 'message') listeners.push(l);
+    });
     vi.stubGlobal('postMessage', (m: LayoutResponse) => posted.push(m));
     try {
       await import(pathToFileURL(copy).href);

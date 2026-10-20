@@ -134,7 +134,10 @@ describe('the layout worker', () => {
     const listeners: ((event: { origin: string; source: unknown; data: unknown }) => void)[] = [];
     const posted: LayoutResponse[] = [];
     vi.stubGlobal('self', globalThis);
-    vi.stubGlobal('addEventListener', (_: string, l: (typeof listeners)[number]) => listeners.push(l));
+    // The worker's message listener; the CSP listener it adds first (worker/csp.ts) is not under test here.
+    vi.stubGlobal('addEventListener', (type: string, l: (typeof listeners)[number]) => {
+      if (type === 'message') listeners.push(l);
+    });
     vi.stubGlobal('postMessage', (m: LayoutResponse) => posted.push(m));
     await import('../src/worker/layout.worker');
     expect(listeners).toHaveLength(1);

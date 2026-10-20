@@ -8,7 +8,8 @@ jobs and steps run, skip or might run, why, and which values flow between them. 
   evaluated, and every unknown named with the mock that would pin it.
 - **`simulci test`:** route tests in your repository (`.github/simulci/tests/*.test.yml`) that run in milliseconds in
   CI: "a fork pull request never reaches `deploy`", "a docs-only push starts nothing".
-- **The app:** the same engine in your browser, with a builder that re-simulates on every edit.
+- **[The app](https://simulci.vercel.app):** the same engine in your browser, with a builder that re-simulates on every
+  edit.
 
 Built on [`@ciatlas/core`](https://github.com/ciatlas/core), the workflow model behind
 [flowpact](https://github.com/ciatlas/flowpact). flowpact answers what is true for every run (the wiring, values that
@@ -35,7 +36,8 @@ job summary, `junit`), or prints the plan of a scenario:
 
 ## Status
 
-The engine, the CLI and the action are the first release; the web app and the self-host image follow.
+The engine, the CLI and the action are released. The app simulates in the browser at https://simulci.vercel.app; its
+builder and the self-host image follow.
 
 ## Licences
 
