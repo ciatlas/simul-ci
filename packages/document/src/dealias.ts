@@ -24,7 +24,14 @@ export function dealiasDraft(doc: WorkflowDocument, path: YamlPath): Draft | Ref
   if (bad) return bad;
   const at = locate(doc.tree, path);
   const use = at ? doc.anchors.aliases.find((a) => a.node === at.node) : undefined;
-  if (!at || !use) return refusals.notFound(doc.path, path);
+  if (!at) return refusals.notFound(doc.path, path);
+  if (!use)
+    return refusals.unsupported(
+      doc.path,
+      path,
+      `${refusals.describe(path)} is not an alias`,
+      doc.lineOf(path),
+    );
   if (at.alias!.at < path.length)
     return refusals.aliasRefusal(doc.path, path.slice(0, at.alias!.at), at.alias!.node.source, undefined);
   const edits = copyInto(doc, use);

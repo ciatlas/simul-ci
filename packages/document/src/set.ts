@@ -642,7 +642,8 @@ function addDraft(doc: WorkflowDocument, path: YamlPath, value: Json, options: S
       { [key]: value },
       { ...options, order: orderAt(options.order, mapPath.slice(0, -1)) },
     );
-    return isRefusal(deep) ? deep : { ...deep, expect: (js) => setIn(js, path, value), select: path };
+    const expect = (js: unknown) => equivalents(doc, path).reduce((j, p) => setIn(j, p, value), js);
+    return isRefusal(deep) ? deep : { ...deep, expect, select: path };
   }
   const at = reach(doc, mapPath, options);
   if (isRefusal(at)) return at;
@@ -664,14 +665,42 @@ function addKey(
   order: readonly string[] | undefined,
 ): Draft | Refusal {
   const node = at.node;
-  const path = [...mapPath, key];
   const hop = at.hops.at(-1);
-  if ((node === null || (isScalar(node) && node.value === null)) && hop)
-    return replaceValue(doc, hop, node, mapPath, { [key]: value });
+  // An empty value (`jobs:`, `jobs: {}`) is written anew as the map holding the key, outside a flow collection: one
+  // inside (`{with: {}}`) takes the key in its braces, and an empty value there cannot become a map.
+  const flow = hop !== undefined && isFlow(hop.parent);
+  if (emptyValue(node) && hop && !flow) return replaceValue(doc, hop, node, mapPath, { [key]: value });
+  if (!isMap(node) && flow)
+    return refusals.flowShape(
+      doc.path,
+      mapPath,
+      doc.tree.lines.lineAt(hop.parent.range[0]) + 1,
+      'and cannot hold a map',
+    );
   if (!isMap(node))
-    return refusals.unsupported(doc.path, mapPath, `${refusals.describe(mapPath)} is not a map`);
-  const map = node;
-  if (isFlow(map)) return flowAddKey(doc, map, mapPath, key, value);
+    return refusals.unsupported(
+      doc.path,
+      mapPath,
+      `${refusals.describe(mapPath)} is not a map`,
+      doc.lineOf(mapPath),
+    );
+  return isFlow(node)
+    ? flowAddKey(doc, node, mapPath, key, value)
+    : blockAddKey(doc, node, mapPath, key, value, order);
+}
+
+const emptyValue = (node: ParsedNode | null): boolean =>
+  node === null || (isScalar(node) && node.value === null) || (isMap(node) && node.items.length === 0);
+
+function blockAddKey(
+  doc: WorkflowDocument,
+  map: YAMLMap.Parsed,
+  mapPath: YamlPath,
+  key: string,
+  value: Json,
+  order: readonly string[] | undefined,
+): Draft | Refusal {
+  const path = [...mapPath, key];
   const column = map.items.length > 0 ? itemColumn(doc.tree, map) : 0;
   const lines = renderPair(
     key,

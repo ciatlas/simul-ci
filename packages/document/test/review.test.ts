@@ -221,3 +221,33 @@ describe('review regressions: anchors', () => {
     expect(result(set(doc, ['jobs', 'a', 'runs-on'], 'y'))).toBe('refused: anchor');
   });
 });
+
+describe('review regressions: what the ops review found in the primitives', () => {
+  it('adds a key to `{}` and an item to `[]` by writing the collection anew', () => {
+    const doc = open('on: push\njobs: {}\nenv: []\n');
+    expect(result(set(doc, ['jobs', 'a'], { 'runs-on': 'x' }))).toBe(
+      'on: push\njobs:\n  a:\n    runs-on: x\nenv: []\n',
+    );
+    expect(result(insert(doc, ['env'], 0, 'x'))).toBe('on: push\njobs: {}\nenv: [x]\n');
+  });
+
+  it('refuses an index that is not a whole number', () => {
+    const doc = open(job('    steps:\n      - run: a\n'));
+    expect(result(insert(doc, ['jobs', 'a', 'steps'], 0.5, { run: 'b' }))).toBe('refused: out-of-range');
+    expect(result(insert(doc, ['jobs', 'a', 'steps'], Number.NaN, { run: 'b' }))).toBe(
+      'refused: out-of-range',
+    );
+  });
+
+  it('adds a missing map to every use under "Change all"', () => {
+    const doc = open(fixture('shared.yml'));
+    const all = set(doc, ['jobs', 'build', 'outputs', 'o'], 'v', { shared: 'all' });
+    expect(result(all)).toContain('    outputs:\n      o: v\n');
+  });
+
+  it('adds a key to `{}` inside a flow collection in its braces, and refuses an empty value there', () => {
+    const doc = open('on: push\njobs:\n  build: {runs-on: x, env: {}, outputs: ~, steps: [{run: a}]}\n');
+    expect(result(set(doc, ['jobs', 'build', 'env', 'X'], '1'))).toContain("env: {X: '1'}");
+    expect(result(set(doc, ['jobs', 'build', 'outputs', 'o'], 'v'))).toBe('refused: flow-shape');
+  });
+});

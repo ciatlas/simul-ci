@@ -83,7 +83,9 @@ function chainRefusal(
     line: def.line,
     redefined: doc.anchors.definitions(def.name).length > 1,
   }));
-  return refusals.sharedAnchor(doc.path, path, named, uses, equivalents(doc, path).length);
+  // As many places as the edit would change: an entry's removal or rename reaches its collection's uses.
+  const places = (options.sharedAbove ? entryEquivalents(doc, path) : equivalents(doc, path)).length;
+  return refusals.sharedAnchor(doc.path, path, named, uses, places);
 }
 
 /** The anchored nodes on a chain that aliases use elsewhere, innermost first. */
@@ -148,17 +150,20 @@ export function orphanedIn(
   path: YamlPath,
 ): Refusal | undefined {
   const inside = (offset: number) => offset >= range.from && offset < range.to;
-  for (const def of doc.anchors.shared) {
-    if (!inside(def.from)) continue;
-    const outside = def.aliases.filter((alias) => !inside(alias.from));
-    if (outside.length === 0) continue;
-    const redefined = doc.anchors.definitions(def.name).length > 1;
-    return refusals.orphanedAnchor(
-      doc.path,
-      path,
-      { name: def.name, line: def.line, redefined },
-      outside.map((a) => a.line),
-    );
-  }
-  return undefined;
+  const orphans = doc.anchors.shared.filter(
+    (def) => inside(def.from) && def.aliases.some((a) => !inside(a.from)),
+  );
+  if (orphans.length === 0) return undefined;
+  const uses = orphans.flatMap((def) => def.aliases.filter((a) => !inside(a.from)).map((a) => a.line));
+  const defs = orphans.map((def) => ({
+    name: def.name,
+    line: def.line,
+    redefined: doc.anchors.definitions(def.name).length > 1,
+  }));
+  return refusals.orphanedAnchor(
+    doc.path,
+    path,
+    defs,
+    [...new Set(uses)].sort((a, b) => a - b),
+  );
 }

@@ -60,7 +60,7 @@ function intoList(
   options: InsertOptions,
 ): Draft | Refusal {
   const found = locate(doc.tree, seqPath);
-  const missing = !found || isNullAt(found, seqPath);
+  const missing = !found || emptyAt(found, seqPath);
   // A comment goes above an item of a block list; a list created or one in brackets has no line for it.
   if ((options.commentBefore?.length ?? 0) > 0 && (missing || isFlow(found.node)))
     return refusals.unsupported(doc.path, seqPath, `a comment cannot go into ${refusals.describe(seqPath)}`);
@@ -70,8 +70,14 @@ function intoList(
     : refusals.outOfRange(doc.path, [...seqPath, index], 0);
 }
 
-const isNullAt = (at: Located, path: YamlPath): boolean =>
-  at.hops.length === path.length && isScalar(at.node) && at.node.value === null;
+/** An empty value or `[]`, written anew as the list holding the item, as a missing list is. */
+function emptyAt(at: Located, path: YamlPath): boolean {
+  if (at.hops.length !== path.length) return false;
+  return (
+    (isScalar(at.node) && at.node.value === null) ||
+    (isSeq(at.node) && isFlow(at.node) && at.node.items.length === 0)
+  );
+}
 
 function intoItems(
   doc: WorkflowDocument,
@@ -82,7 +88,7 @@ function intoItems(
 ): Draft | Refusal {
   const seq = reachList(doc, seqPath, options);
   if (isRefusal(seq)) return seq;
-  if (index < 0 || index > seq.items.length)
+  if (!Number.isInteger(index) || index < 0 || index > seq.items.length)
     return refusals.outOfRange(doc.path, [...seqPath, index], seq.items.length);
   // An item holding an expression turns a flow list into a block one (G5): the list is written anew.
   if (isFlow(seq) && holdsExpression(value))
@@ -266,7 +272,7 @@ function anchorOrder(
       return refusals.orphanedAnchor(
         doc.path,
         [...path, home],
-        { name: def.name, line: def.line, redefined },
+        [{ name: def.name, line: def.line, redefined }],
         (early.length > 0 ? early : def.aliases).map((a) => a.line),
       );
   }
@@ -283,5 +289,5 @@ function reachList(
   if (isRefusal(at)) return at;
   return isSeq(at.node)
     ? at.node
-    : refusals.unsupported(doc.path, path, `${refusals.describe(path)} is not a list`);
+    : refusals.unsupported(doc.path, path, `${refusals.describe(path)} is not a list`, doc.lineOf(path));
 }

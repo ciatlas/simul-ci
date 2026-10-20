@@ -175,10 +175,6 @@ export function describe(path: YamlPath): string {
   return `${job}'s \`${path.slice(2).join('.')}\``;
 }
 
-/** Who gets a copy when an alias is replaced: the job, else "it". */
-const owner = (path: YamlPath): string =>
-  path[0] === 'jobs' && typeof path[1] === 'string' ? path[1] : 'it';
-
 export function notFound(file: string, path: YamlPath): Refusal {
   return refuse('not-found', file, `${subject(path)} is not in ${fileName(file)} any more.`, {
     at: path,
@@ -204,7 +200,7 @@ export function aliasRefusal(
   const fixes: Fix[] = [
     {
       kind: 'ops',
-      label: `Give ${owner(at)} its own value`,
+      label: `Give ${describe(at)} its own value`,
       ops: [{ op: 'dealias', file, path: at }],
       retry: true,
     },
@@ -251,25 +247,34 @@ export function copyAnchor(file: string, def: { name: string; line: number; rede
     : { op: 'dealiasAnchor', file, anchor: def.name };
 }
 
+/**
+ * Anchors an edit would take with it while aliases elsewhere use them. The fix copies each into its uses, the last
+ * one first, so the lines of the ones above it stay as they are named.
+ */
 export function orphanedAnchor(
   file: string,
   at: YamlPath,
-  def: { name: string; line: number; redefined: boolean },
+  defs: readonly { name: string; line: number; redefined: boolean }[],
   uses: readonly number[],
 ): Refusal {
-  const { name, line, redefined } = def;
+  const [first] = defs;
+  const what =
+    defs.length === 1
+      ? `on line ${first!.line} defines \`&${first!.name}\``
+      : `defines ${defs.map((d) => `\`&${d.name}\` (line ${d.line})`).join(' and ')}`;
+  const n = uses.length;
   return refuse(
     'anchor',
     file,
-    `${subject(at)} on line ${line} defines \`&${name}\`, which ${uses.length} other place${uses.length === 1 ? '' : 's'} reuse${uses.length === 1 ? 's' : ''} (line${uses.length === 1 ? '' : 's'} ${uses.join(', ')}).`,
+    `${subject(at)} ${what}, which ${n} other place${n === 1 ? '' : 's'} reuse${n === 1 ? 's' : ''} (line${n === 1 ? '' : 's'} ${uses.join(', ')}).`,
     {
       at,
-      line,
+      line: first!.line,
       fixes: [
         {
           kind: 'ops',
           label: 'Copy into its uses first',
-          ops: [copyAnchor(file, { name, line, redefined })],
+          ops: defs.toSorted((a, b) => b.line - a.line).map((def) => copyAnchor(file, def)),
           retry: true,
         },
       ],
@@ -308,11 +313,17 @@ export function flowShape(file: string, at: YamlPath, line: number, why: string)
   });
 }
 
+/** Whether a reason starts with a job's id as its subject, as `describe` writes it. */
+const startsWithId = (why: string, id: string): boolean =>
+  why.startsWith(id) && /^(?:'s | (?:is|cannot|would|starts|has) )/.test(why.slice(id.length));
+
 export function unsupported(file: string, at: YamlPath, why: string, line?: number): Refusal {
+  // A sentence starts with a capital, but a job id keeps its case (`build's step 1 …`, `build is not a map`).
+  const id = at[0] === 'jobs' && typeof at[1] === 'string' && startsWithId(why, at[1]);
   return refuse(
     'unsupported-shape',
     file,
-    `${why.replace(/^[a-z]/, (c) => c.toUpperCase())}; edit it in the YAML pane.`,
+    `${id ? why : why.replace(/^[a-z]/, (c) => c.toUpperCase())}; edit it in the YAML pane.`,
     {
       at,
       ...(line === undefined ? {} : { line, fixes: [reveal(line)] }),
@@ -379,9 +390,11 @@ export function moved(file: string, at: YamlPath): Refusal {
 /** `job` needing `need` closes a loop: `need` already reaches `job` through `through`. */
 export function cycle(file: string, job: string, need: string, through: readonly string[]): Refusal {
   const via = through.length === 0 ? '' : ` through ${through.join(', ')}`;
-  return refuse('cycle', file, `${need} already needs ${job}${via}; ${job} needing ${need} would loop.`, {
-    at: ['jobs', job, 'needs'],
-  });
+  const message =
+    need.toLowerCase() === job.toLowerCase()
+      ? `${job} cannot need itself.`
+      : `${need} already needs ${job}${via}; ${job} needing ${need} would loop.`;
+  return refuse('cycle', file, message, { at: ['jobs', job, 'needs'] });
 }
 
 export function recursiveAlias(file: string, name: string, line: number): Refusal {

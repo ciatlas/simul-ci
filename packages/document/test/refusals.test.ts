@@ -38,7 +38,7 @@ describe('refusals of the primitives (§ 2.8)', () => {
       fixes: [
         {
           kind: 'ops',
-          label: 'Give test its own value',
+          label: "Give test's `runs-on` its own value",
           ops: [{ op: 'dealias', file: PATH, path: ['jobs', 'test', 'runs-on'] }],
           retry: true,
         },
@@ -84,14 +84,19 @@ describe('refusals of the primitives (§ 2.8)', () => {
       ok: false,
       reason: 'anchor',
       file: PATH,
-      message: 'build on line 5 defines `&job`, which 1 other place reuses (line 20).',
+      message:
+        'build defines `&job` (line 5) and `&checkout` (line 8), which 2 other places reuse (lines 18, 20).',
       at: ['jobs', 'build'],
       line: 5,
       fixes: [
         {
           kind: 'ops',
           label: 'Copy into its uses first',
-          ops: [{ op: 'dealiasAnchor', file: PATH, anchor: 'job' }],
+          // The last anchor first: the lines of the ones above stay as named.
+          ops: [
+            { op: 'dealiasAnchor', file: PATH, anchor: 'checkout' },
+            { op: 'dealiasAnchor', file: PATH, anchor: 'job' },
+          ],
           retry: true,
         },
       ],
@@ -171,19 +176,19 @@ describe('refusals of the primitives (§ 2.8)', () => {
       'The whole file cannot be replaced by an edit; edit it in the YAML pane.',
     );
     expect(refused(set(doc, ['jobs', 'build', 'steps', 'x'], 1)).message).toBe(
-      "Build's `steps` is not a map; edit it in the YAML pane.",
+      "build's `steps` is not a map; edit it in the YAML pane.",
     );
     expect(refused(insert(doc, ['jobs', 'build'], 0, 1)).message).toBe(
-      'Build is not a list; edit it in the YAML pane.',
+      'build is not a list; edit it in the YAML pane.',
     );
     expect(refused(remove(doc, ['jobs', 'build', 'steps', 2, 'run'])).message).toBe(
-      "Build's step 3 would be left empty; edit it in the YAML pane.",
+      "build's step 3 would be left empty; edit it in the YAML pane.",
     );
     expect(refused(remove(open('on: push\n'), ['on'])).message).toBe(
       'The file would be left empty; edit it in the YAML pane.',
     );
     expect(refused(renameKey(doc, ['jobs', 'build', 'steps', 0], 'x')).message).toBe(
-      "Build's step 1 is not a key; edit it in the YAML pane.",
+      "build's step 1 is not a key; edit it in the YAML pane.",
     );
   });
 
@@ -204,7 +209,10 @@ describe('refusals of the primitives (§ 2.8)', () => {
     expect(refused(insert(doc, ['jobs', 'build', 'steps'], 9, 'x')).reason).toBe('out-of-range');
     expect(refused(move(doc, ['jobs', 'build', 'steps'], 0, 3)).reason).toBe('out-of-range');
     expect(refused(insert(doc, ['jobs', 'build', 'services'], 1, 'x')).reason).toBe('out-of-range');
-    expect(refused(dealias(doc, ['jobs', 'build'])).reason).toBe('not-found');
+    expect(refused(dealias(doc, ['jobs', 'nope'])).reason).toBe('not-found');
+    expect(refused(dealias(doc, ['jobs', 'build'])).message).toBe(
+      'build is not an alias; edit it in the YAML pane.',
+    );
     expect(refused(dealiasAnchor(doc, 'nope'))).toMatchObject({
       reason: 'not-found',
       message: '`&nope` is not in ci.yml any more.',
