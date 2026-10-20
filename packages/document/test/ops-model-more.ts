@@ -222,7 +222,7 @@ function rewriteReads(
     return value;
   }
   if (typeof value !== 'string') return value;
-  const name = old.replace(/[-]/g, '\\-');
+  const name = old.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
   const read = new RegExp(
     `((?<![\\w.-])(?:${contexts(path).join('|')})\\s*(?:\\.\\s*|\\[\\s*'))${name}(?![\\w-])`,
     'gi',
