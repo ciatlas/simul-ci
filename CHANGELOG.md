@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/ciatlas/simulci/compare/v0.2.0...v0.3.0) (2026-10-20)
+
+
+### Features
+
+* **docs:** the docs site ([#37](https://github.com/ciatlas/simulci/issues/37)) ([d793a91](https://github.com/ciatlas/simulci/commit/d793a915b6ae3564671831fe42d29e80215ff533))
+* **docs:** the reference pages ([461f06f](https://github.com/ciatlas/simulci/commit/461f06f992890e17d8168a4f4e1f86a9bcccaca2))
+* **web:** copy a plan as a test case ([#32](https://github.com/ciatlas/simulci/issues/32)) ([a1a3441](https://github.com/ciatlas/simulci/commit/a1a34416da18b0b467ea007bb7e2faade706fa31))
+* **web:** the accessibility pass ([#33](https://github.com/ciatlas/simulci/issues/33)) ([6745d8b](https://github.com/ciatlas/simulci/commit/6745d8b2b40deecbaaa2b6fd83246b77c9dafce6))
+
+
+### Bug Fixes
+
+* **cli:** keep every value of a repeated flag, and exit 2 on bad input ([461f06f](https://github.com/ciatlas/simulci/commit/461f06f992890e17d8168a4f4e1f86a9bcccaca2))
+* **cli:** refuse unknown flag values, show kebab-case flags, exit 2 on errors ([#42](https://github.com/ciatlas/simulci/issues/42)) ([301dadf](https://github.com/ciatlas/simulci/commit/301dadf594cbd40358b299c33041da9def1eff10))
+
 ## [0.2.0](https://github.com/ciatlas/simulci/compare/v0.1.0...v0.2.0) (2026-10-19)
 
 
