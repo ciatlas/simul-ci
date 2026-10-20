@@ -155,6 +155,12 @@ test('a drag that would loop draws no need and says why', async ({ page }) => {
   await expect(status(page).getByRole('status')).toContainText(sentence);
   await expect(page.getByRole('note', { name: 'Refused' })).toContainText(sentence);
   await expect(page.getByRole('button', { name: /^Undo/ }).first()).toHaveAttribute('aria-disabled', 'true');
+  // The note under the card and a removal's question after it are two things: one question, not two.
+  await jobNode(page, 'build').click();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('dialog[open]')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
   expect(await downloaded(page)).toBe(CI);
 });
 
