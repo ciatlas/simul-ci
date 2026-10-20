@@ -1,12 +1,13 @@
 import { hashFiles } from '../lib/hash';
 import type { SourceStore, StoredSource } from '../state/persist';
-import type { SessionStore, Source } from '../state/store';
+import type { SessionState, SessionStore, Source } from '../state/store';
 import { type Dropped, filesFromDrop } from './drop';
 import { filterFiles } from './filter';
 import { canPickFolder, canReadFolder, pickFolder, readFolder, requestFolder } from './folder';
 import { leftOut, overLimit, type Skipped, type Walked } from './limits';
 import { checkPaste, type PasteCheck } from './paste';
 import { filesFromList } from './picker';
+import type { FileMeta } from './read';
 import { sampleByName } from './samples';
 
 /**
@@ -33,6 +34,17 @@ export interface Sources {
 
 const LOOKED_FOR = 'looked for .github/workflows/*.yml, .github/actions/**/action.yml and action.yml';
 
+/** What a way in brought: the files, what reading them found (none for strings), and the files it left out. */
+type Brought = Pick<Walked, 'files'> & Partial<Pick<Walked, 'meta' | 'skipped'>>;
+
+/** Whether a folder read again is what the store holds: a BOM added or removed changes no text, but it is a change. */
+function unchanged(read: Walked, files: SessionState['files']): boolean {
+  if (hashFiles(read.files) !== hashFiles(files.byPath)) return false;
+  return Object.entries(read.meta).every(
+    ([path, m]) => m.bom === files.meta[path]?.bom && m.utf8 === files.meta[path]?.utf8,
+  );
+}
+
 export function createSources({ store, persist }: { store: SessionStore; persist: SourceStore }): Sources {
   const actions = store.getState();
 
@@ -46,12 +58,7 @@ export function createSources({ store, persist }: { store: SessionStore; persist
     if (skipped.length) actions.notify(`${where}: ${leftOut(skipped)}`);
   };
 
-  const accept = (
-    files: Record<string, string>,
-    source: Source,
-    where: string,
-    skipped: Skipped[] = [],
-  ): boolean => {
+  const accept = ({ files, meta, skipped = [] }: Brought, source: Source, where: string): boolean => {
     const kept = filterFiles(files);
     if (Object.keys(kept).length === 0) {
       fail(nothingIn(where, skipped, `no workflow files in ${where}: ${LOOKED_FOR}`));
@@ -62,9 +69,9 @@ export function createSources({ store, persist }: { store: SessionStore; persist
       fail(`${where} is too big: ${limit}`);
       return false;
     }
-    actions.setFiles(kept, source);
+    actions.setFiles(kept, source, meta);
     tellLeftOut(where, skipped);
-    void persist.save(source, kept);
+    void persist.save(source, kept, store.getState().files.meta);
     return true;
   };
 
@@ -89,24 +96,36 @@ export function createSources({ store, persist }: { store: SessionStore; persist
     return s.source.kind === 'paste' ? s.source.buffers : [];
   };
 
-  const setBuffers = (buffers: { path: string; text: string }[]): void => {
+  /** What the store holds about these buffers, so a paste or a removal keeps what a drop read of the others. */
+  const metaOf = (buffers: { path: string }[]): Record<string, FileMeta> => {
+    const { meta } = store.getState().files;
+    const kept: Record<string, FileMeta> = {};
+    for (const { path } of buffers) {
+      const m = meta[path];
+      if (m) kept[path] = m;
+    }
+    return kept;
+  };
+
+  const setBuffers = (buffers: { path: string; text: string }[], meta = metaOf(buffers)): void => {
     if (buffers.length === 0) {
       actions.forgetSource();
       void persist.clear();
       return;
     }
-    accept(filesOf(buffers), { kind: 'paste', buffers }, 'the pasted files');
+    accept({ files: filesOf(buffers), meta }, { kind: 'paste', buffers }, 'the pasted files');
   };
 
   /** Dropped files with no folder among them join the pasted buffers, replacing a buffer at the same path. */
-  const dropLoose = ({ files, skipped }: Dropped): void => {
+  const dropLoose = ({ files, meta, skipped }: Dropped): void => {
     if (Object.keys(files).length === 0) {
       fail(nothingIn('the drop', skipped, `nothing in the drop is a workflow file: ${LOOKED_FOR}`));
       return;
     }
     const buffers = buffersOf().filter((b) => !(b.path in files));
+    const read = { ...metaOf(buffers), ...meta };
     for (const [path, text] of Object.entries(files)) buffers.push({ path, text });
-    if (accept(filesOf(buffers), { kind: 'paste', buffers }, 'the pasted files'))
+    if (accept({ files: filesOf(buffers), meta: read }, { kind: 'paste', buffers }, 'the pasted files'))
       tellLeftOut('the drop', skipped);
   };
 
@@ -134,7 +153,10 @@ export function createSources({ store, persist }: { store: SessionStore; persist
     if (!untouched()) return;
     if (!granted) {
       // Not yet: the screen offers "Reopen <name>"; the scenario from the URL waits for the files.
-      store.setState({ source, files: { version: store.getState().files.version + 1, byPath: {} } });
+      store.setState({
+        source,
+        files: { version: store.getState().files.version + 1, byPath: {}, meta: {} },
+      });
       return;
     }
     let read: Walked;
@@ -147,8 +169,7 @@ export function createSources({ store, persist }: { store: SessionStore; persist
       return;
     }
     if (!untouched()) return;
-    if (!accept(read.files, { ...source, readAt: Date.now() }, `the folder ${name}`, read.skipped))
-      await persist.clear();
+    if (!accept(read, { ...source, readAt: Date.now() }, `the folder ${name}`)) await persist.clear();
   };
 
   /** What the last visit stored, set again; a kind this page does not know is nothing stored. */
@@ -161,10 +182,14 @@ export function createSources({ store, persist }: { store: SessionStore; persist
       }
       case 'paste':
         if (stored.buffers.length)
-          actions.setFiles(filesOf(stored.buffers), { kind: 'paste', buffers: stored.buffers });
+          actions.setFiles(filesOf(stored.buffers), { kind: 'paste', buffers: stored.buffers }, stored.meta);
         break;
       case 'copy':
-        actions.setFiles(filesOf(stored.buffers), { kind: 'folder', name: stored.name, readAt: 0 });
+        actions.setFiles(
+          filesOf(stored.buffers),
+          { kind: 'folder', name: stored.name, readAt: 0 },
+          stored.meta,
+        );
         break;
       case 'folder':
         await restoreFolder(stored.name, stored.handle, untouched);
@@ -180,22 +205,17 @@ export function createSources({ store, persist }: { store: SessionStore; persist
         const picked = await pickFolder();
         if (!picked) return;
         accept(
-          picked.files,
+          picked,
           { kind: 'folder', name: picked.name, handle: picked.handle, readAt: Date.now() },
           `the folder ${picked.name}`,
-          picked.skipped,
         );
       }),
 
     chooseFiles: (list) =>
       guarded(async () => {
-        const { name, files, skipped } = await filesFromList(list);
-        accept(
-          files,
-          { kind: 'folder', name: name ?? 'the chosen files', readAt: Date.now() },
-          name ?? 'the chosen files',
-          skipped,
-        );
+        const picked = await filesFromList(list);
+        const name = picked.name ?? 'the chosen files';
+        accept(picked, { kind: 'folder', name, readAt: Date.now() }, name);
       }),
 
     drop: (transfer) =>
@@ -207,15 +227,16 @@ export function createSources({ store, persist }: { store: SessionStore; persist
         }
         const source: Source = { kind: 'folder', name: dropped.name, readAt: Date.now() };
         if (dropped.handle) source.handle = dropped.handle;
-        accept(dropped.files, source, dropped.where, dropped.skipped);
+        accept(dropped, source, dropped.where);
       }),
 
     paste: (path, text) => {
       const check = checkPaste(path, text);
       if (!check.ok) return check;
       const buffers = buffersOf().filter((b) => b.path !== check.path);
+      const meta = metaOf(buffers);
       buffers.push({ path: check.path, text });
-      setBuffers(buffers);
+      setBuffers(buffers, meta);
       return check;
     },
 
@@ -224,7 +245,7 @@ export function createSources({ store, persist }: { store: SessionStore; persist
     useSample: (name) => {
       const sample = sampleByName(name);
       if (!sample) return fail(`no sample named ${name}`);
-      accept(sample.files, { kind: 'sample', name }, `the sample ${name}`);
+      accept({ files: sample.files }, { kind: 'sample', name }, `the sample ${name}`);
     },
 
     reload: () =>
@@ -234,12 +255,12 @@ export function createSources({ store, persist }: { store: SessionStore; persist
         const read = await readAgain(s.source, 'open it again');
         if (!read) return;
         const where = `the folder ${s.source.name}`;
-        if (hashFiles(read.files) === hashFiles(s.files.byPath)) {
+        if (unchanged(read, s.files)) {
           actions.notify(`${s.source.name}: no changes`);
           tellLeftOut(where, read.skipped);
           return;
         }
-        accept(read.files, { ...s.source, readAt: Date.now() }, where, read.skipped);
+        accept(read, { ...s.source, readAt: Date.now() }, where);
       }),
 
     reopen: () =>
@@ -247,13 +268,7 @@ export function createSources({ store, persist }: { store: SessionStore; persist
         const s = store.getState();
         if (s.source.kind !== 'folder') return;
         const read = await readAgain(s.source, 'choose it again');
-        if (read)
-          accept(
-            read.files,
-            { ...s.source, readAt: Date.now() },
-            `the folder ${s.source.name}`,
-            read.skipped,
-          );
+        if (read) accept(read, { ...s.source, readAt: Date.now() }, `the folder ${s.source.name}`);
       }),
 
     forget: async () => {

@@ -211,7 +211,7 @@ describe('the YAML pane', () => {
     const initial = initialSessionState();
     return createSessionStore({
       ...initial,
-      files: { version: 1, byPath: starter },
+      files: { version: 1, byPath: starter, meta: {} },
       project: { status: 'ready', version: 1, outline, files: 3 },
       plan: main.plan,
       focus: CI,
@@ -373,7 +373,7 @@ describe('the YAML pane', () => {
     const initial = initialSessionState();
     const store = createSessionStore({
       ...initial,
-      files: { version: 1, byPath: starter },
+      files: { version: 1, byPath: starter, meta: {} },
       project: { status: 'ready', version: 1, outline: main.outline, files: 3 },
       plan: main.plan,
       focus: CI,
@@ -507,7 +507,7 @@ describe('the YAML pane', () => {
     expect(container.querySelectorAll('.cm-sc-mark')).toHaveLength(0);
     expect(content(container).getAttribute('aria-label')).toBe(`${CI}, read-only`);
     unmount();
-    const stale = mount({ files: { version: 2, byPath: starter } });
+    const stale = mount({ files: { version: 2, byPath: starter, meta: {} } });
     expect(stale.container.querySelectorAll('.cm-sc-mark')).toHaveLength(0);
   });
 

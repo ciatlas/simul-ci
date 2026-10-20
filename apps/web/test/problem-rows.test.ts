@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { AssumeEntry, RunPlan } from '@simulci/engine';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -137,6 +137,26 @@ describe('problemRows', () => {
     ]);
   });
 
+  it('lists a file that is not UTF-8 as a warning, at the line of its first replaced byte', () => {
+    const texts = {
+      byPath: { [CI]: 'on: push\n', [NOTES]: 'on: push\nname: caf\uFFFD\n' },
+      meta: {
+        [CI]: { bom: true, eol: 'lf', utf8: true },
+        [NOTES]: { bom: false, eol: 'lf', utf8: false },
+      },
+    } as const;
+    const encoding = problemRows(undefined, undefined, texts);
+    expect(brief(encoding)).toEqual([['warning', 'encoding', NOTES, 2, undefined]]);
+    expect(encoding[0]!.message).toBe(
+      'notes.yml is not valid UTF-8: invalid bytes are shown and simulated as \uFFFD',
+    );
+    expect(brief(problemRows(outline, plan, texts)).slice(-3)).toEqual([
+      ['warning', 'unsupported', CI, 7, 3],
+      ['warning', 'workflow', NOTES, 1, undefined],
+      ['warning', 'encoding', NOTES, 2, undefined],
+    ]);
+  });
+
   it('words a row’s place as its link reads', () => {
     expect(placeOf({ severity: 'error', code: 'parse', message: '', file: BROKEN, line: 4, column: 1 })).toBe(
       'broken.yml:4:1',
@@ -184,6 +204,25 @@ describe('the Problems tab', () => {
     const warning = items.find((item) => item.textContent?.includes('warning'))!;
     const glyph = warning.querySelector('[aria-hidden="true"]')!;
     expect([glyph.textContent, glyph.classList.contains('text-might-text')]).toEqual(['!', true]);
+  });
+
+  it('shows a file that is not UTF-8 from the files in the store, with a link to its line', async () => {
+    const { store, user } = mount(false);
+    act(() =>
+      store.getState().setFiles(
+        { [NOTES]: 'name: caf\uFFFD\n' },
+        { kind: 'folder', name: 'repo', readAt: 0 },
+        {
+          [NOTES]: { bom: false, eol: 'lf', utf8: false },
+        },
+      ),
+    );
+    const items = within(screen.getByRole('list', { name: 'Problems' })).getAllByRole('listitem');
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining('notes.yml is not valid UTF-8'),
+    ]);
+    await user.click(screen.getByRole('button', { name: new RegExp(`\\(${NOTES} line 1\\)$`) }));
+    expect(store.getState().reveal).toMatchObject({ file: NOTES, line: 1 });
   });
 
   it('says so when there is nothing to report', () => {

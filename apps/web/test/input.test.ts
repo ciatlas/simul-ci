@@ -4,16 +4,24 @@ import { readFolder } from '../src/input/folder';
 import { leftOut } from '../src/input/limits';
 import { checkPaste, DEFAULT_PASTE_PATH, nextPastePath } from '../src/input/paste';
 import { filesFromList } from '../src/input/picker';
+import { type FileMeta, textMeta } from '../src/input/read';
 import { SAMPLES } from '../src/input/samples';
 import { createSources } from '../src/input/sources';
 import { memoryStore } from '../src/lib/idb';
 import { sourceStore, toStored } from '../src/state/persist';
 import { createSessionStore } from '../src/state/store';
 
-/** A tree as `{ name: text | subtree }`, served through the handle API and the older entry API. */
-type Tree = { [name: string]: string | Tree };
+/** A tree as `{ name: text | bytes | subtree }`, served through the handle API and the older entry API. */
+type Tree = { [name: string]: string | Uint8Array<ArrayBuffer> | Tree };
 
-const fileOf = (text: string) => ({ size: text.length, text: () => Promise.resolve(text) });
+const isFile = (v: Tree[string]): v is string | Uint8Array<ArrayBuffer> =>
+  typeof v === 'string' || v instanceof Uint8Array;
+
+/** A File as a walk reads it: its size and its bytes. Text is written as UTF-8; bytes are taken as they are. */
+const fileOf = (content: string | Uint8Array<ArrayBuffer>) => {
+  const blob = new Blob([content]);
+  return { size: blob.size, arrayBuffer: () => blob.arrayBuffer() };
+};
 
 function handleOf(name: string, tree: Tree): FileSystemDirectoryHandle {
   const h = {
@@ -23,9 +31,7 @@ function handleOf(name: string, tree: Tree): FileSystemDirectoryHandle {
       for (const [n, v] of Object.entries(tree))
         yield [
           n,
-          typeof v === 'string'
-            ? { kind: 'file', name: n, getFile: () => Promise.resolve(fileOf(v)) }
-            : handleOf(n, v),
+          isFile(v) ? { kind: 'file', name: n, getFile: () => Promise.resolve(fileOf(v)) } : handleOf(n, v),
         ];
     },
   };
@@ -34,7 +40,7 @@ function handleOf(name: string, tree: Tree): FileSystemDirectoryHandle {
 
 function entryOf(name: string, tree: Tree): FileSystemDirectoryEntry {
   const children = Object.entries(tree).map(([n, v]) =>
-    typeof v === 'string'
+    isFile(v)
       ? { isDirectory: false, isFile: true, name: n, file: (ok: (f: unknown) => void) => ok(fileOf(v)) }
       : entryOf(n, v),
   );
@@ -99,7 +105,7 @@ const folderItem = (name: string, tree: Tree, withHandle = true): FakeItem => ({
 });
 
 /** A dropped file: Chromium gives a file handle, every browser a file entry and the File. */
-const fileItem = (name: string, text: string, withHandle = true): FakeItem => ({
+const fileItem = (name: string, text: string | Uint8Array<ArrayBuffer>, withHandle = true): FakeItem => ({
   kind: 'file',
   ...(withHandle && { handle: { kind: 'file', name } }),
   entry: { isDirectory: false, isFile: true, name },
@@ -108,6 +114,23 @@ const fileItem = (name: string, text: string, withHandle = true): FakeItem => ({
 
 /** Bigger than a file may be. */
 const BIG = 'x'.repeat(2.5 * 1024 * 1024);
+
+const utf8 = (text: string): number[] => Array.from(new TextEncoder().encode(text));
+/** A workflow saved by an editor that writes a BOM and CR LF. */
+const BOM_CRLF = new Uint8Array([0xef, 0xbb, 0xbf, ...utf8('on: push\r\njobs: {}\r\n')]);
+/** A workflow saved as Latin-1: its é is no UTF-8. */
+const LATIN1 = new Uint8Array([...utf8('name: caf'), 0xe9, ...utf8('\non: push\n')]);
+/** What a walk reads of the two. */
+const ODD = {
+  files: {
+    '.github/workflows/bom.yml': 'on: push\r\njobs: {}\r\n',
+    '.github/workflows/latin1.yml': 'name: caf\uFFFD\non: push\n',
+  },
+  meta: {
+    '.github/workflows/bom.yml': { bom: true, eol: 'crlf', utf8: true },
+    '.github/workflows/latin1.yml': { bom: false, eol: 'lf', utf8: false },
+  },
+};
 
 const repo: Tree = {
   '.github': {
@@ -126,9 +149,17 @@ const EXPECTED = {
   'action.yml': 'runs: {}',
 };
 
+/** What reading these files finds: each one is written as UTF-8 without a BOM, so its meta is its string's. */
+const metaOf = (files: Record<string, string>): Record<string, FileMeta> =>
+  Object.fromEntries(Object.entries(files).map(([path, text]) => [path, textMeta(text)]));
+
 describe('the ways in', () => {
   it('walks a folder handle through the directories that can hold project files only', async () => {
-    expect(await readFolder(handleOf('repo', repo))).toEqual({ files: EXPECTED, skipped: [] });
+    expect(await readFolder(handleOf('repo', repo))).toEqual({
+      files: EXPECTED,
+      meta: metaOf(EXPECTED),
+      skipped: [],
+    });
   });
 
   it('leaves out a project file over the per-file limit and says which, on every walk', async () => {
@@ -137,7 +168,8 @@ describe('the ways in', () => {
     };
     const skipped = [{ path: '.github/workflows/big.yml', bytes: BIG.length }];
     const files = { '.github/workflows/ci.yml': 'on: push' };
-    expect(await readFolder(handleOf('repo', tree))).toEqual({ files, skipped });
+    const meta = metaOf(files);
+    expect(await readFolder(handleOf('repo', tree))).toEqual({ files, meta, skipped });
     expect(await filesFromDrop(transferOf([folderItem('repo', tree)]))).toMatchObject({ files, skipped });
     expect(await filesFromDrop(transferOf([folderItem('repo', tree, false)]))).toMatchObject({
       files,
@@ -151,7 +183,22 @@ describe('the ways in', () => {
       { name: 'big.yml', webkitRelativePath: 'repo/.github/workflows/big.yml', ...fileOf(BIG) },
       { name: 'dependabot.yml', webkitRelativePath: 'repo/.github/dependabot.yml', ...fileOf(BIG) },
     ] as unknown as File[];
-    expect(await filesFromList(list)).toEqual({ name: 'repo', files, skipped });
+    expect(await filesFromList(list)).toEqual({ name: 'repo', files, meta, skipped });
+  });
+
+  it('records what reading found of each file on every walk: a BOM, the line endings, bytes that are no UTF-8', async () => {
+    const tree: Tree = { '.github': { workflows: { 'bom.yml': BOM_CRLF, 'latin1.yml': LATIN1 } } };
+    expect(await readFolder(handleOf('repo', tree))).toEqual({ ...ODD, skipped: [] });
+    expect(await filesFromDrop(transferOf([folderItem('repo', tree)]))).toMatchObject(ODD);
+    expect(await filesFromDrop(transferOf([folderItem('repo', tree, false)]))).toMatchObject(ODD);
+    expect(
+      await filesFromDrop(transferOf([fileItem('bom.yml', BOM_CRLF), fileItem('latin1.yml', LATIN1)])),
+    ).toMatchObject(ODD);
+    const list = [
+      { name: 'bom.yml', webkitRelativePath: 'repo/.github/workflows/bom.yml', ...fileOf(BOM_CRLF) },
+      { name: 'latin1.yml', webkitRelativePath: 'repo/.github/workflows/latin1.yml', ...fileOf(LATIN1) },
+    ] as unknown as File[];
+    expect(await filesFromList(list)).toMatchObject(ODD);
   });
 
   it('words the files a walk left out as the per-file limit does', () => {
@@ -175,9 +222,11 @@ describe('the ways in', () => {
         text: () => Promise.resolve(''),
       },
     ] as unknown as File[];
+    const read = { '.github/workflows/ci.yml': 'on: push', 'action.yml': 'runs: {}' };
     expect(await filesFromList(list)).toEqual({
       name: 'repo',
-      files: { '.github/workflows/ci.yml': 'on: push', 'action.yml': 'runs: {}' },
+      files: read,
+      meta: metaOf(read),
       skipped: [{ path: '.github/workflows/big.yml', bytes: 3 * 1024 * 1024 }],
     });
     const loose = [
@@ -185,6 +234,7 @@ describe('the ways in', () => {
     ] as unknown as File[];
     expect(await filesFromList(loose)).toEqual({
       files: { '.github/workflows/deploy.yml': 'on: push' },
+      meta: metaOf({ '.github/workflows/deploy.yml': 'on: push' }),
       skipped: [],
     });
   });
@@ -196,7 +246,13 @@ describe('the ways in', () => {
     expect(a.handle).toBeDefined();
     expect(a.files).toEqual(EXPECTED);
     const b = await filesFromDrop(transferOf([folderItem('repo', repo, false)]));
-    expect(b).toEqual({ name: 'repo', where: 'the folder repo', files: EXPECTED, skipped: [] });
+    expect(b).toEqual({
+      name: 'repo',
+      where: 'the folder repo',
+      files: EXPECTED,
+      meta: metaOf(EXPECTED),
+      skipped: [],
+    });
     const files = transferOf([
       fileItem('ci.yml', 'on: push', false),
       { kind: 'string' },
@@ -205,6 +261,7 @@ describe('the ways in', () => {
     expect(await filesFromDrop(files)).toEqual({
       where: 'the drop',
       files: { '.github/workflows/ci.yml': 'on: push' },
+      meta: metaOf({ '.github/workflows/ci.yml': 'on: push' }),
       skipped: [],
     });
   });
@@ -234,18 +291,22 @@ describe('the ways in', () => {
     const withFile = await filesFromDrop(
       transferOf([folderItem('repo', repo), fileItem('hotfix.yml', 'on: push')]),
     );
+    const both = { ...EXPECTED, '.github/workflows/hotfix.yml': 'on: push' };
     expect(withFile).toEqual({
       name: 'repo + hotfix.yml',
       where: 'the drop',
-      files: { ...EXPECTED, '.github/workflows/hotfix.yml': 'on: push' },
+      files: both,
+      meta: metaOf(both),
       skipped: [],
     });
     const other: Tree = { '.github': { workflows: { 'release.yml': 'on: release' } } };
     const two = await filesFromDrop(transferOf([folderItem('repoA', repo), folderItem('repoB', other)]));
+    const all = { ...EXPECTED, '.github/workflows/release.yml': 'on: release' };
     expect(two).toEqual({
       name: 'repoA + repoB',
       where: 'the drop',
-      files: { ...EXPECTED, '.github/workflows/release.yml': 'on: release' },
+      files: all,
+      meta: metaOf(all),
       skipped: [],
     });
     const three = await filesFromDrop(
@@ -306,6 +367,29 @@ describe('the ways in', () => {
       kind: 'folder',
       name: 'repo',
       handle,
+    });
+  });
+
+  it('stores what reading found with the buffers only: a folder is read again, a sample is bundled', () => {
+    const files = { 'action.yml': 'x' };
+    const buffers = [{ path: 'action.yml', text: 'x' }];
+    const meta = { 'action.yml': { bom: true, eol: 'none', utf8: false } } as const;
+    expect(toStored({ kind: 'paste', buffers }, files, meta)).toEqual({ kind: 'paste', buffers, meta });
+    expect(toStored({ kind: 'folder', name: 'repo', readAt: 1 }, files, meta)).toEqual({
+      kind: 'copy',
+      name: 'repo',
+      buffers,
+      meta,
+    });
+    const handle = handleOf('repo', {});
+    expect(toStored({ kind: 'folder', name: 'repo', handle, readAt: 1 }, files, meta)).toEqual({
+      kind: 'folder',
+      name: 'repo',
+      handle,
+    });
+    expect(toStored({ kind: 'sample', name: 'starter' }, files, meta)).toEqual({
+      kind: 'sample',
+      name: 'starter',
     });
   });
 });

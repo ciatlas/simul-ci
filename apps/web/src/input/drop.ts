@@ -38,7 +38,7 @@ export async function filesFromDrop(transfer: DataTransfer): Promise<Dropped> {
   const taken = Array.from(transfer.items)
     .filter((item) => item.kind === 'file')
     .map(take);
-  const walked: Walked = { files: {}, skipped: [] };
+  const walked: Walked = { files: {}, meta: {}, skipped: [] };
   const parts: Part[] = [];
   for (const t of taken) {
     const part = await readItem(t, walked);
