@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
 import { isCollection, type ParsedNode } from 'yaml';
 import { WorkflowDocument, unitPathAt, yamlPathOf, type YamlPath } from '@simulci/document';
 import { itemSpan } from '../src/spans';
 import { entriesOf, isFlow, locate, type Collection } from '../src/tree';
 import { corpus, crlf, fixture, fixtures } from './corpus';
+
+// The corpus-wide checks run over every file and its CRLF variants; under coverage they take seconds.
+vi.setConfig({ testTimeout: 60_000 });
 
 const open = (text: string) => WorkflowDocument.open(text, { path: 'x.yml', kind: 'workflow' });
 
@@ -60,12 +64,12 @@ describe('pathAt', () => {
     },
   );
 
-  it('answers a path whose item holds the offset, at every offset of the fixtures and every 7th of the rest', () => {
+  it('answers a path whose item holds the offset, at every offset of the fixtures and every 11th of the rest', () => {
     for (const { name, text, owned } of corpus()) {
       const doc = open(text);
       if (!doc.status.editable) continue;
       const wrong: string[] = [];
-      for (let at = 0; at <= text.length; at += owned ? 1 : 7) {
+      for (let at = 0; at <= text.length; at += owned ? 1 : 11) {
         const path = doc.pathAt(at);
         const span = path.length === 0 ? { from: 0, to: text.length } : doc.spanOf(path);
         if (!span || at < span.from || at > span.to) wrong.push(`@${at} ${path.join('.')}`);

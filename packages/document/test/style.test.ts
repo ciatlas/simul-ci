@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
 import { WorkflowDocument, type Style } from '@simulci/document';
 import { BOM, crlf, fixture, fixtures, workflows } from './corpus';
+
+// The corpus-wide checks run over every file and its CRLF variants; under coverage they take seconds.
+vi.setConfig({ testTimeout: 60_000 });
 
 const styleOf = (text: string): Style =>
   WorkflowDocument.open(text, { path: 'x.yml', kind: 'workflow' }).style;

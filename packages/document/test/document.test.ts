@@ -1,11 +1,15 @@
 import { loadProject, memoryFileSystem } from '@ciatlas/core';
 import * as fc from 'fast-check';
 import { parseDocument } from 'yaml';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
 import { WorkflowDocument, type OpenOptions, type Refusal } from '@simulci/document';
 import { invalidYaml } from '../src/refusal';
 import { BOM, corpus, fixture } from './corpus';
 import { runs } from './runs';
+
+// The corpus-wide checks run over every file and its CRLF variants; under coverage they take seconds.
+vi.setConfig({ testTimeout: 60_000 });
 
 const PATH = '.github/workflows/ci.yml';
 const open = (text: string, more: Partial<OpenOptions> = {}) =>

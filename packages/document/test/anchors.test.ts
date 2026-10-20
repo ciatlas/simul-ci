@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
 import { visit, isAlias } from 'yaml';
 import { WorkflowDocument } from '@simulci/document';
 import { corpus, fixture } from './corpus';
+
+// The corpus-wide checks run over every file and its CRLF variants; under coverage they take seconds.
+vi.setConfig({ testTimeout: 60_000 });
 
 const open = (text: string) => WorkflowDocument.open(text, { path: 'x.yml', kind: 'workflow' });
 
