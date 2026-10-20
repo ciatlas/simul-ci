@@ -1,7 +1,8 @@
 /**
  * How a field's control points at what is said about it: the hint and the assumed note through
- * `aria-describedby`, the worker's refusal through `aria-invalid` and `aria-errormessage`. Every id hangs off the
- * field's own, so a group never collides with another.
+ * `aria-describedby`, the worker's refusal through `aria-invalid` and `aria-errormessage`. The refusal is also in
+ * `aria-describedby`: `aria-errormessage` alone is read by too few screen readers, and axe asks for a technique that
+ * announces it. Every id hangs off the field's own, so a group never collides with another.
  */
 
 export interface FieldIds {
@@ -31,7 +32,13 @@ export function fieldAria(
   shown: { hint?: string | undefined; issue?: string | undefined; assumed?: boolean },
 ): FieldAria {
   const out: FieldAria = { id: ids.id };
-  const described = [shown.hint ? ids.hint : '', shown.assumed ? ids.assumed : ''].filter(Boolean).join(' ');
+  const described = [
+    shown.hint ? ids.hint : '',
+    shown.issue ? ids.error : '',
+    shown.assumed ? ids.assumed : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   if (described) out['aria-describedby'] = described;
   if (shown.issue) {
     out['aria-invalid'] = true;

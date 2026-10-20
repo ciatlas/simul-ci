@@ -5,12 +5,16 @@
  * its --xy-* variables, then the cards' and edges' own rules. Status is told by the border's style as well as its
  * colour: runs a solid border in the run colour, skipped a thin dimmed one, might run the one dashed mark, in its
  * own colour. The accent is the selection and its dependency path's edges, never a status; what is off the path
- * fades, its text to the muted colour rather than by opacity, so every word keeps 4.5:1 on its background. Borders
- * and outlines, no shadows. index.css turns every transition off under prefers-reduced-motion.
+ * fades, its text to the muted colour rather than by opacity, so every word keeps 4.5:1 on its background; so does
+ * what a hovered unknown does not affect. Borders and outlines, no shadows. index.css turns every transition and
+ * animation off under prefers-reduced-motion, SVG and inline styles included, and the canvas never sets the flash
+ * there.
  */
 
+/* Its own stacking context, so the stale rule below sits over React Flow's layers and under nothing outside it. */
 .sc-canvas {
   position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100%;
 }
@@ -31,13 +35,30 @@
   color: var(--text);
 }
 
-.sc-canvas .react-flow__viewport {
+/*
+ * The inputs moved on since this picture was drawn (a refused input keeps the last good plan). Only what carries no
+ * text fades: the edges and the background's dots. The cards and the edges' labels keep their colours, so every word
+ * keeps 4.5:1, and a dashed rule inside the canvas's edge marks the picture as the last good one; the top bar says
+ * "stale" in words.
+ */
+.sc-canvas .react-flow__edges,
+.sc-canvas .react-flow__background-pattern {
   transition: opacity 150ms ease;
 }
 
-/* The inputs moved on since this picture was drawn. */
-.sc-canvas[data-stale] .react-flow__viewport {
-  opacity: 0.6;
+.sc-canvas[data-stale] .react-flow__edges,
+.sc-canvas[data-stale] .react-flow__background-pattern {
+  opacity: 0.4;
+}
+
+/* Above React Flow's layers (its panels sit at 5), and the pointer goes through it. */
+.sc-canvas[data-stale]::after {
+  content: '';
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  border: 2px dashed var(--border-strong);
+  pointer-events: none;
 }
 
 /* Edges meet a card at its handles; nothing connects by hand, so they are never seen. */
@@ -213,6 +234,33 @@
 
 .sc-card[data-path='off'][data-verdict='maybe'] {
   border-color: color-mix(in oklab, var(--might) 50%, var(--border));
+}
+
+/*
+ * A pin's changes: the cards it changed pulse once in the accent's soft colour and are their own again after a
+ * second (highlight.ts FLASH_MS), since the accent is the selection's and never a status. The two keyframes are one
+ * pulse under two names, picked by the pin's parity, so a card the next pin changes too plays it again.
+ */
+.sc-card[data-flash='a'],
+.sc-scope[data-flash='a'] {
+  animation: sc-flash-a 1s ease-out 1;
+}
+
+.sc-card[data-flash='b'],
+.sc-scope[data-flash='b'] {
+  animation: sc-flash-b 1s ease-out 1;
+}
+
+@keyframes sc-flash-a {
+  30% {
+    background-color: var(--accent-soft);
+  }
+}
+
+@keyframes sc-flash-b {
+  30% {
+    background-color: var(--accent-soft);
+  }
 }
 
 .sc-card-header {

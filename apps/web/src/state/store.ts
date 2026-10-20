@@ -1,6 +1,7 @@
-import type { AssumeEntry, RunPlan, ScenarioInput } from '@simulci/engine';
+import type { AssumeEntry, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { GraphState, GraphUi } from '../graph/types';
+import { pinSentence, type VerdictChange, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
 import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
 
@@ -39,9 +40,32 @@ export interface PlanState {
   ms: { simulate: number; derive: number };
   /**
    * The files version and the project version the plan answers, and the case layer it was simulated with: the plan
-   * names the assume entries by position, so it speaks of the list it was given and of no other.
+   * names the assume entries by position, so it speaks of the list it was given and of no other. The scenario is the
+   * store's object it was simulated from, so a pin can tell the plan that answers it.
    */
-  for: { files: number; project: number; assume?: AssumeEntry[] };
+  for: { files: number; project: number; assume?: AssumeEntry[]; scenario?: ScenarioInput };
+}
+
+/**
+ * The last pin (a scenario field or an assume entry written from the Unknowns tab) and, once the plan that answers
+ * it came, what it changed: the status line says it ("pinned; deploy now runs") and the cards it changed flash. A pin
+ * belongs to the files it was made over: new files, or none, drop it.
+ */
+export interface Pin {
+  seq: number;
+  /** The plan the pin was made over, until the answering plan settled it: then only what it changed is kept. */
+  before?: Pick<PlanState, 'plan' | 'derived'>;
+  /** The inputs the pin left in the store: the plan simulated from exactly these objects answers it. */
+  scenario: ScenarioInput;
+  assume: AssumeEntry[];
+  /** What the answering plan changed; absent until it comes. */
+  after?: { plan: RunPlan; changes: VerdictChange[]; sentence: string };
+}
+
+/** A request to put the focus on an unknown's row in the Unknowns tab: "Show X in Unknowns" in a reason. */
+export interface UnknownFocus {
+  id: UnknownId;
+  seq: number;
 }
 
 export interface Notice {
@@ -112,6 +136,11 @@ export interface SessionState {
   reveal?: Reveal;
   /** Whether the Copy as test case dialog is open: the top bar's button and the `c` key open it. */
   caseOpen: boolean;
+  /** The unknown whose "affects n" the pointer or the focus is on: the canvas dims every card it does not affect. */
+  hoveredUnknown?: UnknownId;
+  /** The unknown whose row the Unknowns tab was asked to focus, until the tab takes it. */
+  unknownFocus?: UnknownFocus;
+  pin?: Pin;
   ui: Omit<GraphUi, 'hideUntriggered'> & {
     view: 'graph' | 'text';
     hideUntriggered: boolean;
@@ -140,6 +169,8 @@ export interface SessionActions {
   /** The form took the request `seq`. */
   fieldFocused: (seq: number) => void;
   setAssume: (assume: AssumeEntry[]) => void;
+  /** Writes the assume list a pin built (the Unknowns tab's Assume and Pin… controls), as a pin. */
+  pinAssume: (assume: AssumeEntry[]) => void;
   setDetail: (detail: 'legs' | 'steps') => void;
   setFocus: (focus: string | undefined) => void;
   /**
@@ -162,6 +193,12 @@ export interface SessionActions {
   setYamlFile: (file: string | undefined) => void;
   openCase: () => void;
   closeCase: () => void;
+  /** The pointer or the focus is on an unknown's "affects n", or left it (`undefined`). */
+  hoverUnknown: (id: UnknownId | undefined) => void;
+  /** Opens the right panel on the Unknowns tab and asks it to focus the unknown's row. */
+  showUnknown: (id: UnknownId) => void;
+  /** The Unknowns tab took the request `seq`. */
+  unknownFocused: (seq: number) => void;
   projectLoading: () => void;
   projectReady: (version: number, outline: Outline, files: number) => void;
   projectFailed: (error: SessionError) => void;
@@ -200,6 +237,14 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
 
 let noticeId = 0;
 let requestSeq = 0;
+/** Pins count apart from the pin the store holds, which new files drop (`pinOver`). */
+let pinSeq = 0;
+
+/**
+ * What belongs to the files that were there: the pin made over their plan, and the unknown hovered or asked for,
+ * which the next files' plan may not have. New files, or none, clear it all, so no plan of theirs settles that pin.
+ */
+const UNPINNED = { pin: undefined, hoveredUnknown: undefined, unknownFocus: undefined } as const;
 
 export function createSessionStore(initial: SessionState = initialSessionState()): SessionStore {
   return createStore<SessionState & SessionActions>((set, get) => ({
@@ -213,6 +258,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         graph: undefined,
         stale: false,
         error: s.error?.kind === 'source' ? undefined : s.error,
+        ...UNPINNED,
       })),
     forgetSource: () =>
       set({
@@ -225,6 +271,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         focus: undefined,
         sel: undefined,
         error: replaceError(get().error, undefined),
+        ...UNPINNED,
       }),
     setScenario: (scenario, options) =>
       set((s) => ({
@@ -250,11 +297,19 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         stale: s.plan !== undefined,
         error: authorsErrorCleared(s.error, 'scenario'),
         fieldFocus: { ...focus, seq: ++requestSeq },
+        pin: pinOver(s, scenario, s.assume),
       })),
     focusField: (focus) => set({ fieldFocus: { ...focus, seq: ++requestSeq } }),
     fieldFocused: (seq) => set((s) => (s.fieldFocus?.seq === seq ? { fieldFocus: undefined } : {})),
     setAssume: (assume) =>
       set((s) => ({ assume, stale: s.plan !== undefined, error: authorsErrorCleared(s.error, 'assume') })),
+    pinAssume: (assume) =>
+      set((s) => ({
+        assume,
+        stale: s.plan !== undefined,
+        error: authorsErrorCleared(s.error, 'assume'),
+        pin: pinOver(s, s.scenario, assume),
+      })),
     setDetail: (detail) => set((s) => ({ detail, stale: s.plan !== undefined })),
     setFocus: (focus) => set({ focus }),
     // Returning `s` skips the update: a held selection keeps the tab the author picked.
@@ -287,6 +342,17 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     setYamlFile: (yamlFile) => set((s) => ({ ui: withYamlFile(s.ui, yamlFile) })),
     openCase: () => set({ caseOpen: true }),
     closeCase: () => set({ caseOpen: false }),
+    hoverUnknown: (hoveredUnknown) =>
+      set((s) => (s.hoveredUnknown === hoveredUnknown ? s : { hoveredUnknown })),
+    showUnknown: (id) =>
+      set((s) => ({
+        unknownFocus: { id, seq: ++requestSeq },
+        ui: {
+          ...s.ui,
+          prefs: { ...s.ui.prefs, panel: 'unknowns', collapsed: { ...s.ui.prefs.collapsed, right: false } },
+        },
+      })),
+    unknownFocused: (seq) => set((s) => (s.unknownFocus?.seq === seq ? { unknownFocus: undefined } : {})),
     projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
     projectReady: (version, outline, files) =>
       set((s) => ({
@@ -309,6 +375,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         plan,
         stale: false,
         error: replaceError(s.error, undefined),
+        pin: answered(s.pin, plan),
       })),
     rejected: (error) => set((s) => ({ error: replaceError(s.error, error) })),
     clearError: () => set((s) => ({ error: replaceError(s.error, undefined) })),
@@ -358,6 +425,31 @@ function withYamlFile(ui: SessionState['ui'], yamlFile: string | undefined): Ses
 
 const toggled = (list: readonly string[], item: string): string[] =>
   list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
+
+/**
+ * A pin over the store as it is: the plan it is made over and the inputs it leaves. Its `seq` comes from `pinSeq`,
+ * so one pin and the next always differ in parity, whatever cleared the pin between them.
+ */
+const pinOver = (s: SessionState, scenario: ScenarioInput, assume: AssumeEntry[]): Pin => ({
+  seq: ++pinSeq,
+  ...(s.plan ? { before: { plan: s.plan.plan, derived: s.plan.derived } } : {}),
+  scenario,
+  assume,
+});
+
+/**
+ * The pin with what the plan answering it changed: the plan simulated from the very inputs the pin left. A plan for
+ * other inputs (an older reply, an edit after the pin) leaves the pin waiting; one already answered stays as it is.
+ * A settled pin drops the plan it was made over, which nothing reads once the changes are known, so the store does
+ * not hold an old plan for as long as the pin stays.
+ */
+function answered(pin: Pin | undefined, plan: PlanState): Pin | undefined {
+  if (!pin?.before || pin.after || plan.for.scenario !== pin.scenario || plan.for.assume !== pin.assume)
+    return pin;
+  const changes = verdictChanges(pin.before, plan);
+  const { seq, scenario, assume } = pin;
+  return { seq, scenario, assume, after: { plan: plan.plan, changes, sentence: pinSentence(changes) } };
+}
 
 /** The errors only a reload clears: the engine never started, or it stopped and could not be restarted. */
 export function isBlocking(error: SessionError | undefined): boolean {

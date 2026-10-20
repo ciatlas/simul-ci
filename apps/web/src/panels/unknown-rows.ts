@@ -1,4 +1,14 @@
-import type { AssumeEntry, Loc, MockValue, NodeId, RunPlan, Unknown, UnknownKind } from '@simulci/engine';
+import type {
+  AssumeEntry,
+  Loc,
+  MockValue,
+  NodeId,
+  RunPlan,
+  Unknown,
+  UnknownId,
+  UnknownKind,
+} from '@simulci/engine';
+import { listed } from '../lib/words';
 import type { PlanIndex } from '../plan/index';
 import type { Derived } from '../worker/protocol';
 import type { DraftAbout, Outcome, PinDraft } from './pin-draft';
@@ -6,8 +16,9 @@ import { planLabels } from './outline-tree';
 
 /**
  * The Unknowns tab's model (synthesis § 7), apart from React: the plan's unknowns as rows, the ones that decide a
- * verdict apart from the rest, the row the focus moves to once a pin removed one, the entry a pin writes, and the
- * PinEditor's fields as the author edits them, turned back into an assume entry.
+ * verdict apart from the rest, the row the focus moves to once a pin removed one, what the tab opens to show the row
+ * a reason asked for, the entry a pin writes, and the PinEditor's fields as the author edits them, turned back into an
+ * assume entry.
  */
 
 export interface AffectedNode {
@@ -73,12 +84,6 @@ export function affectsText(affects: readonly AffectedNode[]): { text: string; n
   return { text: `affects ${affects.length}`, names: listed(affects.map((a) => a.label)) };
 }
 
-/** Words as a sentence lists them: `a`, `a and b`, `a, b and c`. */
-export function listed(words: readonly string[]): string {
-  if (words.length <= 1) return words[0] ?? '';
-  return `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
-}
-
 /**
  * The row the focus goes to once the pinned row is gone: the first of the rows shown after it that the new plan
  * still has, else the nearest one before it. Undefined sends it to the tab's heading.
@@ -93,6 +98,31 @@ export function focusAfter(
   return (
     order.slice(at + 1).find((id) => present.has(id)) ?? order.slice(0, at).findLast((id) => present.has(id))
   );
+}
+
+/** What the tab does with a request for an unknown's row ("Show X in Unknowns", the store's `unknownFocus`). */
+export interface RowReveal {
+  /** The row takes the focus; the tab's heading does when the plan lists no such unknown. */
+  target: 'row' | 'heading';
+  /** The "affecting" toggle hides the row: it goes off. */
+  unfilter: boolean;
+  /** The row waits among the collapsed ones that decide no verdict: they open. */
+  openIdle: boolean;
+}
+
+/**
+ * How the tab shows the row of unknown `id` before the row takes the focus. `shown` is what the tab shows now: the
+ * rows the toggle keeps and whether the collapsed rest is open; none before the first plan, which has no row to show.
+ * The toggle never keeps an unknown that decides no verdict, so such a row may need both.
+ */
+export function revealRow(
+  shown: { plan: RunPlan; rows: UnknownRows; idleOpen: boolean } | undefined,
+  id: UnknownId,
+): RowReveal {
+  const unknown = shown?.plan.unknowns.find((u) => u.id === id);
+  if (!shown || !unknown) return { target: 'heading', unfilter: false, openIdle: false };
+  const kept = [...shown.rows.gating, ...shown.rows.idle].some((r) => r.unknown.id === id);
+  return { target: 'row', unfilter: !kept, openIdle: unknown.affects.length === 0 && !shown.idleOpen };
 }
 
 /** Where an entry applied, as the Assumptions list says it: `applied at build.detect, provides outcome, outputs.sha`. */

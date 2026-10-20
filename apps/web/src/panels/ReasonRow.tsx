@@ -1,6 +1,5 @@
 import type { MouseEvent } from 'react';
 import { useApp } from '../app/providers';
-import { focusPanel } from '../app/shortcuts';
 import type { PlanIndex } from '../plan/index';
 import { Gate, LocLink } from './kit';
 import {
@@ -20,8 +19,8 @@ import {
 
 /**
  * One reason of the chain (reason-rows.ts): its gate, the reason in words by kind, and on the deciding row "decided
- * here" with the line it is written on. Buttons ask the form for a field, select the parent or open the Unknowns tab;
- * the focus stays in the right panel, on the Unknowns tab's panel once that tab opens.
+ * here" with the line it is written on. Buttons ask the form for a field, select the parent or show an unknown's row
+ * in the Unknowns tab; the focus stays in the right panel, on that row once the tab shows it.
  */
 export function ReasonRow({ row, index }: { row: ReasonRowModel; index: PlanIndex }) {
   return (
@@ -236,10 +235,7 @@ function ReadValue({ read }: { read: ReadRow }) {
           type="button"
           className={`${BUTTON} font-sans`}
           aria-label={`Show ${u.label} in Unknowns`}
-          onClick={() => {
-            store.getState().setPanel('unknowns');
-            focusPanel('unknowns');
-          }}
+          onClick={() => store.getState().showUnknown(u.id)}
         >
           {u.label}
         </button>

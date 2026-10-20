@@ -105,6 +105,15 @@ body {
   outline-offset: 1px;
 }
 
+/*
+ * A tab stop that fills the box it scrolls in (the text view's plan) draws the ring inside its own edge: drawn
+ * outside, the box's overflow clips it and the focus is not seen (WCAG 2.4.7). Unlayered like the rule above, which a
+ * Tailwind utility, in its layer, would lose to.
+ */
+.focus-inset:focus-visible {
+  outline-offset: -2px;
+}
+
 /* A field whose value the page chose for the author. */
 .assumed {
   border-style: dashed;

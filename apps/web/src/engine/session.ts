@@ -94,12 +94,12 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
     const id = ++request;
     const files = s.files.version;
     const project = s.project.version;
-    const { assume } = s;
+    const { assume, scenario } = s;
     busy(1);
-    const r = await client.simulate({ project, scenario: s.scenario, assume, detail: s.detail });
+    const r = await client.simulate({ project, scenario, assume, detail: s.detail });
     busy(-1);
     if (id !== request) return;
-    await settle(r, { files, project, assume });
+    await settle(r, { files, project, assume, scenario });
   };
 
   const settle = async (

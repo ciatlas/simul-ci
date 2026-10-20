@@ -19,15 +19,22 @@ import { handle, initialState } from '../src/worker/handle';
 
 /**
  * The Unknowns tab over the starter's real plans: a scenario pin writes the scenario and asks the form for the field,
- * the editor writes an assume entry (or edits the one already there), the next plan shows it among the Assumptions
- * where it applied, a refusal shows on its entry (before the first plan too), an entry's editor follows it when
- * another goes, and the toggle keeps what affects the selection. Then the PinEditor on its own: its chips' names,
- * its problems announced and on their fields, the focus when a preset is cleared, the held value's placeholder.
+ * the editor writes an assume entry as a pin (or edits the one already there), the next plan shows it among the
+ * Assumptions where it applied and moves the focus off the row it dropped, a refusal shows on its entry (before the
+ * first plan too), an entry's editor follows it when another goes, and the toggle keeps what affects the selection.
+ * "affects n" holds the hovered unknown while the pointer or the keyboard focus is on it, a reason's "Show … in
+ * Unknowns" puts the focus on the row, whatever hid it, and a row is focusable only for the focus the tab puts there. Then the PinEditor on its own: its chips' names, its problems
+ * announced and on their fields, the focus when a preset is cleared, the held value's placeholder.
  */
 
 const starter = sampleByName('starter')!.files;
 const CI = '.github/workflows/ci.yml';
+const RELEASE = '.github/workflows/release.yml';
+const DETECT = `${CI}#build/steps.detect.outputs.changed`;
 const push: ScenarioInput = { event: 'push', branch: 'main' };
+/** A tag push runs the release, whose composite's cache leaves two unknowns that decide no verdict. */
+const tag: ScenarioInput = { event: 'push', tag: 'v1' };
+const CACHE = `${RELEASE}#publish/~github-actions-setup>.github/actions/setup/steps.cache`;
 const source: ScenarioInput = { ...push, changed: ['src/index.ts'] };
 const detect: AssumeEntry = { step: 'build.detect', outputs: { changed: 'true' } };
 
@@ -43,15 +50,20 @@ function planState(scenario: ScenarioInput, assume: AssumeEntry[] = []): PlanSta
   });
   if (step.response.type !== 'plan') throw new Error(JSON.stringify(step.response));
   const { plan, derived, text, ms } = step.response;
-  return { plan, derived, text, ms, for: { files: 1, project: 1, assume } };
+  return { plan, derived, text, ms, for: { files: 1, project: 1, assume, scenario } };
 }
 
-function mount(scenario: ScenarioInput, assume: AssumeEntry[] = [], sel?: string) {
-  return mountState({ scenario, assume, plan: planState(scenario, assume), sel });
+function mount(scenario: ScenarioInput, assume: AssumeEntry[] = [], sel?: string, focus = CI) {
+  return mountState({ scenario, assume, plan: planState(scenario, assume), sel, focus });
 }
 
-function mountState(state: Partial<SessionState>) {
+/** The tab over a store in `state`; `before` acts on the store before the tab mounts. */
+function mountState(
+  state: Partial<SessionState>,
+  before?: (store: ReturnType<typeof createSessionStore>) => void,
+) {
   const store = createSessionStore({ ...initialSessionState(), focus: CI, ...state });
+  before?.(store);
   render(
     <AppProvider app={{ store } as unknown as App}>
       <Unknowns />
@@ -72,6 +84,29 @@ const itemOf = (label: string) =>
     .getAllByRole('listitem')
     .find((li) => li.querySelector('.font-mono')?.textContent === label)!;
 const PENDING = 'where it applies shows with the next plan';
+/** A row by its unknown's id (`data-unknown`), wherever it is, the collapsed rest too. */
+const rowById = (id: string) =>
+  Array.from(document.querySelectorAll<HTMLElement>('[data-unknown]')).find(
+    (el) => el.dataset.unknown === id,
+  );
+const idleDetails = () => screen.getByText(/that decides? no verdict$/).closest('details')!;
+const countOf = (path: string) => within(rowOf(path)).getByRole('button', { name: /^affects \d+:/ });
+
+/**
+ * What the browser says of `:hover` and `:focus-visible` on `el`, which happy-dom cannot tell: it never matches
+ * `:hover`, and matches `:focus-visible` for any focus. The test says whether the pointer is over the element and
+ * whether its focus came from the keyboard; every other selector is matched as happy-dom does.
+ */
+function pseudoClasses(el: HTMLElement): { hover: boolean; keyboard: boolean } {
+  const state = { hover: false, keyboard: true };
+  const matches = el.matches.bind(el);
+  vi.spyOn(el, 'matches').mockImplementation((selector) => {
+    if (selector === ':hover') return state.hover;
+    if (selector === ':focus-visible') return state.keyboard && document.activeElement === el;
+    return matches(selector);
+  });
+  return state;
+}
 
 describe('the Unknowns tab', () => {
   afterEach(cleanup);
@@ -93,6 +128,8 @@ describe('the Unknowns tab', () => {
     await user.keyboard('true');
     await user.click(within(editor).getByRole('button', { name: 'Apply' }));
     expect(store.getState().assume).toEqual([detect]);
+    // A pin, which the status line answers once the plan for exactly these inputs comes.
+    expect(store.getState().pin?.assume).toBe(store.getState().assume);
 
     act(() => store.getState().planReceived(planState(source, store.getState().assume)));
     const assumptions = screen.getByRole('region', { name: 'Assumptions' });
@@ -117,6 +154,8 @@ describe('the Unknowns tab', () => {
     expect(assumptions.textContent).toContain('outputs: expected a record');
     await user.click(within(assumptions).getByRole('button', { name: /^Remove / }));
     expect(store.getState().assume).toEqual([]);
+    // The Assumptions list edits the case layer; it pins nothing.
+    expect(store.getState().pin).toBeUndefined();
   });
 
   it('edits the entry a step output already has when Pin… opens on it again, so no second entry conflicts', async () => {
@@ -210,6 +249,179 @@ describe('the Unknowns tab', () => {
     cleanup();
     mount(push);
     expect(screen.queryByRole('checkbox', { name: /affecting/ })).toBeNull();
+  });
+});
+
+describe('the focus and the hover in the Unknowns tab', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('moves the focus to the next row once the plan a pin brought drops the pinned one, and dims no card', async () => {
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const { store, user } = mount(push);
+    await user.click(within(rowOf('build.detect.outputs.changed')).getByRole('button', { name: 'Pin…' }));
+    await user.keyboard('true');
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    const s = store.getState();
+    act(() => s.planReceived(planState(s.scenario, s.assume)));
+    expect(rowById(DETECT)).toBeUndefined();
+    // The row, not its affects n, whose focus would dim the canvas over the cards the pin flashed.
+    const next = rowById('scenario.changed')!;
+    expect(document.activeElement).toBe(next);
+    expect(next.getAttribute('tabindex')).toBe('-1');
+    expect(scroll.mock.contexts).toContain(next);
+    expect(store.getState().hoveredUnknown).toBeUndefined();
+  });
+
+  it('makes a row focusable only for the focus the tab puts there, so a click on its text rings nothing', async () => {
+    const { store, user } = mount(push);
+    const row = rowById(DETECT)!;
+    expect(row.hasAttribute('tabindex')).toBe(false);
+    await user.click(row.querySelector('code')!);
+    expect(document.activeElement).toBe(document.body);
+
+    act(() => store.getState().showUnknown(DETECT));
+    expect(document.activeElement).toBe(row);
+    expect(row.getAttribute('tabindex')).toBe('-1');
+    // Once the focus leaves, the row is plain again, and a click on its text leaves the focus nowhere.
+    await user.click(rowById('scenario.changed')!.querySelector('code')!);
+    expect(document.activeElement).toBe(document.body);
+    expect(row.hasAttribute('tabindex')).toBe(false);
+    await user.click(row.querySelector('code')!);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('holds the hovered unknown while the pointer or the focus is on affects n, and lets go of it after', async () => {
+    const { store, user } = mount(push);
+    const count = countOf('build.detect.outputs.changed');
+    await user.hover(count);
+    expect(store.getState().hoveredUnknown).toBe(DETECT);
+    await user.unhover(count);
+    expect(store.getState().hoveredUnknown).toBeUndefined();
+
+    act(() => count.focus());
+    expect(store.getState().hoveredUnknown).toBe(DETECT);
+    act(() => count.blur());
+    expect(store.getState().hoveredUnknown).toBeUndefined();
+
+    // Leaving one count while the store holds another leaves that one alone.
+    await user.hover(count);
+    act(() => store.getState().hoverUnknown('scenario.changed'));
+    await user.unhover(count);
+    expect(store.getState().hoveredUnknown).toBe('scenario.changed');
+  });
+
+  it('keeps the dim the keyboard focus holds while the pointer passes off the count, and the pointer’s while the focus leaves', async () => {
+    const { store, user } = mount(push);
+    const count = countOf('build.detect.outputs.changed');
+    const at = pseudoClasses(count);
+    act(() => count.focus());
+    at.hover = true;
+    await user.hover(count);
+    at.hover = false;
+    await user.unhover(count);
+    expect(store.getState().hoveredUnknown).toBe(DETECT);
+    act(() => count.blur());
+    expect(store.getState().hoveredUnknown).toBeUndefined();
+
+    at.hover = true;
+    await user.hover(count);
+    act(() => count.focus());
+    act(() => count.blur());
+    expect(store.getState().hoveredUnknown).toBe(DETECT);
+    at.hover = false;
+    await user.unhover(count);
+    expect(store.getState().hoveredUnknown).toBeUndefined();
+  });
+
+  it('lets go of the dim when the pointer leaves a count a click left the focus on', async () => {
+    const { store, user } = mount(push);
+    const count = countOf('build.detect.outputs.changed');
+    const at = pseudoClasses(count);
+    at.keyboard = false;
+    at.hover = true;
+    await user.click(count);
+    expect(document.activeElement).toBe(count);
+    expect(store.getState().hoveredUnknown).toBe(DETECT);
+    at.hover = false;
+    await user.unhover(count);
+    expect(store.getState().hoveredUnknown).toBeUndefined();
+  });
+
+  it('lets go of the hovered unknown when its row goes with the plan a pin brought', async () => {
+    const { store, user } = mount(source);
+    await user.hover(countOf('build.detect.outputs.changed'));
+    expect(store.getState().hoveredUnknown).toBe(DETECT);
+    act(() => store.getState().pinAssume([detect]));
+    const s = store.getState();
+    act(() => s.planReceived(planState(s.scenario, s.assume)));
+    expect(rowById(DETECT)).toBeUndefined();
+    expect(store.getState().hoveredUnknown).toBeUndefined();
+  });
+
+  it('puts the focus on the row a reason asks for, scrolled into view at once, and takes the request', () => {
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const { store } = mount(push);
+    act(() => store.getState().showUnknown('scenario.changed'));
+    const row = rowById('scenario.changed')!;
+    expect(row.tagName).toBe('LI');
+    expect(row.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(row);
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest', behavior: 'instant' });
+    expect(scroll.mock.contexts).toContain(row);
+    expect(store.getState().unknownFocus).toBeUndefined();
+  });
+
+  it('answers a request made before the tab mounted, as when the panel was closed', () => {
+    const { store } = mountState({ scenario: push, plan: planState(push) }, (s) =>
+      s.getState().showUnknown(DETECT),
+    );
+    expect(document.activeElement).toBe(rowById(DETECT));
+    expect(store.getState().unknownFocus).toBeUndefined();
+  });
+
+  it('opens the collapsed rest for a row that decides no verdict', () => {
+    const { store } = mount(tag, [], undefined, RELEASE);
+    expect(idleDetails().open).toBe(false);
+    act(() => store.getState().showUnknown(`${CACHE}.outputs.cache-matched-key`));
+    expect(idleDetails().open).toBe(true);
+    expect(document.activeElement).toBe(rowById(`${CACHE}.outputs.cache-matched-key`));
+    expect(store.getState().unknownFocus).toBeUndefined();
+  });
+
+  it('turns the toggle off and opens the collapsed rest for a row the toggle hides that decides no verdict', async () => {
+    const { store, user } = mount(tag, [], 'publish', RELEASE);
+    await user.click(screen.getByRole('checkbox', { name: /affecting/ }));
+    const hashFiles = "expression:deps-${{ hashFiles('package-lock.json') }}";
+    expect(rowById(hashFiles)).toBeUndefined();
+    act(() => store.getState().showUnknown(hashFiles));
+    expect(screen.getByRole('checkbox', { name: /affecting/ })).toHaveProperty('checked', false);
+    expect(idleDetails().open).toBe(true);
+    expect(document.activeElement).toBe(rowById(hashFiles));
+  });
+
+  it('turns the toggle off for a row that decides a verdict but not about the selection', async () => {
+    const { store, user } = mount(push, [], 'build');
+    await user.click(screen.getByRole('checkbox', { name: /affecting/ }));
+    expect(rowById('scenario.changed')).toBeUndefined();
+    act(() => store.getState().showUnknown('scenario.changed'));
+    expect(screen.getByRole('checkbox', { name: /affecting/ })).toHaveProperty('checked', false);
+    expect(document.activeElement).toBe(rowById('scenario.changed'));
+  });
+
+  it('puts the focus on the heading for an unknown the plan does not list, or before the first plan, and takes the request', () => {
+    const { store } = mount(source);
+    act(() => store.getState().showUnknown('scenario.changed'));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Unknowns' }));
+    expect(store.getState().unknownFocus).toBeUndefined();
+    cleanup();
+
+    const before = mountState({ scenario: source });
+    act(() => before.store.getState().showUnknown(DETECT));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Unknowns' }));
+    expect(before.store.getState().unknownFocus).toBeUndefined();
   });
 });
 

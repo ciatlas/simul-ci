@@ -14,6 +14,7 @@ import { handle, initialState } from '../src/worker/handle';
 
 const starter = sampleByName('starter')!.files;
 const CI = '.github/workflows/ci.yml';
+const LABELS = 'github.event.pull_request.labels.*.name';
 
 function planState(scenario: ScenarioInput): PlanState {
   const loaded = handle(initialState(), { id: 1, type: 'load', files: starter, repository: 'o/r' });
@@ -125,17 +126,18 @@ describe('the Reasons tab', () => {
     expect(document.activeElement).toBe(screen.getByRole('article', { name: 'Reasons for CI' }));
   });
 
-  it('opens the Unknowns tab from an unknown the condition reads, and the Node tab for the effects', async () => {
+  it('asks the Unknowns tab for the row of an unknown the condition reads, and opens the Node tab for the effects', async () => {
     const { store, user } = mount({ plan: labeled, sel: 'preview' });
     await user.click(
       screen.getByRole('button', { name: 'Show github.event.pull_request.labels.*.name in Unknowns' }),
     );
     expect(store.getState().ui.prefs.panel).toBe('unknowns');
+    expect(store.getState().unknownFocus?.id).toBe(LABELS);
     await user.click(screen.getByRole('button', { name: 'Effects in the Node tab' }));
     expect(store.getState().ui.prefs.panel).toBe('node');
   });
 
-  it('hands the focus to the panel of the tab its buttons open, never to the page', async () => {
+  it('hands the focus to the panel of the tab its buttons open, or to the row they ask for, never to the page', async () => {
     const { store, user } = mount({ plan: labeled, sel: 'preview', panels: true });
     const panel = (tab: string) => document.querySelector(`[data-panel="${tab}"]`);
     screen.getByRole('button', { name: 'Effects in the Node tab' }).focus();
@@ -146,7 +148,17 @@ describe('the Reasons tab', () => {
     screen.getByRole('button', { name: 'Show github.event.pull_request.labels.*.name in Unknowns' }).focus();
     await user.keyboard('{Enter}');
     expect(store.getState().ui.prefs.panel).toBe('unknowns');
-    await waitFor(() => expect(document.activeElement).toBe(panel('unknowns')));
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-unknown')).toBe(LABELS));
+    expect(panel('unknowns')?.contains(document.activeElement)).toBe(true);
+    expect(store.getState().unknownFocus).toBeUndefined();
+  });
+
+  it('shows the row of an unknown the condition reads in an Unknowns tab that mounts for the request', async () => {
+    const { user } = mount({ plan: labeled, sel: 'preview', panels: true });
+    expect(document.querySelector('[data-panel="unknowns"]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: `Show ${LABELS} in Unknowns` }));
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-unknown')).toBe(LABELS));
+    expect(document.activeElement?.tagName).toBe('LI');
   });
 
   it('follows the selection', () => {

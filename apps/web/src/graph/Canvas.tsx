@@ -33,6 +33,7 @@ import {
   cardFocus,
   type Flow,
   type FlowNode,
+  type FlowView,
   keepUnchanged,
   keyAction,
   type NavEffects,
@@ -42,10 +43,11 @@ import {
   runNav,
   toFlow,
 } from './flow';
+import { FLASH_MS, type Flash, flashOf, litCards, reducedMotion } from './highlight';
 import { cardOf, createNavigator } from './navigate';
 import { JobNode } from './nodes/JobNode';
 import { WorkflowNode } from './nodes/WorkflowNode';
-import type { GraphState } from './types';
+import type { GraphModel, GraphState } from './types';
 import { doubleClickZoom, type MountView, mountView, type ViewMemory } from './view';
 import './canvas.css';
 
@@ -56,7 +58,9 @@ import './canvas.css';
  * Shift and Meta select). The first picture of the files loaded is fitted once; after that the viewport moves only
  * when the author asks, and a picture mounted again opens where it was left. Every node stays mounted (the node
  * count is bounded by workflows and jobs, never legs or steps), so the card with the focus never leaves the page
- * under it.
+ * under it. An unknown hovered in the Unknowns tab fades the cards it does not affect; the cards a pin changed flash
+ * once. For an author who asked for less motion nothing on the canvas moves by itself: the viewport jumps, nothing
+ * flashes, and index.css turns the recolour transitions off.
  */
 
 const NODE_TYPES = { workflow: WorkflowNode, job: JobNode };
@@ -105,6 +109,8 @@ const WAITING: Record<SessionState['project']['status'], string> = {
 
 /** Per session, the viewport its picture was last left at, kept while the canvas is unmounted. */
 const memory = new WeakMap<SessionStore, ViewMemory>();
+/** Per session, the last pin whose flash has played, so a picture mounted again does not play it twice. */
+const flashed = new WeakMap<SessionStore, number>();
 
 export function Canvas() {
   return (
@@ -125,7 +131,7 @@ function Flow() {
   return graph ? <Picture key={graph.for.files} graph={graph} graphRef={graphRef} /> : <Waiting />;
 }
 
-/** The committed picture with the selection and the hovered node on it. */
+/** The committed picture with the selection, the hovered node, a hovered unknown and the last pin's flash on it. */
 function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<GraphState | undefined> }) {
   const { store } = useApp();
   const selected = useSession(selectedNode);
@@ -136,7 +142,7 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
   const wrapper = useRef<HTMLDivElement>(null);
   const placed = useRef<NodeId>(undefined);
   const act = useMemo(() => cardActions(store), [store]);
-  const flow = useFlow(graph, selected, hovered);
+  const flow = useFlow(store, graph, { selected, hovered });
   const start = useStartView(store, graph.for.files);
   const onKeyDown = useCanvasKeys(store, { wrapper, placed }, graphRef, selected);
   const onFocus = useCardFocus(store, graphRef, placed);
@@ -175,18 +181,55 @@ function Waiting() {
   return <p className="p-4 text-muted">{WAITING[project]}</p>;
 }
 
-/** The flow for the picture, each node and edge that did not change kept as the object it was. */
-function useFlow(graph: GraphState, selected: NodeId | undefined, hovered: NodeId | undefined): Flow {
+/**
+ * The flow for the picture, with the cards a hovered unknown lights and the last pin's flash on it, each node and
+ * edge that did not change kept as the object it was.
+ */
+function useFlow(
+  store: SessionStore,
+  graph: GraphState,
+  { selected, hovered }: Pick<FlowView, 'selected' | 'hovered'>,
+): Flow {
+  const lit = useLit(graph.model);
+  const flash = useFlash(store, graph);
   const last = useRef<Flow>(undefined);
   return useMemo(() => {
-    last.current = keepUnchanged(last.current, toFlow(graph.model, graph.layout, { selected, hovered }));
+    const view = { selected, hovered, lit, flash };
+    last.current = keepUnchanged(last.current, toFlow(graph.model, graph.layout, view));
     return last.current;
-  }, [graph, selected, hovered]);
+  }, [graph, selected, hovered, lit, flash]);
+}
+
+/** The cards the unknown hovered in the Unknowns tab lights, while one is. */
+function useLit(model: GraphModel): ReadonlySet<NodeId> | undefined {
+  const hovered = useSession((s) => s.hoveredUnknown);
+  const plan = useSession((s) => s.plan?.plan);
+  return useMemo(() => litCards(model, plan, hovered), [model, plan, hovered]);
+}
+
+/**
+ * The last pin's flash while the picture shows the plan that answered it, until it has played: after FLASH_MS it is
+ * taken off the cards, so a card mounted later (a callee opened, the picture mounted again) does not play it.
+ */
+function useFlash(store: SessionStore, graph: GraphState): Flash | undefined {
+  const pin = useSession((s) => s.pin);
+  const plan = useSession((s) => s.plan);
+  const flash = useMemo(() => flashOf(pin, plan, graph), [pin, plan, graph]);
+  const [, played] = useState<number>();
+  const seq = flash?.seq;
+  useEffect(() => {
+    if (seq === undefined || flashed.get(store) === seq) return undefined;
+    const timer = setTimeout(() => {
+      flashed.set(store, seq);
+      played(seq);
+    }, FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [store, seq]);
+  return flash && flashed.get(store) !== flash.seq ? flash : undefined;
 }
 
 /** No animation for an author who asked for less motion; 200 ms otherwise. */
-const duration = (): number =>
-  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 200;
+const duration = (): number => (reducedMotion() ? 0 : 200);
 
 /**
  * Where this mount starts (view.ts): fitted, without animation, or where the picture was left. The fit is asked for

@@ -468,6 +468,7 @@ describe('the session over the real client', () => {
       files: store.getState().files.version,
       project: 1,
       assume: store.getState().assume,
+      scenario: store.getState().scenario,
     });
     expect(store.getState().engine.busy).toBe(false);
   });

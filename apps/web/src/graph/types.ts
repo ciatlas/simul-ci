@@ -197,7 +197,10 @@ export interface GraphLayout {
 export interface GraphState {
   model: GraphModel;
   layout: GraphLayout;
-  /** The plan it was built from (`PlanState['for']`). */
+  /**
+   * The plan it was built from: that plan's own `for` object (`PlanState['for']`), not a copy, since the flash
+   * compares the two by identity to tell the picture of the pin's plan from an older one.
+   */
   for: { files: number; project: number };
   /** Milliseconds the layout worker took, when it ran. */
   ms?: number;

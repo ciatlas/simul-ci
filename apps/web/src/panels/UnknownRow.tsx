@@ -1,5 +1,5 @@
-import type { AssumeEntry, NodeId } from '@simulci/engine';
-import { useId, useMemo, useRef, useState } from 'react';
+import type { AssumeEntry, NodeId, UnknownId } from '@simulci/engine';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useApp, useSession } from '../app/providers';
 import { type PlanIndex, selectionOf } from '../plan/index';
 import { applyScenarioPin, type PinControl, pinControl, withEntry } from '../scenario/apply-pin';
@@ -9,16 +9,18 @@ import { PinEditor } from './PinEditor';
 import { affectsText, type PinTarget, pinTarget, type UnknownRowModel } from './unknown-rows';
 
 /**
- * One unknown of the Unknowns tab: its unit path, its kind, what it affects (a click selects the first), where it is
- * read, and the control that pins it. A scenario pin writes the form and hands it the focus; an assume entry written
- * here leaves the focus in the panel, which moves it once the next plan drops the row.
+ * One unknown of the Unknowns tab: its unit path, its kind, what it affects (a click selects the first; the pointer or
+ * the focus on it dims every card it does not affect), where it is read, and the control that pins it. A scenario pin
+ * writes the form and hands it the focus; an assume entry written here is a pin too, and leaves the focus in the
+ * panel, which moves it to the next row once the next plan drops this one. The row itself takes the focus then, and
+ * when a reason asks for it.
  */
 
 interface Props {
   row: UnknownRowModel;
   plan: PlanState;
   index: PlanIndex;
-  /** The row's element, so the tab can put the focus on it after a pin. */
+  /** The row's element, so the tab can put the focus on it after a pin or when a reason asks for it. */
   register: (el: HTMLElement | null) => void;
   /** An assume entry was written from the row: the next plan should drop it. */
   onPinned: () => void;
@@ -35,7 +37,13 @@ export function UnknownRow({ row, plan, index, register, onPinned }: Props) {
     [row.unknown, plan, models],
   );
   return (
-    <li ref={register} className="flex flex-col gap-1.5 border-border border-b py-2 last:border-b-0">
+    // Not focusable of itself, so a click on its text rings nothing: the tab makes it focusable for the focus it puts
+    // there (after a pin, or when "Show … in Unknowns" asks), which draws the ring keyboard focus has.
+    <li
+      ref={register}
+      data-unknown={row.unknown.id}
+      className="flex flex-col gap-1.5 border-border border-b py-2 last:border-b-0 focus:outline-2 focus:outline-accent focus:outline-offset-1"
+    >
       <div className="flex items-start gap-2">
         <code className="min-w-0 flex-1 break-all font-mono text-text text-xs">{row.path}</code>
         <span className="shrink-0 rounded bg-unknown-soft px-1 font-mono text-[10px] text-unknown">
@@ -53,7 +61,10 @@ export function UnknownRow({ row, plan, index, register, onPinned }: Props) {
   );
 }
 
-/** `affects n`: its title names the nodes, a click selects the first; the disclosure beside it lists them all. */
+/**
+ * `affects n`: its title names the nodes, a click selects the first, the pointer or the focus on it dims every other
+ * card; the disclosure beside it lists them all.
+ */
 function Affects({ row, index }: { row: UnknownRowModel; index: PlanIndex }) {
   const { store } = useApp();
   const [open, setOpen] = useState(false);
@@ -67,15 +78,14 @@ function Affects({ row, index }: { row: UnknownRowModel; index: PlanIndex }) {
   };
   return (
     <>
-      <button
-        type="button"
+      <AffectsCount
+        id={row.unknown.id}
         title={names}
-        aria-label={`${text}: ${names}; select ${first.label}`}
+        label={`${text}: ${names}; select ${first.label}`}
         onClick={() => select(first.id)}
-        className="rounded px-1 text-text underline decoration-dotted underline-offset-2 hover:bg-chrome"
       >
         {text}
-      </button>
+      </AffectsCount>
       <button
         type="button"
         aria-expanded={open}
@@ -108,6 +118,76 @@ function Affects({ row, index }: { row: UnknownRowModel; index: PlanIndex }) {
   );
 }
 
+interface CountProps {
+  id: UnknownId;
+  title: string;
+  label: string;
+  onClick: () => void;
+  children: string;
+}
+
+/** The `affects n` button, which holds the store's hovered unknown while the pointer or the focus is on it. */
+function AffectsCount({ id, title, label, onClick, children }: CountProps) {
+  const { enter, pointerLeft, blurred } = useHoverUnknown(id);
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={label}
+      onClick={onClick}
+      onPointerEnter={enter}
+      onPointerLeave={pointerLeft}
+      onFocus={enter}
+      onBlur={blurred}
+      className="rounded px-1 text-text underline decoration-dotted underline-offset-2 hover:bg-chrome"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** The count an event is on: the pointer and the focus events both carry it. */
+interface OnCount {
+  currentTarget: Element;
+}
+
+interface Hover {
+  enter: () => void;
+  /** The pointer left the count: the keyboard focus on it still holds the unknown. */
+  pointerLeft: (e: OnCount) => void;
+  /** The focus left the count: the pointer still over it holds the unknown. */
+  blurred: (e: OnCount) => void;
+}
+
+/**
+ * Hovering an unknown, which the pointer and the focus on its count hold in the store's one slot: entering sets it.
+ * Each leaving lets go only while the other does not still hold it, so the pointer passing over a count the keyboard
+ * is on, or the focus leaving one the pointer is over, keeps the dim. The pointer asks for the keyboard's focus
+ * (`:focus-visible`), not any focus: the focus a click leaves on the button does not keep the cards dimmed once the
+ * pointer goes. Either lets go only while the store still holds this one (the pointer may already be on another
+ * row's count). A button that goes while hovered, its row dropped by the plan a pin brought, clears it too, so no
+ * card stays dimmed.
+ */
+function useHoverUnknown(id: UnknownId): Hover {
+  const { store } = useApp();
+  const clear = useCallback(() => {
+    const s = store.getState();
+    if (s.hoveredUnknown === id) s.hoverUnknown(undefined);
+  }, [store, id]);
+  useEffect(() => clear, [clear]);
+  /** Lets go unless the count still matches `held`, the state of the other that holds it. */
+  const leave =
+    (held: string) =>
+    (e: OnCount): void => {
+      if (!e.currentTarget.matches(held)) clear();
+    };
+  return {
+    enter: () => store.getState().hoverUnknown(id),
+    pointerLeft: leave(':focus-visible'),
+    blurred: leave(':hover'),
+  };
+}
+
 function Control({ control, onPinned }: { control: PinControl; onPinned: () => void }) {
   if (control.kind === 'none') return <p className="text-muted text-xs">{control.text}</p>;
   if (control.kind === 'scenario') return <ScenarioPin control={control} />;
@@ -131,7 +211,7 @@ function ScenarioPin({ control }: { control: Extract<PinControl, { kind: 'scenar
   );
 }
 
-/** The entry the engine wrote (Assume cancelled), added to the case layer. */
+/** The entry the engine wrote (Assume cancelled), added to the case layer as a pin. */
 function AssumePin({
   control,
   onPinned,
@@ -142,7 +222,7 @@ function AssumePin({
   const { store } = useApp();
   const apply = (): void => {
     const s = store.getState();
-    s.setAssume(withEntry(s.assume, control.entry));
+    s.pinAssume(withEntry(s.assume, control.entry));
     onPinned();
   };
   return (
@@ -153,8 +233,9 @@ function AssumePin({
 }
 
 /**
- * Pin…: the PinEditor under the row, prefilled; Apply adds its entry to the case layer and closes it. An entry that
- * already states what the unknown is about opens instead, and Apply puts the edit in its place (`pinTarget`).
+ * Pin…: the PinEditor under the row, prefilled; Apply adds its entry to the case layer as a pin and closes it. An
+ * entry that already states what the unknown is about opens instead, and Apply puts the edit in its place
+ * (`pinTarget`).
  */
 function EditorPin({
   control,
@@ -175,7 +256,7 @@ function EditorPin({
     const s = store.getState();
     // The entry it edits, where it is now; gone meanwhile, the edit is a new entry.
     const at = target?.replaces === undefined ? -1 : s.assume.indexOf(target.replaces);
-    s.setAssume(withEntry(s.assume, entry, at));
+    s.pinAssume(withEntry(s.assume, entry, at));
     close();
     onPinned();
   };

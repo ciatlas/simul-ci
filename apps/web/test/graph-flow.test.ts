@@ -402,6 +402,75 @@ describe('toFlow', () => {
   });
 });
 
+describe('a hovered unknown and a pin on the canvas', () => {
+  const pathOf = (nodes: FlowNode[], id: string) => byId(nodes, id).data.state.path;
+  const edgeData = (edges: ReturnType<typeof toFlow>['edges']) =>
+    Object.fromEntries(edges.map((e) => [e.id, e.data!]));
+
+  it('lights the cards it names and fades every other, over the selected path, the selection keeping its outline', () => {
+    const { model, layout } = picture();
+    const lit = new Set([CI, j('lint'), j('docs')]);
+    const { nodes, edges } = toFlow(model, layout, { selected: j('test'), lit });
+    expect([CI, j('lint'), j('docs')].map((id) => pathOf(nodes, id))).toEqual(['on', 'on', 'on']);
+    for (const id of [j('build'), j('test'), j('deploy'), SUB, j('compile', SUB), j('pack', SUB), RELEASE])
+      expect(pathOf(nodes, id)).toBe('off');
+    expect(byId(nodes, j('test')).selected).toBe(true);
+    expect(byId(nodes, j('test')).data.state.selected).toBe(true);
+    const data = edgeData(edges);
+    expect(data[`${j('lint')}->${j('docs')}`]).toMatchObject({ onPath: false, faded: false });
+    // The selected job's path waits for the hover to end.
+    expect(data[`${j('build')}->${j('test')}`]).toMatchObject({ onPath: false, faded: true });
+    expect(data[`${j('test')}->${j('deploy')}`]).toMatchObject({
+      onPath: false,
+      faded: true,
+      deciding: true,
+    });
+  });
+
+  it('keeps an edge inside a called workflow only between two lit cards', () => {
+    const { model, layout } = picture();
+    const both = toFlow(model, layout, {
+      lit: new Set([CI, j('build'), SUB, j('compile', SUB), j('pack', SUB)]),
+    });
+    expect(edgeData(both.edges)[`${j('compile', SUB)}->${j('pack', SUB)}`]).toMatchObject({ faded: false });
+    expect(edgeData(both.edges)[`${j('build')}->${j('test')}`]).toMatchObject({ faded: true });
+    const one = toFlow(model, layout, { lit: new Set([CI, j('build'), SUB, j('pack', SUB)]) });
+    expect(edgeData(one.edges)[`${j('compile', SUB)}->${j('pack', SUB)}`]).toMatchObject({ faded: true });
+  });
+
+  it('fades every card and edge for an unknown that lights none', () => {
+    const { model, layout } = picture();
+    const { nodes, edges } = toFlow(model, layout, { lit: new Set() });
+    expect(nodes.every((n) => n.data.state.path === 'off')).toBe(true);
+    expect(edges.every((e) => e.data!.faded && !e.data!.onPath)).toBe(true);
+  });
+
+  it('flashes the cards the last pin changed, with its parity, and no other', () => {
+    const { model, layout } = picture();
+    const flash = { parity: 'b' as const, cards: new Set([j('deploy'), RELEASE]) };
+    const { nodes } = toFlow(model, layout, { flash });
+    const flashing = nodes.filter((n) => n.data.state.flash !== undefined);
+    expect(flashing.map((n) => [n.id, n.data.state.flash])).toEqual([
+      [j('deploy'), 'b'],
+      [RELEASE, 'b'],
+    ]);
+  });
+
+  it('keeps every card a flash or a hover leaves alone as the object it was', () => {
+    const { model, layout } = picture();
+    const before = toFlow(model, layout, {});
+    const flash = { parity: 'a' as const, cards: new Set([j('deploy')]) };
+    const flashed = keepUnchanged(before, toFlow(model, layout, { flash }));
+    expect(flashed.nodes.filter((n, i) => n !== before.nodes[i]).map((n) => n.id)).toEqual([j('deploy')]);
+    expect(flashed.edges).toBe(before.edges);
+    // The same cards lit by a set built anew change nothing.
+    const lit = keepUnchanged(flashed, toFlow(model, layout, { flash, lit: new Set([CI, j('lint')]) }));
+    const again = keepUnchanged(lit, toFlow(model, layout, { flash, lit: new Set([CI, j('lint')]) }));
+    expect(again.nodes).toBe(lit.nodes);
+    expect(again.edges).toBe(lit.edges);
+  });
+});
+
 describe('the canvas glue', () => {
   it('tells a rectangle partly out of view from one wholly inside', () => {
     const view = { width: 800, height: 600 };
@@ -600,8 +669,13 @@ describe('what a card says', () => {
     expect(deepCallee(scope(CI, { depth: 3 }))).toBe(false);
   });
 
-  it('gives the styles the verdict, the selection and the path as attributes', () => {
+  it('gives the styles the verdict, the selection, the path and the flash as attributes', () => {
     expect(cardAttrs('maybe', { selected: false, hovered: false })).toEqual({ 'data-verdict': 'maybe' });
+    expect(cardAttrs('yes', { selected: false, hovered: false, path: 'off', flash: 'b' })).toEqual({
+      'data-verdict': 'yes',
+      'data-path': 'off',
+      'data-flash': 'b',
+    });
     expect(cardAttrs('yes', { selected: true, hovered: false, path: 'on' })).toEqual({
       'data-verdict': 'yes',
       'data-selected': 'self',

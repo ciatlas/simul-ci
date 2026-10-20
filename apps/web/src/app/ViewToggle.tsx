@@ -7,11 +7,13 @@ const button =
 
 /**
  * Graph | Text: the view the author picked, kept in the URL (`view`), also switched by `t`. Below 1024 px the text
- * view is the only one: Text shows pressed, Graph is disabled, and a line beside them says why.
+ * view is the only one: Text shows pressed, Graph is disabled, and a line beside them says why. The buttons name
+ * their key only while the page keys are on, since with them off `t` is just a letter.
  */
 export function ViewToggle() {
   const view = useSession((s) => s.ui.view);
   const setView = useSession((s) => s.setView);
+  const keys = useSession((s) => s.ui.prefs.keys);
   const narrow = useNarrow();
   const shown = shownView(view, narrow);
   const hint = useId();
@@ -22,7 +24,7 @@ export function ViewToggle() {
           type="button"
           className={button}
           aria-pressed={shown === 'graph'}
-          aria-keyshortcuts="t"
+          aria-keyshortcuts={keys ? 't' : undefined}
           aria-describedby={narrow ? hint : undefined}
           disabled={narrow}
           onClick={() => setView('graph')}
@@ -33,7 +35,7 @@ export function ViewToggle() {
           type="button"
           className={button}
           aria-pressed={shown === 'text'}
-          aria-keyshortcuts="t"
+          aria-keyshortcuts={keys ? 't' : undefined}
           onClick={() => setView('text')}
         >
           Text

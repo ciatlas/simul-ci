@@ -138,7 +138,7 @@ describe('the graph from a sample to the canvas', () => {
     const p = page(sampleByName('starter')!.files);
     p.simulate({ event: 'push', branch: 'main' });
     const graph = await committed(p.store);
-    expect(graph.for).toEqual(p.store.getState().plan!.for);
+    expect(graph.for).toBe(p.store.getState().plan!.for);
     expect(Object.keys(graph.model.jobs).length).toBeGreaterThan(0);
     expectPlaced(graph);
     expectDrawn(graph, `${graph.model.roots[0]}#deploy`);

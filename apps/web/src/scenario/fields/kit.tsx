@@ -56,7 +56,8 @@ interface FieldProps {
 
 /**
  * A field: its label, the control and whatever follows it, then the hint and the refusal. The page's error banner
- * announces a refusal; the copy here is what the control's `aria-errormessage` points at, so it is no live region.
+ * announces a refusal; the copy here is what the control's `aria-errormessage` and `aria-describedby` point at, so it
+ * is no live region.
  */
 export function Field({ ids, label, tag, hint, issue, children }: FieldProps) {
   return (

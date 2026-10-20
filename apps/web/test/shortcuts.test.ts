@@ -371,6 +371,15 @@ describe('the view toggle', () => {
     expect([pressed('Graph'), pressed('Text')]).toEqual(['false', 'true']);
   });
 
+  it('names its t key on both buttons only while the page keys are on', () => {
+    const { store } = mount();
+    const shortcuts = () =>
+      ['Graph', 'Text'].map((name) => screen.getByRole('button', { name }).getAttribute('aria-keyshortcuts'));
+    expect(shortcuts()).toEqual(['t', 't']);
+    act(() => store.getState().setPrefs({ keys: false }));
+    expect(shortcuts()).toEqual([null, null]);
+  });
+
   it('shows Text pressed and Graph disabled below 1024 px, with a line that says why', () => {
     mount();
     act(() => {
