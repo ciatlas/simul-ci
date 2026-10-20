@@ -52,6 +52,12 @@ function loaded(): { state: WorkerState; project: number } {
   return { state: r.state, project: r.response.project };
 }
 
+function loadedOutline() {
+  const r = handle(initialState(), { id: 1, type: 'load', files });
+  if (r.response.type !== 'loaded') throw new Error(JSON.stringify(r.response));
+  return r.response.outline;
+}
+
 const sim = (over: Partial<SimulateRequest> = {}): SimulateRequest => ({
   id: 2,
   type: 'simulate',
@@ -63,6 +69,74 @@ const sim = (over: Partial<SimulateRequest> = {}): SimulateRequest => ({
 });
 
 describe('the worker handler', () => {
+  it('outlines the interfaces Properties offers: a local action’s, a reusable workflow’s, a job’s outputs', () => {
+    const r = handle(initialState(), {
+      id: 1,
+      type: 'load',
+      files: {
+        '.github/workflows/lib.yml': `on:
+  workflow_call:
+    inputs:
+      target: { type: string, required: true }
+      dry: { type: boolean, default: false }
+    secrets:
+      token: { required: true }
+    outputs:
+      url:
+        value: \${{ jobs.a.outputs.url }}
+jobs:
+  a:
+    runs-on: x
+    outputs:
+      url: \${{ steps.d.outputs.url }}
+      sha: abc
+    steps:
+      - id: d
+        uses: ./.github/actions/deploy
+        with: { env: prod }
+`,
+        '.github/actions/deploy/action.yml': `name: Deploy
+inputs:
+  env: { required: true, description: Where }
+  wait: { default: '30' }
+outputs:
+  url: { description: The URL, value: x }
+runs: { using: node20, main: index.js }
+`,
+      },
+    });
+    if (r.response.type !== 'loaded') throw new Error(JSON.stringify(r.response));
+    const { outline } = r.response;
+    expect(outline.actions).toEqual([
+      {
+        dir: '.github/actions/deploy',
+        file: '.github/actions/deploy/action.yml',
+        name: 'Deploy',
+        using: 'node20',
+        inputs: [
+          { name: 'env', required: true, description: 'Where' },
+          { name: 'wait', required: false, default: '30' },
+        ],
+        outputs: ['url'],
+      },
+    ]);
+    const lib = outline.workflows[0]!;
+    expect(lib.call).toEqual({
+      inputs: [
+        { name: 'target', type: 'string', required: true },
+        { name: 'dry', type: 'boolean', required: false, default: false },
+      ],
+      outputs: ['url'],
+      secrets: ['token'],
+    });
+    expect(lib.jobs[0]!.outputs).toEqual(['url', 'sha']);
+    // Nothing of the kind declared, nothing outlined.
+    expect(loadedOutline().actions).toEqual([
+      expect.objectContaining({ dir: '.github/actions/x', using: 'composite', inputs: [], outputs: [] }),
+    ]);
+    expect(loadedOutline().workflows.find((w) => w.path.endsWith('ci.yml'))!.call).toBeUndefined();
+  });
+
   it('loads a project once and answers with its outline', () => {
     const r = handle(initialState(), { id: 1, type: 'load', files });
     expect(r.response).toMatchObject({ id: 1, type: 'loaded', project: 1 });

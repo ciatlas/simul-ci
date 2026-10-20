@@ -4,24 +4,22 @@
  * tests apply them to small inputs and to what the web app's Vite config builds.
  */
 
+/** What only the engine worker may hold: the engine's dependencies but the YAML parser. */
+const ENGINE_WORKER_ONLY = [/@ciatlas\/core\//, /\/@actions\//, /\/zod\//, /picomatch/, /cronstrue/];
 /**
- * What only the engine worker may hold: the engine's dependencies. The `yaml` package is matched as a package, so the
- * YAML pane's CodeMirror grammar (`@lezer/yaml`, `@codemirror/lang-yaml`) stays allowed on the page.
+ * The YAML parser: the engine worker's, and the edit runtime's, which edits the text on the page (synthesis § 8.5).
+ * Matched as a package, so the YAML pane's CodeMirror grammar (`@lezer/yaml`, `@codemirror/lang-yaml`) stays allowed.
  */
-const ENGINE_WORKER_ONLY = [
-  /@ciatlas\/core\//,
-  /\/@actions\//,
-  /\/zod\//,
-  /node_modules\/yaml\//,
-  /picomatch/,
-  /cronstrue/,
-];
+const YAML = /node_modules\/yaml\//;
 /** What only the layout worker may hold. */
 const ELKJS = /\/elkjs\//;
 /** Engine sources the page may use: the core-free entries. */
 const PAGE_ENGINE_OK = /packages\/engine\/src\/(plan|render)\//;
 const ENGINE = /packages\/engine\/src\//;
-/** The document model, and the one module of it the page may hold: its text edits, which import nothing. */
+/**
+ * The document model, and the one module of it the page may hold: its text edits, which import nothing. The rest is
+ * the edit runtime's (`edit-*`).
+ */
 const DOCUMENT = /packages\/document\/src\//;
 const PAGE_DOCUMENT_OK = /packages\/document\/src\/edits\.ts$/;
 /** The Node host (@simulci/node): it reads the checkout from disk, which neither the page nor the worker can. */
@@ -37,6 +35,8 @@ const DATA_FONT = /@font-face\s*\{[^}]*url\(\s*['"]?data:/;
 
 const isEngineWorker = (file) => file.startsWith('engine.worker-');
 const isLayoutWorker = (file) => file.startsWith('layout.worker-');
+/** The edit runtime, fetched when the author edits: the page's but for the document model and its YAML parser. */
+const isEditRuntime = (file) => file.startsWith('edit-');
 
 /**
  * What breaks the contract in one JavaScript chunk.
@@ -78,7 +78,7 @@ function layoutWorkerProblems(file, sources) {
   if (!sources.some((s) => ELKJS.test(s)))
     problems.push(`${file} holds no elkjs, so nothing lays the graph out`);
   for (const s of sources) {
-    if (ENGINE.test(s) || ENGINE_WORKER_ONLY.some((re) => re.test(s)))
+    if (ENGINE.test(s) || ENGINE_WORKER_ONLY.some((re) => re.test(s)) || YAML.test(s))
       problems.push(`${file} holds ${s}, which only the engine worker may`);
     if (DOCUMENT.test(s)) problems.push(`${file} holds ${s}: the document model edits on the page, not here`);
   }
@@ -87,17 +87,21 @@ function layoutWorkerProblems(file, sources) {
 
 /**
  * The page holds none of the engine but its plan/ and render/ entries, none of the document model but its text edits
- * (the edit history's and the pane's), and nothing that only a worker may.
+ * (the edit history's and the pane's), and nothing that only a worker may. The edit runtime is a page chunk that may
+ * also hold the document model and the YAML parser; a lazy chunk of the page (the YAML pane) may hold neither.
  */
 function pageProblems(file, sources) {
   const problems = [];
+  const edit = isEditRuntime(file);
   for (const s of sources) {
     if (ENGINE_WORKER_ONLY.some((re) => re.test(s)))
       problems.push(`${file} holds ${s}, which only the engine worker may`);
+    if (YAML.test(s) && !edit)
+      problems.push(`${file} holds ${s}, which only the engine worker and the edit runtime may`);
     if (ELKJS.test(s)) problems.push(`${file} holds ${s}, which only the layout worker may`);
     if (ENGINE.test(s) && !PAGE_ENGINE_OK.test(s))
       problems.push(`${file} holds ${s}: the page may use only plan/ and render/`);
-    if (DOCUMENT.test(s) && !PAGE_DOCUMENT_OK.test(s))
+    if (DOCUMENT.test(s) && !PAGE_DOCUMENT_OK.test(s) && !edit)
       problems.push(`${file} holds ${s}: the page may use only @simulci/document/edits`);
   }
   return problems;

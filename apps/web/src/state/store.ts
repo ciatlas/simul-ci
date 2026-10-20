@@ -1,6 +1,7 @@
 import type { AssumeEntry, NodeId, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { regionEdit, type TextEdit, touched } from '@simulci/document/edits';
+import type { PendingSel, Refused } from '../edit/types';
 import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
 import { fileLabel } from '../lib/file-label';
@@ -214,6 +215,8 @@ export interface SessionState {
   graph?: GraphState;
   /** The field a pin or a reason asked the form to focus, until the form takes it. */
   fieldFocus?: FieldFocus;
+  /** The Properties field the `i` key asked to focus (`if`), until Properties takes it. */
+  propertyFocus?: { field: string; seq: number };
   /** The line the YAML pane was last asked to show. */
   reveal?: Reveal;
   /** Whether the Copy as test case dialog is open: the top bar's button and the `c` key open it. */
@@ -265,6 +268,10 @@ export interface EditState extends history.History {
   on: boolean;
   /** Generated files the author chose to edit this session. */
   unlocked: string[];
+  /** Where the selection goes once the plan of the texts an op or an undo left is in (§ 4.10). */
+  pendingSel?: PendingSel;
+  /** The last refused edit, for the status line and the gesture's callout, until an edit commits or it is dismissed. */
+  refused?: Refused;
 }
 
 export interface Replacing {
@@ -312,6 +319,10 @@ export interface SessionActions {
   focusField: (focus: Omit<FieldFocus, 'seq'>) => void;
   /** The form took the request `seq`. */
   fieldFocused: (seq: number) => void;
+  /** Opens the right panel on Properties (the Node tab in edit mode) and asks a field of it to take the focus. */
+  focusProperty: (field: string) => void;
+  /** Properties took the request `seq`. */
+  propertyFocused: (seq: number) => void;
   setAssume: (assume: AssumeEntry[]) => void;
   /** Writes the assume list a pin built (the Unknowns tab's Assume and Pin… controls), as a pin. */
   pinAssume: (assume: AssumeEntry[]) => void;
@@ -349,6 +360,11 @@ export interface SessionActions {
    * and the scenario: the plan is stale for the edit until the session brings the one of the new texts.
    */
   transact: (input: history.TxInput) => EditOutcome;
+  /**
+   * A commit of a Properties field: a transaction that joins the open group of the same `key` (the field's focus
+   * session), so the session is one undo entry; it closes on blur (`closeGroup`) or at any other edit.
+   */
+  grouped: (key: string, input: history.TxInput) => EditOutcome;
   /** Text typed in the YAML pane, in the offsets of the file's text now; grouped into undo entries (§ 6). */
   typed: (path: string, edits: readonly TextEdit[], alone?: history.Alone) => EditOutcome;
   /** Closes the open typing group: the pane lost the focus or showed another file. */
@@ -356,6 +372,8 @@ export interface SessionActions {
   /** Undoes the last entry; false when there is none or the hash guard stopped it. */
   undo: () => boolean;
   redo: () => boolean;
+  /** Keeps a refused edit for the status line, or clears it (`undefined`); returns its `seq`. */
+  refused: (refused: Omit<Refused, 'seq'> | undefined) => number;
   /** Restore conflicts for the author to settle; the snapshot writer waits until none is left. */
   offerRestore: (offer: RestoreOffer) => void;
   /** Settles a restore conflict: the snapshot's text (`mine`, one undoable entry) or the file as it is (`disk`). */
@@ -519,24 +537,33 @@ export function createSessionStore(initial: SessionState = initialSessionState()
   return createStore<SessionState & SessionActions>((set, get) => {
     /**
      * Commits a step of the history in one `set()` with the texts it changes (`committed`), and the change it leaves
-     * for the status line, said as `said` words it from the state before the step.
+     * for the status line, said as `said` words it from the state before the step; an op's `after` is the selection
+     * it leaves waiting for its plan.
      */
     const commit = (
       step: (s: SessionState) => StepOutcome,
       said: (s: SessionState) => Said,
       verb?: 'undo' | 'redo',
+      after?: history.SelectionRef,
     ): EditOutcome => {
       let outcome: EditOutcome = { ok: false };
       set((s) => {
-        const result = committed(s, step(s), said(s), verb && { verb, id: ++noticeId });
+        const result = committed(s, step(s), said(s), verb && { verb, id: ++noticeId }, after);
         outcome = result.outcome;
         return result.patch;
       });
       return outcome;
     };
-    /** After an undo or a redo, the pane shows the file and the line it changed (§ 6); it is not opened for it. */
-    const revealed = (outcome: EditOutcome): boolean => {
-      if (outcome.ok) set((s) => revealPatch(s) ?? s);
+    /**
+     * After an undo or a redo, the pane shows the file and the line it changed (§ 6), without being opened for it, and
+     * the selection goes back to where the entry was made (or to where a redone op left it) once its plan is in.
+     */
+    const revealed = (outcome: EditOutcome, verb: 'undo' | 'redo'): boolean => {
+      if (outcome.ok)
+        set((s) => {
+          const patch = { ...revealPatch(s), ...restoredSelection(s, verb) };
+          return Object.keys(patch).length > 0 ? patch : s;
+        });
       return outcome.ok;
     };
     return {
@@ -589,6 +616,15 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         })),
       focusField: (focus) => set({ fieldFocus: { ...focus, seq: ++requestSeq } }),
       fieldFocused: (seq) => set((s) => (s.fieldFocus?.seq === seq ? { fieldFocus: undefined } : {})),
+      focusProperty: (field) =>
+        set((s) => ({
+          propertyFocus: { field, seq: ++requestSeq },
+          ui: {
+            ...s.ui,
+            prefs: { ...s.ui.prefs, panel: 'node', collapsed: { ...s.ui.prefs.collapsed, right: false } },
+          },
+        })),
+      propertyFocused: (seq) => set((s) => (s.propertyFocus?.seq === seq ? { propertyFocus: undefined } : s)),
       setAssume: (assume) =>
         set((s) => ({ assume, stale: inputsStale(s), error: authorsErrorCleared(s.error, 'assume') })),
       pinAssume: (assume) =>
@@ -600,10 +636,20 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         })),
       setDetail: (detail) => set((s) => ({ detail, stale: inputsStale(s) })),
       setFocus: (focus) => set({ focus }),
-      // Returning `s` skips the update: a held selection keeps the tab the author picked.
+      // Returning `s` skips the update: a held selection keeps the tab the author picked. The author's own choice,
+      // the selection already shown included, wins over the one an edit left waiting for its plan.
       select: (focus, sel) =>
         set((s) =>
-          s.focus === focus && s.sel === sel ? s : { focus, sel, ui: withYamlFile(s.ui, undefined) },
+          s.focus === focus && s.sel === sel
+            ? s.edit.pendingSel
+              ? { edit: { ...s.edit, pendingSel: undefined } }
+              : s
+            : {
+                focus,
+                sel,
+                ui: withYamlFile(s.ui, undefined),
+                ...(s.edit.pendingSel ? { edit: { ...s.edit, pendingSel: undefined } } : {}),
+              },
         ),
       toggleExpanded: (job) => set((s) => ({ ui: { ...s.ui, expanded: toggled(s.ui.expanded, job) } })),
       setRepresentative: (job, leg) =>
@@ -646,6 +692,15 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         commit(
           (s) => history.transact(s.edit, s.files.byPath, input, contextOf(s)),
           () => ({ label: input.label }),
+          undefined,
+          input.selectionAfter,
+        ),
+      grouped: (key, input) =>
+        commit(
+          (s) => history.grouped(s.edit, s.files.byPath, key, input, contextOf(s)),
+          () => ({ label: input.label }),
+          undefined,
+          input.selectionAfter,
         ),
       typed: (path, splices, alone) =>
         commit(
@@ -671,7 +726,15 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         set((s) =>
           s.edit.on === on
             ? s
-            : { edit: { ...history.close(s.edit), restore: s.edit.restore, on, unlocked: s.edit.unlocked } },
+            : {
+                edit: {
+                  ...history.close(s.edit),
+                  restore: s.edit.restore,
+                  on,
+                  unlocked: s.edit.unlocked,
+                  refused: on ? s.edit.refused : undefined,
+                },
+              },
         ),
       unlock: (path) =>
         set((s) =>
@@ -684,6 +747,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
             (s) => ({ label: `Undo ${history.undoLabel(s.edit)}` }),
             'undo',
           ),
+          'undo',
         ),
       redo: () =>
         revealed(
@@ -692,7 +756,17 @@ export function createSessionStore(initial: SessionState = initialSessionState()
             (s) => ({ label: `Redo ${history.redoLabel(s.edit)}` }),
             'redo',
           ),
+          'redo',
         ),
+      refused: (refused) => {
+        if (!refused) {
+          set((s) => (s.edit.refused ? { edit: { ...s.edit, refused: undefined } } : s));
+          return 0;
+        }
+        const seq = ++requestSeq;
+        set((s) => ({ edit: { ...s.edit, refused: { ...refused, seq } } }));
+        return seq;
+      },
       projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
       // A new project of the newest texts: whatever was held is released.
       projectReady: (version, outline, files) =>
@@ -722,6 +796,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           stale: plan.for.files < s.files.version ? 'edit' : false,
           error: replaceError(s.error, undefined),
           change: answered(s.change, plan),
+          ...pendingSelection(s, plan),
         })),
       rejected: (error) => set((s) => ({ error: replaceError(s.error, error) })),
       clearError: () => set((s) => ({ error: replaceError(s.error, undefined) })),
@@ -747,6 +822,7 @@ function committed(
   outcome: StepOutcome,
   said: Said,
   stopped?: { verb: string; id: number },
+  after?: history.SelectionRef,
 ): { patch: Partial<SessionState>; outcome: EditOutcome } {
   if (outcome === undefined) return { patch: s, outcome: { ok: false } };
   if ('refused' in outcome) {
@@ -770,7 +846,9 @@ function committed(
       eols: Object.fromEntries(Object.keys(outcome.edits).map((p) => [p, s.files.meta[p]?.eol ?? 'none'])),
     };
   if (!texts.files) return { patch, outcome: { ok: false } };
-  return { patch: { ...patch, ...besideTexts(s, outcome, texts.files, said) }, outcome: { ok: true } };
+  // An edit that commits answers the last refusal; an op leaves the selection waiting for its plan.
+  const edit = { ...patch.edit!, refused: undefined, ...pending(s, after, texts.files.version) };
+  return { patch: { ...patch, edit, ...besideTexts(s, outcome, texts.files, said) }, outcome: { ok: true } };
 }
 
 /**
@@ -786,6 +864,38 @@ function besideTexts(
   const source = writtenThrough(s.source, step.changes, files.byPath);
   if (!Object.keys(step.changes).some(isProjectFile)) return { source };
   return { source, change: editOver(s, files.version, said) };
+}
+
+/**
+ * The selection to apply once the plan of `files` is in. One already shown needs no plan, and drops a selection an
+ * earlier edit left waiting: the newest edit says where the author is. No selection keeps the one waiting.
+ */
+function pending(
+  s: Pick<SessionState, 'focus' | 'sel' | 'edit'>,
+  to: history.SelectionRef | undefined,
+  files: number,
+): { pendingSel?: PendingSel } {
+  if (!to) return {};
+  if (to.focus === s.focus && to.sel === s.sel) return s.edit.pendingSel ? { pendingSel: undefined } : {};
+  return { pendingSel: { ...to, files } };
+}
+
+/** An undone entry's selection from before it, a redone one's from after it, for the plan of the texts now. */
+function restoredSelection(s: SessionState, verb: 'undo' | 'redo'): Partial<SessionState> {
+  const tx = verb === 'undo' ? s.edit.future.at(-1) : s.edit.past.at(-1);
+  const to = verb === 'undo' ? tx?.selection.before : tx?.selection.after;
+  const next = pending(s, to, s.files.version);
+  return 'pendingSel' in next ? { edit: { ...s.edit, ...next } } : {};
+}
+
+/**
+ * The selection an edit left waiting, applied by the first plan of its texts or newer ones: an older plan would
+ * resolve its unit path against the old text, and so perhaps to another node (§ 4.10).
+ */
+function pendingSelection(s: SessionState, plan: PlanState): Partial<SessionState> {
+  const waiting = s.edit.pendingSel;
+  if (!waiting || plan.for.epoch !== s.files.epoch || plan.for.files < waiting.files) return {};
+  return { focus: waiting.focus, sel: waiting.sel, edit: { ...s.edit, pendingSel: undefined } };
 }
 
 /**
@@ -813,13 +923,20 @@ function writtenThrough(
   return { ...source, buffers };
 }
 
-const contextOf = (s: SessionState): history.Context => ({
-  at: Date.now(),
-  selection: {
-    ...(s.focus === undefined ? {} : { focus: s.focus }),
-    ...(s.sel === undefined ? {} : { sel: s.sel }),
-  },
-});
+/**
+ * When and where an entry is made. While an earlier edit's selection waits for its plan, that selection is where the
+ * author is: the one shown is a unit path of an older text, which an undo would bring back onto another node.
+ */
+const contextOf = (s: SessionState): history.Context => {
+  const at = s.edit.pendingSel ?? s;
+  return {
+    at: Date.now(),
+    selection: {
+      ...(at.focus === undefined ? {} : { focus: at.focus }),
+      ...(at.sel === undefined ? {} : { sel: at.sel }),
+    },
+  };
+};
 
 /**
  * The files of a new source: a new epoch, every file at the new version, its text as read and as opened, except
