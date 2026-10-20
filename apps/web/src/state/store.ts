@@ -40,11 +40,12 @@ export interface PlanState {
   text: string;
   ms: { simulate: number; derive: number };
   /**
-   * The files version and the project version the plan answers, and the case layer it was simulated with: the plan
+   * The files version the plan was simulated from, which may be older than the store's while an edit is answered,
+   * the epoch of those files, the project version it answers, and the case layer it was simulated with: the plan
    * names the assume entries by position, so it speaks of the list it was given and of no other. The scenario is the
    * store's object it was simulated from, so a pin can tell the plan that answers it.
    */
-  for: { files: number; project: number; assume?: AssumeEntry[]; scenario?: ScenarioInput };
+  for: { files: number; epoch: number; project: number; assume?: AssumeEntry[]; scenario?: ScenarioInput };
 }
 
 /**
@@ -98,11 +99,26 @@ export interface Reveal {
 export interface SessionState {
   source: Source;
   files: {
+    /** Moves with every change of the texts: a new source, or an edit within the epoch (`withTexts`). */
     version: number;
+    /**
+     * Moves with a new source only (`setFiles`, `forgetSource`, `awaitReopen`): the picture, the viewport, the
+     * pane's states and the scenario's defaults belong to an epoch, so an edit keeps them.
+     */
+    epoch: number;
     /** The project files' texts, a BOM stripped. */
     byPath: Record<string, string>;
     /** What reading each file in `byPath` found: its BOM, its line endings, whether it is valid UTF-8. */
     meta: Record<string, FileMeta>;
+    /**
+     * Per file, the files version that last changed its text. The version only grows, so a path and its rev name one
+     * text for the page's life, across epochs too: what the pane keeps a file's state by.
+     */
+    revs: Record<string, number>;
+    /** Per file, its text as read (a save will move it); a file created since has none. */
+    base: Record<string, string>;
+    /** Per file, its text when the epoch began. */
+    opened: Record<string, string>;
   };
   project: {
     status: 'idle' | 'loading' | 'ready' | 'error';
@@ -125,8 +141,11 @@ export interface SessionState {
     busy: boolean;
   };
   plan?: PlanState;
-  /** The inputs changed since `plan` was computed. */
-  stale: boolean;
+  /**
+   * What changed since `plan` was computed, if anything: the inputs (the scenario, the assume entries, the detail),
+   * or the texts (`withTexts`). The later change names the cause.
+   */
+  stale: false | 'inputs' | 'edit';
   error?: SessionError;
   /** The depth-0 workflow the defaults, the copy and the fit are about. */
   focus?: string;
@@ -162,6 +181,8 @@ export interface SessionActions {
   /** New files from a source; a file `meta` does not cover is a string no file was read for (a paste, a sample). */
   setFiles: (byPath: Record<string, string>, source: Source, meta?: Record<string, FileMeta>) => void;
   forgetSource: () => void;
+  /** A source that has no files until the author acts: a stored folder waiting for Reopen. */
+  awaitReopen: (source: Source) => void;
   setScenario: (
     scenario: ScenarioInput,
     options?: { assumed?: string[]; from?: SessionState['scenarioFrom'] },
@@ -225,10 +246,20 @@ export type SessionStore = StoreApi<SessionState & SessionActions>;
 
 const DEFAULT_SCENARIO: ScenarioInput = { event: 'push' };
 
+const NO_FILES: SessionState['files'] = {
+  version: 0,
+  epoch: 0,
+  byPath: {},
+  meta: {},
+  revs: {},
+  base: {},
+  opened: {},
+};
+
 export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState {
   return {
     source: { kind: 'none' },
-    files: { version: 0, byPath: {}, meta: {} },
+    files: NO_FILES,
     project: { status: 'idle' },
     scenario: DEFAULT_SCENARIO,
     scenarioFrom: 'default',
@@ -254,39 +285,42 @@ let pinSeq = 0;
  */
 const UNPINNED = { pin: undefined, hoveredUnknown: undefined, unknownFocus: undefined } as const;
 
+/** What a new source starts from: nothing loaded, simulated or drawn, and nothing pinned over the files before. */
+const UNLOADED = {
+  project: { status: 'idle' },
+  plan: undefined,
+  graph: undefined,
+  stale: false,
+  ...UNPINNED,
+} as const;
+
 export function createSessionStore(initial: SessionState = initialSessionState()): SessionStore {
   return createStore<SessionState & SessionActions>((set, get) => ({
     ...initial,
     setFiles: (byPath, source, meta) =>
       set((s) => ({
         source,
-        files: { version: s.files.version + 1, byPath, meta: metaOf(byPath, meta) },
-        project: { status: 'idle' },
-        plan: undefined,
-        graph: undefined,
-        stale: false,
+        files: sourceFiles(s.files, byPath, metaOf(byPath, meta)),
+        ...UNLOADED,
         error: s.error?.kind === 'source' ? undefined : s.error,
-        ...UNPINNED,
       })),
     forgetSource: () =>
-      set({
+      set((s) => ({
         source: { kind: 'none' },
-        files: { version: get().files.version + 1, byPath: {}, meta: {} },
-        project: { status: 'idle' },
-        plan: undefined,
-        graph: undefined,
-        stale: false,
+        files: sourceFiles(s.files, {}, {}),
+        ...UNLOADED,
         focus: undefined,
         sel: undefined,
-        error: replaceError(get().error, undefined),
-        ...UNPINNED,
-      }),
+        error: replaceError(s.error, undefined),
+      })),
+    // A new epoch, so the session takes it for a source with no files, not for an edit that emptied them.
+    awaitReopen: (source) => get().setFiles({}, source),
     setScenario: (scenario, options) =>
       set((s) => ({
         scenario,
         scenarioFrom: options?.from ?? 'author',
         assumed: options?.assumed ?? [],
-        stale: s.plan !== undefined,
+        stale: inputsStale(s),
         error: authorsErrorCleared(s.error, 'scenario'),
       })),
     patchScenario: (patch) =>
@@ -294,7 +328,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         scenario: withPatch(s.scenario, patch),
         scenarioFrom: 'author',
         assumed: s.assumed.filter((k) => !edits(k, s.scenario, patch)),
-        stale: s.plan !== undefined,
+        stale: inputsStale(s),
         error: authorsErrorCleared(s.error, 'scenario'),
       })),
     pinScenario: (scenario, keys, focus) =>
@@ -302,7 +336,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         scenario,
         scenarioFrom: 'author',
         assumed: Array.from(new Set([...s.assumed, ...keys])),
-        stale: s.plan !== undefined,
+        stale: inputsStale(s),
         error: authorsErrorCleared(s.error, 'scenario'),
         fieldFocus: { ...focus, seq: ++requestSeq },
         pin: pinOver(s, scenario, s.assume),
@@ -310,15 +344,15 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     focusField: (focus) => set({ fieldFocus: { ...focus, seq: ++requestSeq } }),
     fieldFocused: (seq) => set((s) => (s.fieldFocus?.seq === seq ? { fieldFocus: undefined } : {})),
     setAssume: (assume) =>
-      set((s) => ({ assume, stale: s.plan !== undefined, error: authorsErrorCleared(s.error, 'assume') })),
+      set((s) => ({ assume, stale: inputsStale(s), error: authorsErrorCleared(s.error, 'assume') })),
     pinAssume: (assume) =>
       set((s) => ({
         assume,
-        stale: s.plan !== undefined,
+        stale: inputsStale(s),
         error: authorsErrorCleared(s.error, 'assume'),
         pin: pinOver(s, s.scenario, assume),
       })),
-    setDetail: (detail) => set((s) => ({ detail, stale: s.plan !== undefined })),
+    setDetail: (detail) => set((s) => ({ detail, stale: inputsStale(s) })),
     setFocus: (focus) => set({ focus }),
     // Returning `s` skips the update: a held selection keeps the tab the author picked.
     select: (focus, sel) =>
@@ -381,7 +415,8 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     planReceived: (plan) =>
       set((s) => ({
         plan,
-        stale: false,
+        // A plan of older texts (an input changed while an edit was loading) is still behind the edit.
+        stale: plan.for.files < s.files.version ? 'edit' : false,
         error: replaceError(s.error, undefined),
         pin: answered(s.pin, plan),
       })),
@@ -395,6 +430,49 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     dismissNotice: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
   }));
 }
+
+/** The files of a new source: a new epoch, every file at the new version, its text as read and as opened. */
+function sourceFiles(
+  files: SessionState['files'],
+  byPath: Record<string, string>,
+  meta: Record<string, FileMeta>,
+): SessionState['files'] {
+  const version = files.version + 1;
+  const revs = Object.fromEntries(Object.keys(byPath).map((path) => [path, version]));
+  return { version, epoch: files.epoch + 1, byPath, meta, revs, base: byPath, opened: byPath };
+}
+
+/**
+ * The texts changed within the epoch: the files version moves, and so does the rev of each file whose text changed;
+ * the epoch, the base and the opened texts stay, and a path new to the files gets the meta of a string. Nothing else
+ * of the store moves, the plan, the picture, the selection and the scenario included: the plan is stale for the edit
+ * until the session brings the one of the new texts. Texts the files already hold change nothing. This is what an
+ * edit of the store's texts reduces to; the edit history's `transact` (M3b A3) is built on it.
+ */
+export function withTexts(
+  s: SessionState,
+  texts: Readonly<Record<string, string>>,
+): Partial<Pick<SessionState, 'files' | 'stale'>> {
+  const changed = Object.entries(texts).filter(([path, text]) => s.files.byPath[path] !== text);
+  if (changed.length === 0) return {};
+  const version = s.files.version + 1;
+  const files = {
+    ...s.files,
+    version,
+    byPath: { ...s.files.byPath },
+    meta: { ...s.files.meta },
+    revs: { ...s.files.revs },
+  };
+  for (const [path, text] of changed) {
+    files.byPath[path] = text;
+    files.meta[path] ??= textMeta(text);
+    files.revs[path] = version;
+  }
+  return { files, stale: s.plan === undefined ? false : 'edit' };
+}
+
+/** An input changed: the plan shown, if any, is stale for it. */
+const inputsStale = (s: SessionState): SessionState['stale'] => (s.plan === undefined ? false : 'inputs');
 
 /** The meta of each file: as the reader gave it, else that of a string. A path not in `byPath` is dropped. */
 function metaOf(

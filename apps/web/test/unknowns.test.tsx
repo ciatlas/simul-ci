@@ -50,7 +50,7 @@ function planState(scenario: ScenarioInput, assume: AssumeEntry[] = []): PlanSta
   });
   if (step.response.type !== 'plan') throw new Error(JSON.stringify(step.response));
   const { plan, derived, text, ms } = step.response;
-  return { plan, derived, text, ms, for: { files: 1, project: 1, assume, scenario } };
+  return { plan, derived, text, ms, for: { files: 1, epoch: 1, project: 1, assume, scenario } };
 }
 
 function mount(scenario: ScenarioInput, assume: AssumeEntry[] = [], sel?: string, focus = CI) {
@@ -210,7 +210,7 @@ describe('the Unknowns tab', () => {
   it('keeps saying where an entry applied while only the scenario changes', () => {
     const { store } = mount(source, [detect]);
     act(() => store.getState().patchScenario({ message: 'docs' }));
-    expect(store.getState().stale).toBe(true);
+    expect(store.getState().stale).toBe('inputs');
     expect(itemOf('build.detect · outputs.changed = true').textContent).toContain('applied at build.detect');
   });
 

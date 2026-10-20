@@ -25,7 +25,8 @@ import type { DecidingLines, ProblemLine } from './locs';
 /**
  * The YAML pane's CodeMirror: read-only, line numbers, YAML highlighting over the page's tokens, and three
  * decorations the pane sets from the plan with effects — the verdict gutter, the selection's deciding line (and its
- * own line when the two differ), the lines the parsers refused — plus the flash a revealed line gets. Colours are the
+ * own line when the two differ), the lines the parsers refused — plus the flash a revealed line gets. Each maps
+ * through a change of the text, so it stays on its line until the pane sets it again. Colours are the
  * token sheet's CSS variables, so the theme follows the page; `dark` only tells CodeMirror's own defaults.
  */
 
@@ -177,13 +178,44 @@ export function scrollOwnTo(view: EditorView, line: number, y: 'center' | 'neare
 }
 
 /**
- * The states of the files of one version, so a file shown again keeps where it was scrolled. A new version of the
- * files drops the states of the old one.
+ * The change that takes a document to a text: one replacement between their longest common start and end. The text
+ * is split into lines as CodeMirror splits a document, so the positions are the document's own in a CRLF file too.
+ */
+function changesTo(doc: Text, text: string): { from: number; to: number; insert: string } {
+  const before = doc.toString();
+  const after = text.split(/\r\n?|\n/).join('\n');
+  const max = Math.min(before.length, after.length);
+  let start = 0;
+  while (start < max && before[start] === after[start]) start++;
+  let end = 0;
+  while (end < max - start && before.at(-1 - end) === after.at(-1 - end)) end++;
+  return { from: start, to: before.length - end, insert: after.slice(start, after.length - end) };
+}
+
+/** Which text of a file a state holds: the files' epoch, and the file's rev within it. */
+export interface PaneText {
+  epoch: number;
+  rev: number;
+}
+
+interface PaneDoc {
+  state: EditorState;
+  rev: number;
+  scroll?: StateEffect<unknown>;
+}
+
+/**
+ * The states of the files of one epoch, so a file shown again keeps where it was scrolled. A file whose text moved
+ * on (its rev) gets the new text as a change of the state it has, shown or put aside: its marks, its selection and
+ * its scroll map through the change, and stay on their lines until the plan of the new text replaces them. A new
+ * epoch drops every state.
  */
 export class PaneDocs {
-  #docs = new Map<string, { state: EditorState; scroll?: StateEffect<unknown> }>();
+  #docs = new Map<string, PaneDoc>();
   #shown: string | undefined;
-  #version: number | undefined;
+  /** The rev of the text the shown state holds. */
+  #rev = 0;
+  #epoch: number | undefined;
   #view: EditorView | undefined;
   #create: (path: string, text: string) => EditorState;
 
@@ -192,36 +224,49 @@ export class PaneDocs {
   }
 
   /**
-   * Puts a file's state in the view unless it is there already. Returns the effects that scroll it back to where it
-   * was left, when it was shown before.
+   * Puts a file's state in the view unless it is there already, with the text given. Returns the effects that scroll
+   * it back to where it was left, when it was shown before.
    */
-  show(view: EditorView, path: string, version: number, text: string): StateEffect<unknown>[] {
-    if (this.#version !== version) {
+  show(view: EditorView, path: string, at: PaneText, text: string): StateEffect<unknown>[] {
+    if (this.#epoch !== at.epoch) {
       this.#docs.clear();
       this.#shown = undefined;
-      this.#version = version;
+      this.#epoch = at.epoch;
     }
     // Another view (React's second mount in development) shows nothing yet.
     if (this.#view !== view) {
       this.#view = view;
       this.#shown = undefined;
     }
-    if (this.#shown === path) return [];
+    if (this.#shown === path) {
+      if (this.#rev !== at.rev) view.dispatch({ changes: changesTo(view.state.doc, text) });
+      this.#rev = at.rev;
+      return [];
+    }
     // A state put aside keeps its place, not a flash that would play again when it comes back.
     if (this.#shown !== undefined) {
       const state = view.state.update({ effects: setFlash.of(undefined) }).state;
-      this.#docs.set(this.#shown, { state, scroll: view.scrollSnapshot() });
+      this.#docs.set(this.#shown, { state, rev: this.#rev, scroll: view.scrollSnapshot() });
     }
-    const doc = this.#docs.get(path) ?? { state: this.#create(path, text) };
+    const doc = this.#kept(path, at.rev, text) ?? { state: this.#create(path, text), rev: at.rev };
     this.#docs.set(path, doc);
     view.setState(doc.state);
     this.#shown = path;
+    this.#rev = at.rev;
     return doc.scroll ? [doc.scroll] : [];
   }
 
   /** The file the view shows. */
   get shown(): string | undefined {
     return this.#shown;
+  }
+
+  /** The state put aside for a file, brought to the text when the file's rev moved since. */
+  #kept(path: string, rev: number, text: string): PaneDoc | undefined {
+    const doc = this.#docs.get(path);
+    if (!doc || doc.rev === rev) return doc;
+    const changes = doc.state.changes(changesTo(doc.state.doc, text));
+    return { state: doc.state.update({ changes }).state, rev, scroll: doc.scroll?.map(changes) };
   }
 }
 

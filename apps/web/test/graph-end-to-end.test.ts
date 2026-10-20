@@ -69,7 +69,9 @@ function page(files: Record<string, string>) {
     const r = step.response;
     if (r.type !== 'plan') throw new Error(JSON.stringify(r));
     const { plan, derived, text, ms } = r;
-    store.getState().planReceived({ plan, derived, text, ms, for: { files: 1, project: r.project } });
+    store
+      .getState()
+      .planReceived({ plan, derived, text, ms, for: { files: 1, epoch: 1, project: r.project } });
   };
   return { store, worker, session, simulate };
 }

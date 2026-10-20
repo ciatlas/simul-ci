@@ -213,7 +213,7 @@ for (const theme of ['light', 'dark'] as const)
     await refuseInput(page);
 
     // The graph: a dashed rule inside the canvas and faded edges say stale; the cards keep their colours.
-    await expect(page.locator('.sc-canvas')).toHaveAttribute('data-stale', 'true');
+    await expect(page.locator('.sc-canvas')).toHaveAttribute('data-stale', 'inputs');
     const rule = await staleRule(page);
     expect(rule).toMatchObject({ style: 'dashed', width: '2px' });
     await expect

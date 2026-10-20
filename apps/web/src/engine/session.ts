@@ -7,7 +7,11 @@ import type { EngineClient, SimulateResult } from '../worker/client';
 /**
  * The store's one bridge to the engine: new files are loaded and simulated at once; a changed scenario, assume
  * entries or detail re-simulates after a short quiet; answers for an older request, project or files are dropped.
- * The engine reads busy while any request of the session is unanswered, and failed once the client gives up on it.
+ * The first load of an epoch (a new source) gives the scenario its defaults; a load of texts edited within the epoch
+ * keeps the scenario, the selection and the plan on screen, which says it is stale until the next one comes. Each
+ * plan is labelled with the files version it was simulated from, so a plan of older texts never passes for one of
+ * the texts on screen. The engine reads busy while any request of the session is unanswered, and failed once the
+ * client gives up on it.
  */
 
 export interface SessionOptions {
@@ -34,7 +38,7 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
   let request = 0;
   /** Requests of the session the client has not answered yet. */
   let unanswered = 0;
-  /** The files version last loaded: the same files loaded again (a stale reply) keep the author's place. */
+  /** The epoch last loaded: its files loaded again (a stale reply, an edit) keep the author's place. */
   let loaded: number | undefined;
 
   const busy = (delta: 1 | -1): void => {
@@ -57,17 +61,21 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
     actions.notify(restarts > 1 ? `the engine restarted again (${restarts})` : 'the engine restarted');
   });
 
-  /** The load counts as unanswered until the simulate it leads to is answered, so busy does not blink between. */
-  const load = async (version: number, byPath: Record<string, string>): Promise<void> => {
-    actions.projectLoading();
+  /**
+   * The load counts as unanswered until the simulate it leads to is answered, so busy does not blink between. The
+   * texts of an edit leave the project as it was, ready to simulate until the new one replaces it: busy says it.
+   */
+  const load = async (version: number, byPath: Record<string, string>, edit = false): Promise<void> => {
+    const { epoch } = store.getState().files;
+    if (!edit) actions.projectLoading();
     busy(1);
     try {
       const r = await client.load({ files: byPath });
       if (store.getState().files.version !== version) return;
       if (r.type === 'loaded') {
         actions.projectReady(r.project, r.outline, version);
-        const fresh = loaded !== version;
-        loaded = version;
+        const fresh = loaded !== epoch;
+        loaded = epoch;
         // New files under the page's own scenario get the defaults for them, and a selection made in other files goes.
         if (fresh && store.getState().scenarioFrom === 'default') {
           const d = defaultScenario(r.outline);
@@ -90,16 +98,17 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
 
   const run = async (): Promise<void> => {
     const s = store.getState();
-    if (s.project.status !== 'ready' || s.project.version === undefined) return;
+    const { version: project, files } = s.project;
+    if (s.project.status !== 'ready' || project === undefined || files === undefined) return;
     const id = ++request;
-    const files = s.files.version;
-    const project = s.project.version;
+    const { epoch } = s.files;
     const { assume, scenario } = s;
     busy(1);
     const r = await client.simulate({ project, scenario, assume, detail: s.detail });
     busy(-1);
     if (id !== request) return;
-    await settle(r, { files, project, assume, scenario });
+    // The files the project was loaded from, not the store's newest: an edit since is not in this plan.
+    await settle(r, { files, epoch, project, assume, scenario });
   };
 
   const settle = async (
@@ -141,7 +150,8 @@ export function createSession({ store, client, timers, debounceMs = 100 }: Sessi
   const unsubscribe = store.subscribe((s, prev) => {
     if (s.files.version !== prev.files.version) {
       simulate.cancel();
-      if (Object.keys(s.files.byPath).length > 0) void load(s.files.version, s.files.byPath);
+      const edit = s.files.epoch === prev.files.epoch;
+      if (Object.keys(s.files.byPath).length > 0) void load(s.files.version, s.files.byPath, edit);
       return;
     }
     if (

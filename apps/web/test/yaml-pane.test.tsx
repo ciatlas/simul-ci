@@ -8,7 +8,7 @@ import type { App } from '../src/app/boot';
 import { AppProvider, useSession } from '../src/app/providers';
 import { sampleByName } from '../src/input/samples';
 import { planIndex, selectionOf } from '../src/plan/index';
-import { createSessionStore, initialSessionState, type SessionStore } from '../src/state/store';
+import { createSessionStore, initialSessionState, type SessionStore, withTexts } from '../src/state/store';
 import { handle, initialState } from '../src/worker/handle';
 import type { Outline } from '../src/worker/protocol';
 import {
@@ -53,11 +53,22 @@ function simulated(files: Record<string, string>, scenario: ScenarioInput) {
   const { plan, derived, text, ms } = step.response;
   return {
     outline: loaded.response.outline,
-    plan: { plan, derived, text, ms, for: { files: 1, project: 1 } },
+    plan: { plan, derived, text, ms, for: { files: 1, epoch: 1, project: 1 } },
   };
 }
 
 const main = simulated(starter, { event: 'push', branch: 'main', changed: ['src/a.ts'] });
+
+/** The store's files of the first source, at a version: every file as it was read. */
+const filesOf = (byPath: Record<string, string>, version: number) => ({
+  version,
+  epoch: 1,
+  byPath,
+  meta: {},
+  revs: Object.fromEntries(Object.keys(byPath).map((path) => [path, 1])),
+  base: byPath,
+  opened: byPath,
+});
 const onMark = vi.fn();
 
 afterEach(() => {
@@ -170,7 +181,7 @@ describe('the pane’s extensions', () => {
     expect(themeFor(true)).toBe(themeFor(true));
   });
 
-  it('keep one state per file for a version of the files, and drop them for the next', () => {
+  it('keep one state per file for an epoch, and drop them for the next', () => {
     const parent = document.createElement('div');
     const view = new EditorView({ parent, state: blankState() });
     const made: string[] = [];
@@ -178,27 +189,58 @@ describe('the pane’s extensions', () => {
       made.push(path);
       return paneState(doc, { path, dark: false, onMark });
     });
-    expect(docs.show(view, 'a.yml', 1, 'a: 1')).toEqual([]);
+    expect(docs.show(view, 'a.yml', { epoch: 1, rev: 1 }, 'a: 1')).toEqual([]);
     expect(view.state.doc.toString()).toBe('a: 1');
-    expect(docs.show(view, 'a.yml', 1, 'a: 1')).toEqual([]);
+    expect(docs.show(view, 'a.yml', { epoch: 1, rev: 1 }, 'a: 1')).toEqual([]);
     view.dispatch({
       effects: [setMarks.of([{ line: 1, node: 'n', verdict: 'yes', title: 'n' }]), setFlash.of(1)],
     });
-    docs.show(view, 'b.yml', 1, 'b: 1');
+    docs.show(view, 'b.yml', { epoch: 1, rev: 1 }, 'b: 1');
     expect(docs.shown).toBe('b.yml');
     // Back to a file shown before: its own state, and where it was scrolled, without the flash it had.
-    expect(docs.show(view, 'a.yml', 1, 'a: 1')).toHaveLength(1);
+    expect(docs.show(view, 'a.yml', { epoch: 1, rev: 1 }, 'a: 1')).toHaveLength(1);
     expect(gutterNodes(view.state).get(1)).toBe('n');
     expect(lineClasses(view.state).size).toBe(0);
-    docs.show(view, 'a.yml', 2, 'a: 2');
+    docs.show(view, 'a.yml', { epoch: 2, rev: 2 }, 'a: 2');
     expect(view.state.doc.toString()).toBe('a: 2');
+    expect(gutterNodes(view.state).size).toBe(0);
     // Another view starts from nothing shown, with the states kept.
     const other = new EditorView({ parent, state: blankState() });
-    docs.show(other, 'a.yml', 2, 'a: 2');
+    docs.show(other, 'a.yml', { epoch: 2, rev: 2 }, 'a: 2');
     expect(other.state.doc.toString()).toBe('a: 2');
     expect(made).toEqual(['a.yml', 'b.yml', 'a.yml']);
     view.destroy();
     other.destroy();
+  });
+
+  it('bring a file’s new text to its state as a change, shown or put aside, so its marks map', () => {
+    const parent = document.createElement('div');
+    const view = new EditorView({ parent, state: blankState() });
+    const docs = new PaneDocs((path, doc) => paneState(doc, { path, dark: false, onMark }));
+    const at = { epoch: 1, rev: 1 };
+    docs.show(view, 'a.yml', at, 'on: push\r\njobs:\r\n  a: {}\r\n');
+    view.dispatch({
+      effects: [
+        setMarks.of([{ line: 3, node: 'a', verdict: 'yes', title: 'a' }]),
+        setProblems.of([{ line: 2, message: 'x' }]),
+      ],
+    });
+    view.dispatch({ selection: { anchor: view.state.doc.line(3).from + 2 } });
+    // A line added above them: the marks and the cursor move down with their lines, in the state the view had.
+    docs.show(view, 'a.yml', { epoch: 1, rev: 2 }, '# ci\r\non: push\r\njobs:\r\n  a: {}\r\n');
+    expect(view.state.doc.toString()).toBe('# ci\non: push\njobs:\n  a: {}\n');
+    expect(view.state.doc.line(4).text).toBe('  a: {}');
+    expect(gutterNodes(view.state)).toEqual(new Map([[4, 'a']]));
+    expect([...lineClasses(view.state).keys()]).toEqual([3]);
+    expect(view.state.selection.main.head).toBe(view.state.doc.line(4).from + 2);
+    // Put aside, then changed again: the kept state gets the change when it is shown.
+    docs.show(view, 'b.yml', { epoch: 1, rev: 1 }, 'b: 1');
+    expect(
+      docs.show(view, 'a.yml', { epoch: 1, rev: 3 }, '# ci\r\n\r\non: push\r\njobs:\r\n  a: {}\r\n'),
+    ).toHaveLength(1);
+    expect(gutterNodes(view.state)).toEqual(new Map([[5, 'a']]));
+    expect([...lineClasses(view.state).keys()]).toEqual([4]);
+    view.destroy();
   });
 });
 
@@ -211,8 +253,8 @@ describe('the YAML pane', () => {
     const initial = initialSessionState();
     return createSessionStore({
       ...initial,
-      files: { version: 1, byPath: starter, meta: {} },
-      project: { status: 'ready', version: 1, outline, files: 3 },
+      files: filesOf(starter, 1),
+      project: { status: 'ready', version: 1, outline, files: 1 },
       plan: main.plan,
       focus: CI,
       ui: {
@@ -338,15 +380,76 @@ describe('the YAML pane', () => {
       expect(scroll.last()).toEqual(deciding);
       const before = scroll.count();
       act(() => store.getState().setFiles({ ...starter }, store.getState().source));
-      act(() => store.getState().projectReady(2, main.outline, 3));
+      act(() => store.getState().projectReady(2, main.outline, 2));
       // The states of the old files are gone; the plan of the new ones puts the selection back in view.
-      act(() => store.getState().planReceived({ ...main.plan, for: { files: 2, project: 2 } }));
+      act(() => store.getState().planReceived({ ...main.plan, for: { files: 2, epoch: 2, project: 2 } }));
       expect(store.getState()).toMatchObject({ focus: CI, sel: 'deploy' });
       expect(scroll.count()).toBe(before + 1);
       expect(scroll.last()).toEqual(deciding);
     } finally {
       scroll.restore();
     }
+  });
+
+  it('keeps the marks and the deciding line on their lines through an edit, until the plan of the new text sets them', () => {
+    const setState = vi.spyOn(EditorView.prototype, 'setState');
+    const scroll = ownScrolls();
+    try {
+      const { container, store } = mount({ sel: 'deploy' });
+      const marks = gutterNodes(viewOf(container).state);
+      const moved = new Map([...marks].map(([line, node]) => [line + 1, node]));
+      expect(classes(container).get(43)).toEqual(['cm-sc-deciding:yes']);
+      const states = setState.mock.calls.length;
+      const scrolls = scroll.count();
+      const edited = { ...starter, [CI]: `# edited\n${starter[CI]!}` };
+      act(() => store.setState((s) => withTexts(s, { [CI]: edited[CI] })));
+      // The plan on screen is of the old text: it neither hides the marks nor puts them by its own line numbers.
+      expect(store.getState().stale).toBe('edit');
+      expect(viewOf(container).state.doc.line(1).text).toBe('# edited');
+      expect(gutterNodes(viewOf(container).state)).toEqual(moved);
+      expect(classes(container).get(44)).toEqual(['cm-sc-deciding:yes']);
+      expect(classes(container).has(43)).toBe(false);
+      // The same state, changed: no new one, and no scroll to the selection.
+      expect(setState.mock.calls.length).toBe(states);
+      expect(scroll.count()).toBe(scrolls);
+      const next = simulated(edited, { event: 'push', branch: 'main', changed: ['src/a.ts'] });
+      act(() => store.getState().projectReady(2, next.outline, 2));
+      act(() => store.getState().planReceived({ ...next.plan, for: { files: 2, epoch: 1, project: 2 } }));
+      expect(gutterNodes(viewOf(container).state)).toEqual(moved);
+      expect(classes(container).get(44)).toEqual(['cm-sc-deciding:yes']);
+      expect(scroll.count()).toBe(scrolls);
+    } finally {
+      setState.mockRestore();
+      scroll.restore();
+    }
+  });
+
+  it('keeps the problem lines through an edit, until the outline of the new text sets them', () => {
+    const outline = structuredClone(main.outline);
+    outline.files
+      .find((f) => f.path === RELEASE)
+      ?.errors.push({ line: 3, column: 1, message: 'Unexpected value' });
+    const initial = initialSessionState();
+    const { container, store } = mount({ ui: { ...initial.ui, yamlFile: RELEASE } }, outline);
+    expect(lineOf(container, 3)?.className).toContain('cm-sc-problem');
+    act(() => store.setState((s) => withTexts(s, { [RELEASE]: `\n${starter[RELEASE]!}` })));
+    expect(classes(container).get(4)).toEqual(['cm-sc-problem']);
+    expect(classes(container).has(3)).toBe(false);
+    act(() => store.getState().projectReady(2, main.outline, 2));
+    expect(classes(container).has(4)).toBe(false);
+  });
+
+  it('stays on the file the selection is in while the plan on screen is of older texts', () => {
+    const tag = simulated(starter, { event: 'push', tag: 'v1' });
+    const index = planIndex(tag.plan);
+    // The action's cache step, as the publish job runs it: declared in the action, selected in release.yml.
+    const inner = [...index.nodes.keys()].find((id) => id.endsWith('/setup/steps.cache'))!;
+    const { focus, sel } = selectionOf(index, inner);
+    const { container, store } = mount({ plan: tag.plan, focus, sel });
+    expect(content(container).getAttribute('aria-label')).toBe(`${SETUP}, read-only`);
+    act(() => store.setState((s) => withTexts(s, { [SETUP]: `# edited\n${starter[SETUP]!}` })));
+    expect(content(container).getAttribute('aria-label')).toBe(`${SETUP}, read-only`);
+    expect(viewOf(container).state.doc.line(1).text).toBe('# edited');
   });
 
   it('centres a line, or moves the least that shows it and not at all when it shows', () => {
@@ -373,8 +476,8 @@ describe('the YAML pane', () => {
     const initial = initialSessionState();
     const store = createSessionStore({
       ...initial,
-      files: { version: 1, byPath: starter, meta: {} },
-      project: { status: 'ready', version: 1, outline: main.outline, files: 3 },
+      files: filesOf(starter, 1),
+      project: { status: 'ready', version: 1, outline: main.outline, files: 1 },
       plan: main.plan,
       focus: CI,
     });
@@ -507,7 +610,7 @@ describe('the YAML pane', () => {
     expect(container.querySelectorAll('.cm-sc-mark')).toHaveLength(0);
     expect(content(container).getAttribute('aria-label')).toBe(`${CI}, read-only`);
     unmount();
-    const stale = mount({ files: { version: 2, byPath: starter, meta: {} } });
+    const stale = mount({ files: filesOf(starter, 2) });
     expect(stale.container.querySelectorAll('.cm-sc-mark')).toHaveLength(0);
   });
 

@@ -28,7 +28,7 @@ function planState(scenario: ScenarioInput): PlanState {
   });
   if (step.response.type !== 'plan') throw new Error(JSON.stringify(step.response));
   const { plan, derived, text, ms } = step.response;
-  return { plan, derived, text, ms, for: { files: 1, project: 1 } };
+  return { plan, derived, text, ms, for: { files: 1, epoch: 1, project: 1 } };
 }
 
 const push = planState({ event: 'push', branch: 'main' });

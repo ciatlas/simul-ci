@@ -55,7 +55,7 @@ function answered(
   const { plan, derived, text, ms } = step.response;
   return {
     outline: loaded.response.outline,
-    state: { plan, derived, text, ms, for: { files: 1, project: 1 } },
+    state: { plan, derived, text, ms, for: { files: 1, epoch: 1, project: 1 } },
   };
 }
 

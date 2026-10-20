@@ -77,7 +77,7 @@ const receive = (store: SessionStore, jobs: FakePlan['jobs']): void =>
     derived: {} as never,
     text: '',
     ms: { simulate: 1, derive: 0 },
-    for: { files: ++files, project: 1 },
+    for: { files: ++files, epoch: 1, project: 1 },
   });
 
 /** Lets the session's promises run. */

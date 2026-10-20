@@ -58,7 +58,7 @@ jobs:
 function planState(): PlanState {
   const plan = simulate({ files, scenario: { event: 'push' }, assume: [], detail: 'steps' });
   const derived = deriveTables(plan, { files: [], workflows: [], events: {} });
-  return { plan, derived, text: '', ms: { simulate: 0, derive: 0 }, for: { files: 1, project: 1 } };
+  return { plan, derived, text: '', ms: { simulate: 0, derive: 0 }, for: { files: 1, epoch: 1, project: 1 } };
 }
 
 /** A small index by hand: ci.yml with a job, its step using a composite action, and an untriggered release.yml. */
