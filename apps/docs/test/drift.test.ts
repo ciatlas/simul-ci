@@ -62,14 +62,13 @@ function blocks(mdx: string): { lang: string; text: string }[] {
   return [...mdx.matchAll(/^```(\w+)[^\n]*\n([\s\S]*?)^```$/gm)].map((m) => ({ lang: m[1]!, text: m[2]! }));
 }
 
-const kebab = (name: string): string => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
-
 type Args = Record<string, { type?: string; alias?: string | string[] }>;
 
+/** The flags of a command, as its keys spell them: in kebab case, as `--help` shows them. */
 function commandFlags(args: Args): string[] {
   return Object.entries(args)
     .filter(([, a]) => a.type !== 'positional')
-    .map(([name]) => `--${kebab(name)}`);
+    .map(([name]) => `--${name}`);
 }
 
 const docFlags = (mdx: string): Set<string> => new Set(mdx.match(/(?<![\w-])--[a-z][a-z-]*/g));
