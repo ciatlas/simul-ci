@@ -449,6 +449,9 @@ test('with less motion asked for, a selection and a pin move no card, f fits at 
   expect(await cardAnimations(page)).toEqual([]);
   expect(await recorded(page)).toEqual([]);
 
+  // The plan's sentence comes half a second after the plan, after the first fit: the line it fills was held for it,
+  // so the canvas `f` fits is the one fitted at first.
+  await expect(statusLine(page)).not.toHaveText('');
   await page.getByRole('button', { name: 'Zoom In' }).click();
   const zoomed = await transform(page);
   expect(zoomed).not.toBe(fitted);

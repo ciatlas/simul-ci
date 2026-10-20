@@ -58,7 +58,8 @@ export function StatusBar() {
 
   return (
     <footer className="flex items-center gap-3 border-border border-t bg-chrome px-4 py-1 text-muted text-xs">
-      <span aria-live="polite" className="min-w-0">
+      {/* One line held from the start: the first sentence must not shrink the canvas under a view already fitted. */}
+      <span aria-live="polite" className="min-h-4 min-w-0">
         <span key={line.key} className={stale && line.key !== 'held' ? 'italic' : undefined}>
           {line.text}
         </span>
