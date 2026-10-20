@@ -525,8 +525,12 @@ describe('the workflow being edited', () => {
 
   it('reads Delete as removing the focused edge’s need, else the selection, and nothing typed or held', () => {
     const { model } = picture();
-    const key = (k: string, target: unknown, mods: Partial<{ altKey: boolean; shiftKey: boolean }> = {}) =>
-      editKey({ key: k, altKey: false, ctrlKey: false, metaKey: false, target, ...mods }, model);
+    const key = (
+      k: string,
+      target: unknown,
+      mods: Partial<{ altKey: boolean; shiftKey: boolean }> = {},
+      selected: string | undefined = j('test'),
+    ) => editKey({ key: k, altKey: false, ctrlKey: false, metaKey: false, target, ...mods }, model, selected);
     const edgeEl = {
       classList: { contains: (name: string) => name === 'react-flow__edge' },
       getAttribute: (name: string) => (name === 'data-id' ? `${j('test')}->${j('deploy')}` : null),
@@ -539,6 +543,10 @@ describe('the workflow being edited', () => {
     expect(key('Delete', { tagName: 'INPUT' })).toBeUndefined();
     expect(key('Delete', cardElement(j('test')), { shiftKey: true })).toBeUndefined();
     expect(key('x', cardElement(j('test')))).toBeUndefined();
+    // A card that does not hold the selection removes nothing: the key is about the card the focus is on.
+    expect(key('Delete', cardElement(j('lint')))).toBeUndefined();
+    expect(key('Delete', cardElement(j('build')), {}, `${j('build')}/steps.compile`)).toBe('remove');
+    expect(key('Delete', cardElement(j('build')), {}, undefined)).toBeUndefined();
   });
 });
 

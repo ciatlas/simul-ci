@@ -471,7 +471,7 @@ function useCanvasKeys(
   const effects = useNavEffects(store, refs, graph, moving);
   const [navigate] = useState(createNavigator);
   return (e) => {
-    if (editing && runEditKey(store, e, graph.current)) {
+    if (editing && runEditKey(store, e, graph.current, selected)) {
       e.preventDefault();
       return;
     }
@@ -487,8 +487,9 @@ function runEditKey(
   store: SessionStore,
   e: KeyboardEvent<HTMLDivElement>,
   graph: GraphState | undefined,
+  selected: NodeId | undefined,
 ): boolean {
-  const key = editKey(e, graph?.model);
+  const key = editKey(e, graph?.model, selected);
   const edit = key && gestures.of(store);
   if (!key || !edit) return false;
   if (key === 'remove') return edit.remove();

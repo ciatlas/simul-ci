@@ -405,14 +405,18 @@ export type EditKey = 'remove' | { source: NodeId; target: NodeId };
 
 /**
  * What a key press on the canvas asks of the edit runtime (synthesis § 4.2): Delete or Backspace removes the need of
- * the focused edge, else the selection. Typed into a field, or with Alt, Ctrl or Meta, it is none.
+ * the focused edge, else the selection; on a card, only the selection that card holds, so a key never removes another
+ * node than the one the focus is on. Typed into a field, or with Alt, Ctrl or Meta, it is none.
  */
 export function editKey(
   e: KeyPress & { shiftKey?: boolean },
   model: GraphModel | undefined,
+  selected: NodeId | undefined,
 ): EditKey | undefined {
   if (!canvasKey(e) || e.shiftKey || e.altKey) return undefined;
   if (e.key !== 'Delete' && e.key !== 'Backspace') return undefined;
+  const card = nodeIdOf(e.target);
+  if (card !== undefined) return model && holder(model, selected) === card ? 'remove' : undefined;
   const edge = edgeIdOf(e.target);
   if (edge === undefined) return 'remove';
   for (const scope of Object.values(model?.scopes ?? {})) {
