@@ -1,22 +1,25 @@
 /* oxlint-disable no-restricted-imports -- the worker is where the engine runs */
-import { ACTIVITY_TYPES, type LoadedProject, readSettings } from '@simulci/engine';
+import { ACTIVITY_TYPES, type LoadedProject, readSettings, type WorkflowSettings } from '@simulci/engine';
 import { isMap, isScalar, isSeq, LineCounter, parseDocument } from 'yaml';
+import type { EventLines, FileCache, OnLines } from './cache';
 import type { Outline, OutlineEvent, OutlineFile, OutlineJob, OutlineWorkflow } from './protocol';
 
-/** The Outline of a loaded project: what the form, the tree and the pane need to know, from core's declarations. */
-export function outlineOf(loaded: LoadedProject): Outline {
+/**
+ * The Outline of a loaded project: what the form, the tree and the pane need to know, from core's declarations. What
+ * it reads from a file's text (run settings, `on:` lines) it takes from the cache when the file is unchanged, and
+ * leaves there for the next load.
+ */
+export function outlineOf(loaded: LoadedProject, cache: FileCache): Outline {
   const { project } = loaded.index;
   const actionFiles = new Set([...project.actions.values()].map((a) => a.file));
   const files: OutlineFile[] = Object.keys(loaded.files)
     .sort((a, b) => a.localeCompare(b))
-    .map((path) => fileOf(loaded, path, actionFiles));
+    .map((path) => fileOf(loaded, cache, path, actionFiles));
   const workflows: OutlineWorkflow[] = [...project.workflows.values()]
     .sort((a, b) => a.path.localeCompare(b.path))
     .map((wf) => {
-      const text = loaded.files[wf.path] ?? '';
-      const settings = loaded.settings.get(wf.path) ?? readSettings(wf.path, text);
-      loaded.settings.set(wf.path, settings);
-      const lines = onLines(text);
+      const settings = settingsOf(loaded, cache, wf.path);
+      const lines = linesOf(loaded, cache, wf.path);
       const out: OutlineWorkflow = {
         path: wf.path,
         callable: wf.call !== undefined,
@@ -132,7 +135,12 @@ function jobOf(
   return out;
 }
 
-function fileOf(loaded: LoadedProject, path: string, actionFiles: Set<string>): OutlineFile {
+function fileOf(
+  loaded: LoadedProject,
+  cache: FileCache,
+  path: string,
+  actionFiles: Set<string>,
+): OutlineFile {
   const { project } = loaded.index;
   const decl = project.workflows.get(path) ?? [...project.actions.values()].find((a) => a.file === path);
   const kind = project.workflows.has(path) ? 'workflow' : actionFiles.has(path) ? 'action' : 'other';
@@ -142,20 +150,33 @@ function fileOf(loaded: LoadedProject, path: string, actionFiles: Set<string>): 
     message: e.message,
   }));
   // What the workflow parser's converter rejected (an unknown event, a bad filter) the YAML parser let through.
-  if (kind === 'workflow' && errors.length === 0) errors.push(...settingsErrors(loaded, path));
+  if (kind === 'workflow' && errors.length === 0) errors.push(...settingsErrors(loaded, cache, path));
   return { path, kind, errors };
 }
 
-function settingsErrors(loaded: LoadedProject, path: string): OutlineFile['errors'] {
-  const settings = loaded.settings.get(path) ?? readSettings(path, loaded.files[path] ?? '');
-  loaded.settings.set(path, settings);
-  return settings.errors.map((e) => ({ line: e.line ?? 1, column: e.column ?? 1, message: e.message }));
+function settingsErrors(loaded: LoadedProject, cache: FileCache, path: string): OutlineFile['errors'] {
+  const { errors } = settingsOf(loaded, cache, path);
+  return errors.map((e) => ({ line: e.line ?? 1, column: e.column ?? 1, message: e.message }));
 }
 
-/** The lines of `on:`, of each event key under it and of each filter key, which the plan's trigger reasons lack. */
-type EventLines = Record<string, { line: number; filters: Record<string, number> }>;
+/** A workflow's run settings, read once per text: the planner reads them from `loaded`, the next load from the cache. */
+function settingsOf(loaded: LoadedProject, cache: FileCache, path: string): WorkflowSettings {
+  const settings = loaded.settings.get(path) ?? readSettings(path, loaded.files[path] ?? '');
+  loaded.settings.set(path, settings);
+  const entry = cache.get(path);
+  if (entry) entry.settings = settings;
+  return settings;
+}
 
-function onLines(text: string): { on: number; events: EventLines } {
+function linesOf(loaded: LoadedProject, cache: FileCache, path: string): OnLines {
+  const entry = cache.get(path);
+  if (entry?.onLines) return entry.onLines;
+  const lines = onLines(loaded.files[path] ?? '');
+  if (entry) entry.onLines = lines;
+  return lines;
+}
+
+function onLines(text: string): OnLines {
   const counter = new LineCounter();
   const doc = parseDocument(text, { lineCounter: counter });
   const line = (offset: number | undefined) => (offset === undefined ? 1 : counter.linePos(offset).line);

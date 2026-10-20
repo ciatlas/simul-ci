@@ -12,6 +12,7 @@ import {
   ScenarioInputSchema,
   simulate,
 } from '@simulci/engine';
+import { carry, type FileCache, prefill } from './cache';
 import { deriveTables } from './derived';
 import { outlineOf } from './outline';
 import type {
@@ -24,13 +25,17 @@ import type {
   SimulateRequest,
 } from './protocol';
 
-/** The worker's state: one loaded project, numbered so a reply can be told from a stale one. */
+/**
+ * The worker's state: one loaded project, numbered so a reply can be told from a stale one, and what its files' texts
+ * gave, for the next load (worker/cache.ts).
+ */
 export interface WorkerState {
   project?: { version: number; loaded: LoadedProject; outline: Outline };
   nextVersion: number;
+  cache: FileCache;
 }
 
-export const initialState = (): WorkerState => ({ nextVersion: 1 });
+export const initialState = (): WorkerState => ({ nextVersion: 1, cache: new Map() });
 
 /** One request to one response, pure over the state: the worker and its tests call it. */
 export function handle(
@@ -68,10 +73,12 @@ function load(state: WorkerState, request: LoadRequest): { state: WorkerState; r
   const started = performance.now();
   try {
     const loaded = loadFiles(request.files, request.repository);
-    const outline = outlineOf(loaded);
+    const cache = carry(state.cache, request.files);
+    prefill(loaded, cache);
+    const outline = outlineOf(loaded, cache);
     const version = state.nextVersion;
     return {
-      state: { project: { version, loaded, outline }, nextVersion: version + 1 },
+      state: { project: { version, loaded, outline }, nextVersion: version + 1, cache },
       response: {
         id: request.id,
         type: 'loaded',

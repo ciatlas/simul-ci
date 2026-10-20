@@ -1,5 +1,8 @@
-import type { AssumeEntry } from '@simulci/engine';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import type { AssumeEntry, ScenarioInput } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
+import { sampleByName } from '../src/input/samples';
 import { handle, initialState, type WorkerState } from '../src/worker/handle';
 import { type CaseRequest, isEngineRequest, type SimulateRequest } from '../src/worker/protocol';
 
@@ -275,5 +278,116 @@ describe('the worker handler', () => {
     expect(isEngineRequest({ id: '1', type: 'load', files })).toBe(false);
     expect(isEngineRequest({ type: 'other' })).toBe(false);
     expect(isEngineRequest(null)).toBe(false);
+  });
+});
+
+/** Every file under a directory, by its path relative to it. */
+function filesUnder(root: string): Record<string, string> {
+  const entries = readdirSync(root, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
+  return Object.fromEntries(
+    entries.map((e) => [
+      relative(root, join(e.parentPath, e.name)),
+      readFileSync(join(e.parentPath, e.name), 'utf8'),
+    ]),
+  );
+}
+
+const projects: Record<string, Record<string, string>> = {
+  starter: sampleByName('starter')!.files,
+  monorepo: sampleByName('monorepo')!.files,
+  lab: filesUnder(join(import.meta.dirname, '../../../fixtures/routes-lab/repo')),
+  handler: files,
+};
+
+/**
+ * An editing session over one project: as opened; one workflow changed (another's text under a comment line, so its
+ * settings, its jobs and every line move); then the last workflow renamed; then the first file deleted.
+ */
+function session(start: Record<string, string>): { what: string; files: Record<string, string> }[] {
+  const paths = Object.keys(start).sort();
+  const workflows = paths.filter((p) => p.startsWith('.github/workflows/'));
+  const [first, other] = [workflows[0]!, workflows[1]!];
+  const changed = { ...start, [first]: `# edited\n${start[other]}` };
+  const last = workflows.at(-1)!;
+  const { [last]: moved, ...rest } = changed;
+  const renamed = { ...rest, [last.replace(/[^/]+$/, (name) => `renamed-${name}`)]: moved! };
+  const { [paths[0]!]: _deleted, ...deleted } = renamed;
+  return [
+    { what: 'opened', files: start },
+    { what: 'changed', files: changed },
+    { what: 'renamed', files: renamed },
+    { what: 'deleted', files: deleted },
+  ];
+}
+
+const scenarios: ScenarioInput[] = [
+  { event: 'push', branch: 'main', changed: ['src/a.ts'] },
+  { event: 'pull_request', action: 'opened', head: 'topic', base: 'main', changed: ['docs/a.md'] },
+];
+
+function loadInto(state: WorkerState, texts: Record<string, string>) {
+  const r = handle(state, { id: 1, type: 'load', files: texts, repository: 'o/r' });
+  if (r.response.type !== 'loaded') throw new Error(JSON.stringify(r.response));
+  return { state: r.state, project: r.response.project, outline: r.response.outline };
+}
+
+/** What a simulate answers, without the timings. */
+function planOf(state: WorkerState, project: number, scenario: ScenarioInput) {
+  const r = handle(state, sim({ project, scenario }));
+  if (r.response.type !== 'plan') throw new Error(JSON.stringify(r.response));
+  const { plan, derived, text } = r.response;
+  return { plan, derived, text };
+}
+
+describe('the cache of run settings and on: lines', () => {
+  it.each(Object.keys(projects))(
+    'gives %s the outline and the plans a cold load gives, edit after edit',
+    (name) => {
+      let state = initialState();
+      for (const step of session(projects[name]!)) {
+        const cached = loadInto(state, step.files);
+        const cold = loadInto(initialState(), step.files);
+        expect(cached.outline, step.what).toStrictEqual(cold.outline);
+        for (const scenario of scenarios)
+          expect(planOf(cached.state, cached.project, scenario), step.what).toStrictEqual(
+            planOf(cold.state, cold.project, scenario),
+          );
+        state = cached.state;
+      }
+    },
+  );
+
+  it('keeps what an unchanged file gave, reads a changed or renamed one again and drops what is gone', () => {
+    const [opened, changed, renamed, deleted] = session(files).map((s) => s.files);
+    const ci = '.github/workflows/ci.yml';
+    const broken = '.github/workflows/broken.yml';
+    const action = '.github/actions/x/action.yml';
+    const first = loadInto(initialState(), opened!).state;
+    expect([...first.cache.keys()].sort()).toEqual(Object.keys(opened!).sort());
+    expect(first.cache.get(ci)).toMatchObject({ text: opened![ci], onLines: { on: 2 } });
+    expect(first.cache.get(ci)!.settings).toBe(first.project!.loaded.settings.get(ci));
+    expect(first.cache.get(action)).toEqual({ text: opened![action] });
+
+    // broken.yml changed; ci.yml did not, so the planner gets its settings without reading it.
+    const second = loadInto(first, changed!).state;
+    expect(second.cache.get(ci)!.settings).toBeDefined();
+    expect(second.cache.get(ci)!.settings).toBe(first.cache.get(ci)!.settings);
+    expect(second.cache.get(ci)!.onLines).toBe(first.cache.get(ci)!.onLines);
+    expect(second.project!.loaded.settings.get(ci)).toBe(first.cache.get(ci)!.settings);
+    expect(second.cache.get(broken)!.settings).not.toBe(first.cache.get(broken)!.settings);
+    expect(second.cache.get(broken)!.onLines).not.toEqual(first.cache.get(broken)!.onLines);
+    // The previous state is left as it was: an entry is copied before the new load fills it.
+    expect(first.cache.get(broken)!.text).toBe(opened![broken]);
+
+    // A renamed file is read again: its settings' messages may name its path.
+    const third = loadInto(second, renamed!).state;
+    const moved = '.github/workflows/renamed-ci.yml';
+    expect(third.cache.has(ci)).toBe(false);
+    expect(third.cache.get(moved)!.settings).not.toBe(second.cache.get(ci)!.settings);
+    expect(third.cache.get(moved)!.onLines).toEqual(second.cache.get(ci)!.onLines);
+
+    const fourth = loadInto(third, deleted!).state;
+    expect(fourth.cache.has(action)).toBe(false);
+    expect([...fourth.cache.keys()].sort()).toEqual(Object.keys(deleted!).sort());
   });
 });
