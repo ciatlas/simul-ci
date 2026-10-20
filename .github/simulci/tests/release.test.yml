@@ -2,10 +2,29 @@ workflow: release.yml
 cases:
   - name: a push to main runs release-please
     when: { event: push, branch: main }
-    then: { run: [release-please], conclusion: success }
+    then:
+      run: [release-please]
+      conclusion: success
+      units:
+        # The release bot's key is a secret of the release environment, which only main may use.
+        release-please: { environment: release }
   - name: a push to another branch does not
     when: { event: push, branch: feat/x }
     then: { because: branches }
   - name: a pull request does not
     when: { event: pull_request, base: main, head: feat/x }
     then: { because: event }
+  - name: publishing a release again from main moves the floating tag with the release bot
+    when:
+      event: workflow_dispatch
+      branch: main
+      inputs: { tag: v0.2.0 }
+      assume:
+        - { step: resolve.tag, outputs: { tag: v0.2.0, version: 0.2.0, prerelease: 'false' } }
+    then:
+      run: [resolve, npm, smoke-published, publish-release, major-tag]
+      skip:
+        - release-please: if
+      units:
+        npm: { environment: npm }
+        major-tag: { environment: release }
