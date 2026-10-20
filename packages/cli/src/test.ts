@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
   type AssumeEntry,
@@ -17,13 +17,13 @@ import {
   discoverTests,
   diskSnapshotStore,
   misplacedTests,
-  parseAssume,
   readTests,
   readWorkflowFiles,
   TESTS_DIR,
   TestsError,
 } from '@simulci/node';
-import { defineCommand } from 'citty';
+import { type ArgsDef, defineCommand } from 'citty';
+import { assumeOf, readArgs, values } from './args';
 
 /** `simulci test`: the route tests under `.github/simulci/tests`, or the files named. */
 
@@ -83,7 +83,7 @@ interface Prepared {
 /** The checkout, the test files, the project and the cli mocks; or the exit code when one of them is not there. */
 function prepare(a: TestArgs, io: TestIo): Prepared | number {
   const root = resolve(a.dir);
-  const files = discoverTests(root, list(a.files));
+  const files = discoverTests(root, values(a.files));
   const misplaced = misplacedTests(files);
   if (misplaced.length) {
     io.stderr(
@@ -97,8 +97,7 @@ function prepare(a: TestArgs, io: TestIo): Prepared | number {
     return 2;
   }
   try {
-    const fileText = a.assumeFile === undefined ? undefined : readFileSync(resolve(a.assumeFile), 'utf8');
-    return { root, files, project: loadFiles(workflows), cli: parseAssume(list(a.assume), fileText) };
+    return { root, files, project: loadFiles(workflows), cli: assumeOf(a.assume, a.assumeFile) };
   } catch (e) {
     if (!(e instanceof AssumeError)) throw e;
     io.stderr(`${e.message}\n`);
@@ -116,49 +115,52 @@ function report(result: RunResult, a: TestArgs, io: TestIo): void {
   }
 }
 
-const list = (v: string | string[] | undefined): string[] =>
-  v === undefined ? [] : Array.isArray(v) ? v : [v];
+const TEST_ARGS = {
+  files: {
+    type: 'positional',
+    description: 'Test files (default: every *.test.yml under .github/simulci/tests)',
+    required: false,
+  },
+  dir: { type: 'string', description: 'The repository checkout', default: '.' },
+  junit: { type: 'string', description: 'Write a JUnit report to this file' },
+  update: {
+    type: 'boolean',
+    alias: 'u',
+    description: 'Write every snapshot and prune stale ones',
+    default: false,
+  },
+  snapshotDetail: { type: 'string', description: 'steps or legs', default: 'steps' },
+  filter: { type: 'string', alias: 't', description: 'Run the cases whose name contains the text' },
+  ci: {
+    type: 'boolean',
+    description: 'Never write snapshots; a missing one fails; only is an error (default when CI=true)',
+  },
+  strict: { type: 'boolean', description: 'Ignore allowMaybe; stale snapshots fail', default: false },
+  annotations: {
+    type: 'boolean',
+    description: 'Print GitHub annotations (default when GITHUB_ACTIONS=true)',
+  },
+  assume: {
+    type: 'string',
+    description: 'A mock for every case: build.unit=failure, build.unit.outputs.sha=abc (repeatable)',
+  },
+  assumeFile: { type: 'string', description: 'A YAML list of mocks for every case' },
+} satisfies ArgsDef;
 
 export const testCommand = defineCommand({
   meta: { name: 'test', description: 'Run the route tests under .github/simulci/tests' },
-  args: {
-    files: {
-      type: 'positional',
-      description: 'Test files (default: every *.test.yml under .github/simulci/tests)',
-      required: false,
-    },
-    dir: { type: 'string', description: 'The repository checkout', default: '.' },
-    junit: { type: 'string', description: 'Write a JUnit report to this file' },
-    update: {
-      type: 'boolean',
-      alias: 'u',
-      description: 'Write every snapshot and prune stale ones',
-      default: false,
-    },
-    snapshotDetail: { type: 'string', description: 'steps or legs', default: 'steps' },
-    filter: { type: 'string', alias: 't', description: 'Run the cases whose name contains the text' },
-    ci: {
-      type: 'boolean',
-      description: 'Never write snapshots; a missing one fails; only is an error (default when CI=true)',
-    },
-    strict: { type: 'boolean', description: 'Ignore allowMaybe; stale snapshots fail', default: false },
-    annotations: {
-      type: 'boolean',
-      description: 'Print GitHub annotations (default when GITHUB_ACTIONS=true)',
-    },
-    assume: {
-      type: 'string',
-      description: 'A mock for every case: build.unit=failure, build.unit.outputs.sha=abc (repeatable)',
-    },
-    assumeFile: { type: 'string', description: 'A YAML list of mocks for every case' },
-  },
-  run({ args }) {
-    const a = args as unknown as TestArgs & { _?: string[] };
-    const files = a._?.length ? a._ : a.files;
-    const code = runTestCommand(
-      { ...a, ...(files === undefined ? {} : { files }) },
-      { stdout: (t) => process.stdout.write(t), stderr: (t) => process.stderr.write(t), env: process.env },
-    );
-    process.exitCode = code;
+  args: TEST_ARGS,
+  run({ rawArgs }) {
+    process.exitCode = runTestCommand(testArgs(rawArgs), {
+      stdout: (t) => process.stdout.write(t),
+      stderr: (t) => process.stderr.write(t),
+      env: process.env,
+    });
   },
 });
+
+/** The arguments of a `simulci test` command line: every test file named, and every `--assume`. */
+export function testArgs(rawArgs: readonly string[]): TestArgs {
+  const a = readArgs(rawArgs, TEST_ARGS, { repeated: ['assume'] }) as unknown as TestArgs & { _: string[] };
+  return a._.length ? { ...a, files: a._ } : a;
+}

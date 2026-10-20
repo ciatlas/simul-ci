@@ -1,0 +1,14 @@
+{
+  "title": "simulci",
+  "pages": [
+    "index",
+    "verdicts",
+    "---CLI---",
+    "...cli",
+    "---Reference---",
+    "...reference",
+    "---Action and app---",
+    "action",
+    "web-app"
+  ]
+}
