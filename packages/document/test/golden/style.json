@@ -373,6 +373,28 @@
     },
     "commentGap": 1
   },
+  "starter.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": true,
+      "steps": false
+    },
+    "commentGap": 1
+  },
   "apps/web/src/samples/monorepo/ci.yml": {
     "indent": 2,
     "indentSeq": true,
