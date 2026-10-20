@@ -3,7 +3,10 @@ import { nextPastePath } from '../input/paste';
 import { useModal } from './modal';
 import { useApp, useSession } from './providers';
 
-/** A path and a buffer; several add up. The native dialog traps and returns focus. */
+/**
+ * A path and a buffer; several add up. The native dialog traps and returns focus. A paste over an edited buffer asks
+ * first; the dialog, and the YAML in it, stays until the author lets the edits go.
+ */
 export function PasteDialog({ onClose }: { onClose: () => void }) {
   const { sources } = useApp();
   const source = useSession((s) => s.source);
@@ -15,9 +18,9 @@ export function PasteDialog({ onClose }: { onClose: () => void }) {
 
   const submit = (e: FormEvent): void => {
     e.preventDefault();
-    const check = sources.paste(path, text);
-    if (check.ok) onClose();
-    else setReason(check.reason);
+    const pasted = sources.paste(path, text);
+    if (!pasted.ok) return setReason(pasted.reason);
+    void pasted.done.then((done) => done && onClose());
   };
 
   return (

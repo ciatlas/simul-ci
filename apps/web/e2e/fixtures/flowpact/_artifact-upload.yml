@@ -1,0 +1,61 @@
+name: Artifact upload
+# The action uploads the contract drift artifact with its own client of GitHub's artifact service
+# (packages/action/src/upload.ts). This uploads one for real and downloads it again with actions/download-artifact: on
+# every pull request (CI calls it) and weekly, so a change in the service shows up even when nothing else runs.
+on:
+  workflow_call:
+  schedule:
+    - cron: '41 4 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    name: Upload and download the drift artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: drift
+        name: check reports contract drift and uploads the artifact
+        uses: $/
+        with:
+          mode: check
+          working-directory: fixtures/contracts-drift
+          fail-on: never
+          annotations: false
+          artifact-name: flowpact-contracts-smoke-${{ github.run_attempt }}
+          retention-days: 1
+      - name: Check the outputs
+        env:
+          DRIFT: ${{ steps.drift.outputs.drift }}
+          PATCH: ${{ steps.drift.outputs.patch }}
+          ARTIFACT_ID: ${{ steps.drift.outputs.artifact-id }}
+        run: |
+          set -x
+          test "$DRIFT" = true
+          test -s "$PATCH"
+          test -n "$ARTIFACT_ID"
+      # By the artifact-id output, which also checks that it names the uploaded artifact. A digest that does not match
+      # the one the action finalized fails the download.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.drift.outputs.artifact-id }}
+          path: ${{ runner.temp }}/downloaded
+      - name: The artifact holds what the step wrote, and its patch applies
+        env:
+          PATCH: ${{ steps.drift.outputs.patch }}
+        run: |
+          set -x
+          got="$RUNNER_TEMP/downloaded"
+          # The patch and the flowpact-contracts folder, nothing else, with the same contents as the step's folder.
+          test "$(ls -A "$got")" = "$(printf 'flowpact-contracts\nflowpact-contracts.patch')"
+          test -s "$got/flowpact-contracts/README.md"
+          test -s "$got/flowpact-contracts/fixtures/contracts-drift/.github/flowpact/contracts/workflows/deploy.contract.yml"
+          diff -r "$(dirname "$PATCH")" "$got"
+          # As the README in the artifact says, from the root of the repository.
+          git apply --index "$got/flowpact-contracts.patch"
+          git diff --cached --stat

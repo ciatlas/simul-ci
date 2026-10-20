@@ -25,6 +25,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useApp, useSession } from '../app/providers';
+import { markEdit } from '../lib/marks';
 import type { SessionState, SessionStore } from '../state/store';
 import { cardActions, selectedNode } from './card';
 import { type ViewportCommands, viewport } from './commands';
@@ -127,6 +128,8 @@ function Flow() {
   graphRef.current = graph;
   const rf = useReactFlow<FlowNode, NeedsFlowEdge>();
   useViewportCommands(rf, graphRef);
+  usePaintedMark(graph?.for.files);
+  useFitWhenRootsChange(graph);
   // A new source is a new picture: it mounts afresh and is fitted. Neither an edit of its texts nor the project a
   // restart numbers anew is one: the picture stays mounted, where the author left it.
   return graph ? <Picture key={graph.for.epoch} graph={graph} graphRef={graphRef} /> : <Waiting />;
@@ -136,7 +139,7 @@ function Flow() {
 function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<GraphState | undefined> }) {
   const { store } = useApp();
   const selected = useSession(selectedNode);
-  const stale = useSession((s) => s.stale);
+  const stale = useSession((s) => s.staleShown);
   const colorMode = useColorMode();
   const [hovered, setHovered] = useState<NodeId>();
   const hover = useHover(setHovered);
@@ -175,6 +178,34 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
       </ReactFlow>
     </div>
   );
+}
+
+/**
+ * Fits the picture once when the workflows it draws change within an epoch: edit mode narrowing it to the focused
+ * workflow, or widening it again, or Hide untriggered. The workflow the author looks at would otherwise move out
+ * from under the viewport, which keeps its transform.
+ */
+function useFitWhenRootsChange(graph: GraphState | undefined): void {
+  const roots = graph?.model.roots.join('\n');
+  const epoch = graph?.for.epoch;
+  const last = useRef<{ epoch: number; roots: string }>(undefined);
+  useEffect(() => {
+    if (roots === undefined || epoch === undefined) return undefined;
+    const before = last.current;
+    last.current = { epoch, roots };
+    if (!before || before.epoch !== epoch || before.roots === roots) return undefined;
+    const frame = requestAnimationFrame(() => viewport.fit());
+    return () => cancelAnimationFrame(frame);
+  }, [roots, epoch]);
+}
+
+/** Marks the frame after a picture of new texts is drawn (`lib/marks.ts`), for the latency gate. */
+function usePaintedMark(files: number | undefined): void {
+  useEffect(() => {
+    if (files === undefined) return undefined;
+    const frame = requestAnimationFrame(() => markEdit('edit:painted', files));
+    return () => cancelAnimationFrame(frame);
+  }, [files]);
 }
 
 function Waiting() {

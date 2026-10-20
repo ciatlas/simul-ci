@@ -2,7 +2,7 @@ import type { AssumeEntry, ScenarioInput } from '@simulci/engine';
 
 /**
  * What the URL carries: the scenario's own keys, `a` (the assume entries), `wf` (the focused workflow), `sel` (the
- * selected unit path), `d` (`legs`), `view` (`text`) and `hide` (`1`). Files never. The picker checks shapes only,
+ * selected unit path), `d` (`legs`), `view` (`text`), `hide` (`1`) and `edit` (`1`, edit mode). Files never. The picker checks shapes only,
  * deep enough that the form can show whatever it keeps; the worker validates and answers `invalid` on the field.
  */
 
@@ -73,6 +73,7 @@ export interface UrlState {
   d?: 'legs';
   view?: 'text';
   hide?: true;
+  edit?: true;
 }
 
 /** Beyond this many characters of JSON the assume entries stay in the store and leave the URL. */
@@ -118,6 +119,8 @@ const isEntry = (e: unknown): e is AssumeEntry =>
   ENTRY_TEXT.every((key) => e[key] === undefined || typeof e[key] === 'string') &&
   ENTRY_RECORDS.every((key) => e[key] === undefined || isObject(e[key]));
 
+const isOne = (value: unknown): boolean => value === 1 || value === '1' || value === true;
+
 /** Reads the search params; anything unexpected is left out rather than refused. */
 export function readSearch(raw: Record<string, unknown>): UrlState {
   const state: UrlState = {};
@@ -128,7 +131,8 @@ export function readSearch(raw: Record<string, unknown>): UrlState {
   if (typeof raw.sel === 'string' && raw.sel) state.sel = raw.sel;
   if (raw.d === 'legs') state.d = 'legs';
   if (raw.view === 'text') state.view = 'text';
-  if (raw.hide === 1 || raw.hide === '1' || raw.hide === true) state.hide = true;
+  if (isOne(raw.hide)) state.hide = true;
+  if (isOne(raw.edit)) state.edit = true;
   return state;
 }
 
@@ -149,6 +153,7 @@ export function writeSearch(state: UrlState): Record<string, unknown> {
   if (state.d === 'legs') out.d = 'legs';
   if (state.view === 'text') out.view = 'text';
   if (state.hide) out.hide = 1;
+  if (state.edit) out.edit = 1;
   return out;
 }
 
@@ -168,6 +173,7 @@ export interface UrlSource {
   sel?: string;
   detail: 'legs' | 'steps';
   ui: { view: 'graph' | 'text'; hideUntriggered: boolean };
+  edit: { on: boolean };
 }
 
 export function urlStateOf(s: UrlSource): UrlState {
@@ -177,6 +183,7 @@ export function urlStateOf(s: UrlSource): UrlState {
   if (s.detail === 'legs') state.d = 'legs';
   if (s.ui.view === 'text') state.view = 'text';
   if (s.ui.hideUntriggered) state.hide = true;
+  if (s.edit.on) state.edit = true;
   return state;
 }
 
@@ -188,6 +195,7 @@ export function urlSliceChanged(s: UrlSource, prev: UrlSource): boolean {
     s.sel !== prev.sel ||
     s.detail !== prev.detail ||
     s.ui.view !== prev.ui.view ||
-    s.ui.hideUntriggered !== prev.ui.hideUntriggered
+    s.ui.hideUntriggered !== prev.ui.hideUntriggered ||
+    s.edit.on !== prev.edit.on
   );
 }

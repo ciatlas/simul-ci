@@ -248,8 +248,11 @@ describe('the form helpers', () => {
       assume: [],
       detail: 'steps' as const,
       ui: { view: 'graph' as const, hideUntriggered: false },
+      edit: { on: false },
     };
     expect(urlStateOf(base)).toEqual({ scenario: { event: 'push' }, assume: [] });
+    expect(urlStateOf({ ...base, edit: { on: true } })).toMatchObject({ edit: true });
+    expect(urlSliceChanged({ ...base, edit: { on: true } }, base)).toBe(true);
     expect(
       urlStateOf({ ...base, focus: 'ci.yml', detail: 'legs', ui: { view: 'text', hideUntriggered: true } }),
     ).toEqual({

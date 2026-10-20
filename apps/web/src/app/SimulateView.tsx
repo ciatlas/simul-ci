@@ -15,6 +15,8 @@ import { TextView } from '../text/TextView';
 import { EmptyState } from './EmptyState';
 import { ErrorBanner } from './ErrorBanner';
 import { ErrorBoundary } from './ErrorBoundary';
+import { ReplacePrompt } from './ReplaceDialog';
+import { RestoreConflicts } from './RestoreConflicts';
 import { useApp, useSession } from './providers';
 import { ScenarioForm } from './ScenarioForm';
 import { shownView, togglePaneKeepingFocus, useNarrow } from './shortcuts';
@@ -57,6 +59,7 @@ export function SimulateView() {
     >
       <TopBar />
       <ErrorBanner />
+      <RestoreConflicts />
       {hasFiles ? (
         <PlanBoundary>
           <Panes />
@@ -66,6 +69,7 @@ export function SimulateView() {
       )}
       <StatusBar />
       <Toaster />
+      <ReplacePrompt />
       {dragging && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center border-4 border-accent border-dashed bg-bg/80">
           <p className="rounded bg-surface px-4 py-2 font-medium text-lg">

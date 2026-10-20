@@ -3,12 +3,13 @@ import { useSession } from '../app/providers';
 const MARK_CLASS: Record<string, string> = { '●': 'text-run', '○': 'text-skip', '◐': 'text-might' };
 
 /**
- * The plan as `simulci plan` prints it, the marks coloured by run state. While the inputs are ahead of it (a refused
- * input keeps the last good plan) a dashed rule runs down its left edge; the text is not faded, so it keeps 4.5:1.
+ * The plan as `simulci plan` prints it, the marks coloured by run state. While the inputs or the texts are ahead of
+ * it (a refused input keeps the last good plan; an edit's plan is on its way) a dashed rule runs down its left edge;
+ * the text is not faded, so it keeps 4.5:1.
  */
 export function TextView() {
   const text = useSession((s) => s.plan?.text);
-  const stale = useSession((s) => s.stale);
+  const stale = useSession((s) => s.staleShown);
   const project = useSession((s) => s.project.status);
 
   if (text === undefined)

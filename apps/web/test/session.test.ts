@@ -21,6 +21,8 @@ import {
 /** A client whose answers the test hands out in order. */
 function fakeClient() {
   const loads: ((r: LoadResult) => void)[] = [];
+  /** What each load sent, by the index of its answer in `loads`. */
+  const loaded: Record<string, string>[] = [];
   const simulates: {
     body: { project: number; scenario: { event: string } };
     resolve: (r: SimulateResult) => void;
@@ -35,7 +37,11 @@ function fakeClient() {
       readyResolve = resolve;
       readyReject = reject;
     }),
-    load: () => new Promise<LoadResult>((resolve) => loads.push(resolve)),
+    load: (body) =>
+      new Promise<LoadResult>((resolve) => {
+        loads.push(resolve);
+        loaded.push(body.files);
+      }),
     simulate: (body) => new Promise<SimulateResult>((resolve) => simulates.push({ body, resolve })),
     case: (body) => new Promise<CaseResult>((resolve) => cases.push({ body, resolve })),
     onRestart: (l) => restartListeners.push(l),
@@ -48,7 +54,7 @@ function fakeClient() {
     readyReject(new Error(message));
     for (const l of failureListeners) l(message);
   };
-  return { client, loads, simulates, cases, readyResolve, fail, restartListeners };
+  return { client, loads, loaded, simulates, cases, readyResolve, fail, restartListeners };
 }
 
 /** A worker for the real client that answers only when the test says. */
@@ -187,7 +193,9 @@ describe('the session', () => {
     const { scenario, plan: shown } = store.getState();
     expect(store.getState().scenarioFrom).toBe('default');
     store.setState((s) => withTexts(s, { [CI]: 'on: [push]' }));
-    // The new texts go to the worker at once; the project they replace stays ready, and the plan stays on screen.
+    // The new texts go to the worker in the same tick; the project they replace stays ready, and the plan stays.
+    expect(f.loads).toHaveLength(1);
+    await Promise.resolve();
     expect(f.loads).toHaveLength(2);
     expect(store.getState()).toMatchObject({ project: { status: 'ready', files: 1 }, stale: 'edit' });
     expect(store.getState().plan).toBe(shown);
@@ -269,11 +277,18 @@ describe('the session', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().engine.status).toBe('failed');
     expect(store.getState().error).toMatchObject({ kind: 'boot', message: 'the engine did not start' });
-    store.getState().projectReady(3, outline, 1);
+    store.getState().projectReady(3, outline, store.getState().files.version);
     f.restartListeners[0]!(1, 9);
     expect(store.getState().engine.restarts).toBe(1);
     expect(store.getState().project.version).toBe(9);
-    expect(store.getState().notices.map((n) => n.text)).toEqual(['the engine restarted']);
+    // A project of texts the store has moved on from went with the old worker: the fresh one's id is not adopted.
+    store.getState().projectReady(4, outline, store.getState().files.version - 1);
+    f.restartListeners[0]!(2, 1);
+    expect(store.getState().project.version).toBeUndefined();
+    expect(store.getState().notices.map((n) => n.text)).toEqual([
+      'the engine restarted',
+      'the engine restarted again (2)',
+    ]);
   });
 
   it('is busy while a load is unanswered and not once the only one left is answered for files gone since', async () => {
@@ -282,8 +297,8 @@ describe('the session', () => {
     createSession({ store, client: f.client });
     f.readyResolve({ type: 'ready', protocol: 1, engine: { version: '0.1.0', runPlan: 1 }, models: [] });
     await vi.advanceTimersByTimeAsync(0);
-    store.getState().setFiles({ 'a.yml': 'on: push' }, { kind: 'sample', name: 'a' });
-    store.getState().setFiles({ 'b.yml': 'on: push' }, { kind: 'sample', name: 'b' });
+    store.getState().setFiles({ '.github/workflows/a.yml': 'on: push' }, { kind: 'sample', name: 'a' });
+    store.getState().setFiles({ '.github/workflows/b.yml': 'on: push' }, { kind: 'sample', name: 'b' });
     await vi.advanceTimersByTimeAsync(0);
     f.loads[0]!({ id: 1, type: 'loaded', project: 1, outline, ms: 1 });
     await vi.advanceTimersByTimeAsync(0);
@@ -293,7 +308,7 @@ describe('the session', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState()).toMatchObject({ project: { status: 'idle' }, engine: { busy: false } });
     expect(f.simulates).toHaveLength(0);
-    store.getState().setFiles({ 'a.yml': 'on: push' }, { kind: 'sample', name: 'a' });
+    store.getState().setFiles({ '.github/workflows/a.yml': 'on: push' }, { kind: 'sample', name: 'a' });
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().engine.busy).toBe(true);
     // A folder from the last visit that needs a click before it can be read again: no files until then.
@@ -424,7 +439,9 @@ describe('the session over the real client', () => {
     const store = createSessionStore();
     store.getState().setFiles(files, { kind: 'sample', name: 'x' });
     createSession({ store, client: createEngineClient({ spawn }) });
-    store.getState().setFiles({ ...files, 'b.yml': 'on: push' }, { kind: 'sample', name: 'y' });
+    store
+      .getState()
+      .setFiles({ ...files, '.github/workflows/b.yml': 'on: push' }, { kind: 'sample', name: 'y' });
     await vi.advanceTimersByTimeAsync(5001);
     expect(store.getState()).toMatchObject({
       engine: { status: 'failed', busy: false },
@@ -481,7 +498,7 @@ describe('the session over the real client', () => {
       engine: { status: 'failed', busy: false },
       error: { kind: 'stopped', message: 'the engine stopped responding' },
     });
-    store.getState().setFiles({ 'b.yml': 'on: push' }, { kind: 'sample', name: 'y' });
+    store.getState().setFiles({ '.github/workflows/b.yml': 'on: push' }, { kind: 'sample', name: 'y' });
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState()).toMatchObject({
       engine: { status: 'failed', busy: false },
@@ -494,7 +511,7 @@ describe('the session over the real client', () => {
     createSession({ store, client: createEngineClient({ spawn }) });
     workers[0]!.ready();
     await vi.advanceTimersByTimeAsync(0);
-    store.getState().setFiles({ 'a.yml': 'on: push' }, { kind: 'sample', name: 'a' });
+    store.getState().setFiles({ '.github/workflows/a.yml': 'on: push' }, { kind: 'sample', name: 'a' });
     store.getState().setFiles(files, { kind: 'sample', name: 'b' });
     await vi.advanceTimersByTimeAsync(3001);
     workers[1]!.ready();
@@ -521,5 +538,284 @@ describe('the session over the real client', () => {
       scenario: store.getState().scenario,
     });
     expect(store.getState().engine.busy).toBe(false);
+  });
+});
+
+const RELEASE = '.github/workflows/release.yml';
+
+/** The Outline of `ci.yml` and `release.yml`, with what each file's parsers refused. */
+const outlineWith = (errors: Partial<Record<string, 'yaml' | 'workflow'>> = {}): Outline => ({
+  ...outline,
+  files: [CI, RELEASE].map((path) => ({
+    path,
+    kind: 'workflow' as const,
+    errors: errors[path]
+      ? [{ line: 3, column: 1, message: 'Implicit keys need to be on a single line', source: errors[path] }]
+      : [],
+  })),
+});
+
+const loadedAs = (project: number, o: Outline = outlineWith()) =>
+  ({ id: project, type: 'loaded', project, outline: o, ms: 1 }) as const;
+
+describe('the session’s edit cadence and the hold', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  /** `ci.yml` and `release.yml` loaded as project 1, from an Outline that may already hold errors, and planned. */
+  const planned = async (first: Outline = outlineWith()) => {
+    const store = createSessionStore();
+    const f = fakeClient();
+    const session = createSession({ store, client: f.client, debounceMs: 100 });
+    store
+      .getState()
+      .setFiles({ [CI]: 'on: push\n', [RELEASE]: 'on: release\n' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[0]!(loadedAs(1, first));
+    await vi.advanceTimersByTimeAsync(0);
+    f.simulates[0]!.resolve(plan(1));
+    await vi.advanceTimersByTimeAsync(0);
+    return { store, f, session };
+  };
+
+  const op = (store: ReturnType<typeof createSessionStore>, path: string, insert: string): void => {
+    const outcome = store.getState().transact({
+      label: 'Op',
+      origin: 'op',
+      files: [{ path, edits: [{ from: 0, to: 0, insert }] }],
+    });
+    expect(outcome.ok).toBe(true);
+  };
+
+  it('loads the ops of one tick in one load, at once, and keys typed in the pane after 150 ms of quiet', async () => {
+    const { store, f } = await planned();
+    op(store, CI, '# a\n');
+    op(store, RELEASE, '# b\n');
+    expect(f.loads).toHaveLength(1);
+    await Promise.resolve();
+    expect(f.loads).toHaveLength(2);
+    expect(f.loaded[1]).toEqual({ [CI]: '# a\non: push\n', [RELEASE]: '# b\non: release\n' });
+
+    store.getState().typed(CI, [{ from: 0, to: 0, insert: 'x' }]);
+    await vi.advanceTimersByTimeAsync(100);
+    store.getState().typed(CI, [{ from: 1, to: 1, insert: 'y' }]);
+    await vi.advanceTimersByTimeAsync(149);
+    expect(f.loads).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.loads).toHaveLength(3);
+    expect(f.loaded[2]![CI]).toBe('xy# a\non: push\n');
+
+    // An undo goes at once, and so does an op that comes while typing waits: the shorter delay wins.
+    store.getState().undo();
+    await Promise.resolve();
+    expect(f.loads).toHaveLength(4);
+    store.getState().typed(CI, [{ from: 0, to: 0, insert: 'z' }]);
+    op(store, RELEASE, '#');
+    await Promise.resolve();
+    expect(f.loads).toHaveLength(5);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(f.loads).toHaveLength(5);
+  });
+
+  it('loads the last of three quick edits, and drops the answers to the two before it', async () => {
+    const { store, f } = await planned();
+    for (const insert of ['1', '2', '3']) {
+      op(store, CI, insert);
+      await Promise.resolve();
+    }
+    expect(f.loaded.slice(1).map((sent) => sent[CI])).toEqual([
+      '1on: push\n',
+      '21on: push\n',
+      '321on: push\n',
+    ]);
+    f.loads[1]!(loadedAs(2));
+    f.loads[2]!(loadedAs(3));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.simulates).toHaveLength(1);
+    f.loads[3]!(loadedAs(4));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({ version: 4, files: store.getState().files.version });
+    expect(f.simulates[1]!.body.project).toBe(4);
+  });
+
+  it('holds a load that breaks the YAML of a file that parsed: the plan stays, a scenario change waits, a fix releases', async () => {
+    const { store, f, session } = await planned();
+    const shown = store.getState().plan;
+    op(store, CI, 'on: :\n');
+    await Promise.resolve();
+    f.loads[1]!(loadedAs(2, outlineWith({ [CI]: 'yaml' })));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({
+      status: 'ready',
+      version: 1,
+      files: 1,
+      held: { files: 2, broken: [{ path: CI, line: 3 }] },
+    });
+    expect(store.getState().plan).toBe(shown);
+    expect(store.getState().stale).toBe('edit');
+    expect(f.simulates).toHaveLength(1);
+
+    // While held, nothing simulates, and the case waits with the plan.
+    store.getState().patchScenario({ branch: 'dev' });
+    await vi.advanceTimersByTimeAsync(500);
+    session.simulateNow();
+    expect(f.simulates).toHaveLength(1);
+    expect(await session.testCase('jobs')).toEqual({
+      type: 'failed',
+      message: 'the plan waits for valid YAML: ci.yml line 3',
+    });
+
+    // Still broken: still held, against the plan shown.
+    store.getState().typed(CI, [{ from: 0, to: 0, insert: ' ' }]);
+    await vi.advanceTimersByTimeAsync(150);
+    f.loads[2]!(loadedAs(3, outlineWith({ [CI]: 'yaml' })));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({
+      version: 1,
+      held: { files: store.getState().files.version },
+    });
+
+    // Fixed: the project of the newest texts is ready and simulates the newest scenario.
+    store.getState().undo();
+    store.getState().undo();
+    await Promise.resolve();
+    f.loads[3]!(loadedAs(4));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({ status: 'ready', version: 4 });
+    expect(store.getState().project.held).toBeUndefined();
+    expect(f.simulates[1]!.body).toMatchObject({ project: 4, scenario: { branch: 'dev' } });
+  });
+
+  it('never holds for a converter’s error, nor for a file already broken on the plan shown', async () => {
+    const { store, f } = await planned(outlineWith({ [RELEASE]: 'yaml' }));
+    op(store, RELEASE, ' ');
+    await Promise.resolve();
+    f.loads[1]!(loadedAs(2, outlineWith({ [RELEASE]: 'yaml' })));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({ version: 2 });
+    expect(store.getState().project.held).toBeUndefined();
+    expect(f.simulates).toHaveLength(2);
+
+    op(store, CI, 'on: nope\n');
+    await Promise.resolve();
+    f.loads[2]!(loadedAs(3, outlineWith({ [CI]: 'workflow', [RELEASE]: 'yaml' })));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({ version: 3 });
+    expect(store.getState().project.held).toBeUndefined();
+  });
+
+  it('never holds the first load of a source, broken or not', async () => {
+    const store = createSessionStore();
+    const f = fakeClient();
+    createSession({ store, client: f.client });
+    store.getState().setFiles({ [CI]: 'on: :\n' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[0]!(loadedAs(1, outlineWith({ [CI]: 'yaml' })));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({ status: 'ready', version: 1 });
+    expect(f.simulates).toHaveLength(1);
+  });
+
+  it('never sends a route test to the engine', async () => {
+    const TEST = '.github/simulci/tests/ci.test.yml';
+    const store = createSessionStore();
+    const f = fakeClient();
+    createSession({ store, client: f.client });
+    store.getState().setFiles({ [CI]: 'on: push\n', [TEST]: 'cases: []\n' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.loaded[0]).toEqual({ [CI]: 'on: push\n' });
+    store.getState().transact({
+      label: 'Op',
+      origin: 'op',
+      files: [
+        { path: CI, edits: [{ from: 0, to: 0, insert: '#' }] },
+        { path: TEST, edits: [{ from: 0, to: 0, insert: '#' }] },
+      ],
+    });
+    await Promise.resolve();
+    expect(f.loaded[1]).toEqual({ [CI]: '#on: push\n' });
+  });
+});
+
+describe('the hold over the real client', () => {
+  const workers: FakeWorker[] = [];
+  const spawn = () => {
+    const w = new FakeWorker();
+    workers.push(w);
+    return w;
+  };
+  beforeEach(() => {
+    vi.useFakeTimers();
+    workers.length = 0;
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const broken = outlineWith({ [CI]: 'yaml' });
+
+  it('replays the broken texts after a restart, holds them again and never simulates, so it cannot loop', async () => {
+    const store = createSessionStore();
+    createSession({ store, client: createEngineClient({ spawn }) });
+    workers[0]!.ready();
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    workers[0]!.loaded(0, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    workers[0]!.reply(planReply(workers[0]!.sent[1]!.id, 1));
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().typed(CI, [{ from: 0, to: 0, insert: ':' }]);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(workers[0]!.sent.map((m) => m.type)).toEqual(['load', 'simulate', 'load']);
+    // The edit's load stalls: the watchdog starts another worker, which gets the newest (broken) texts.
+    await vi.advanceTimersByTimeAsync(3001);
+    workers[1]!.ready();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(workers[1]!.sent).toMatchObject([{ type: 'load', files: { [CI]: ':on: push\n' } }]);
+    workers[1]!.reply({ id: workers[1]!.sent[0]!.id, type: 'loaded', project: 1, outline: broken, ms: 1 });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(store.getState().project.held).toMatchObject({ files: store.getState().files.version });
+    expect(workers[1]!.sent.map((m) => m.type)).toEqual(['load']);
+    expect(workers).toHaveLength(2);
+    expect(store.getState().engine).toMatchObject({ status: 'ready', busy: false, restarts: 1 });
+  });
+
+  it('loads an edit made while a restart replays the texts before it, and ends ready for the newest', async () => {
+    const store = createSessionStore();
+    createSession({ store, client: createEngineClient({ spawn }) });
+    workers[0]!.ready();
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    workers[0]!.loaded(0, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    workers[0]!.reply(planReply(workers[0]!.sent[1]!.id, 1));
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().transact({
+      label: 'Op',
+      origin: 'op',
+      files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '#' }] }],
+    });
+    await vi.advanceTimersByTimeAsync(3001);
+    // The replacement is starting: an edit now waits for it, and replaces the replay's waiting load.
+    store.getState().transact({
+      label: 'Op',
+      origin: 'op',
+      files: [{ path: CI, edits: [{ from: 0, to: 0, insert: '!' }] }],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    workers[1]!.ready();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(workers[1]!.sent).toMatchObject([{ type: 'load', files: { [CI]: '!#on: push\n' } }]);
+    workers[1]!.loaded(0, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({
+      status: 'ready',
+      version: 1,
+      files: store.getState().files.version,
+    });
+    workers[1]!.reply(planReply(workers[1]!.sent[1]!.id, 1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().plan?.for.files).toBe(store.getState().files.version);
+    expect(store.getState().stale).toBe(false);
   });
 });

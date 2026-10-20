@@ -21,6 +21,9 @@ const ELKJS = /\/elkjs\//;
 /** Engine sources the page may use: the core-free entries. */
 const PAGE_ENGINE_OK = /packages\/engine\/src\/(plan|render)\//;
 const ENGINE = /packages\/engine\/src\//;
+/** The document model, and the one module of it the page may hold: its text edits, which import nothing. */
+const DOCUMENT = /packages\/document\/src\//;
+const PAGE_DOCUMENT_OK = /packages\/document\/src\/edits\.ts$/;
 /** The Node host (@simulci/node): it reads the checkout from disk, which neither the page nor the worker can. */
 const NODE_HOST = /packages\/node\/src\//;
 /**
@@ -64,6 +67,7 @@ function engineWorkerProblems(file, sources) {
   for (const s of sources) {
     if (/node-fs\.ts|\/git\.ts/.test(s) && s.includes('@ciatlas/core')) problems.push(`${file} holds ${s}`);
     if (ELKJS.test(s)) problems.push(`${file} holds ${s}, which only the layout worker may`);
+    if (DOCUMENT.test(s)) problems.push(`${file} holds ${s}: the document model edits on the page, not here`);
   }
   return problems;
 }
@@ -73,13 +77,18 @@ function layoutWorkerProblems(file, sources) {
   const problems = [];
   if (!sources.some((s) => ELKJS.test(s)))
     problems.push(`${file} holds no elkjs, so nothing lays the graph out`);
-  for (const s of sources)
+  for (const s of sources) {
     if (ENGINE.test(s) || ENGINE_WORKER_ONLY.some((re) => re.test(s)))
       problems.push(`${file} holds ${s}, which only the engine worker may`);
+    if (DOCUMENT.test(s)) problems.push(`${file} holds ${s}: the document model edits on the page, not here`);
+  }
   return problems;
 }
 
-/** The page holds none of the engine but its plan/ and render/ entries, and nothing that only a worker may. */
+/**
+ * The page holds none of the engine but its plan/ and render/ entries, none of the document model but its text edits
+ * (the edit history's and the pane's), and nothing that only a worker may.
+ */
 function pageProblems(file, sources) {
   const problems = [];
   for (const s of sources) {
@@ -88,6 +97,8 @@ function pageProblems(file, sources) {
     if (ELKJS.test(s)) problems.push(`${file} holds ${s}, which only the layout worker may`);
     if (ENGINE.test(s) && !PAGE_ENGINE_OK.test(s))
       problems.push(`${file} holds ${s}: the page may use only plan/ and render/`);
+    if (DOCUMENT.test(s) && !PAGE_DOCUMENT_OK.test(s))
+      problems.push(`${file} holds ${s}: the page may use only @simulci/document/edits`);
   }
   return problems;
 }

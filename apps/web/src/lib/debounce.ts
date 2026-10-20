@@ -47,3 +47,47 @@ export function debounce<A extends unknown[]>(
     pending: () => last !== undefined,
   };
 }
+
+export interface Scheduled {
+  /**
+   * Runs `fn` after `ms` of quiet, or in a microtask for 0, so the edits of one tick run it once. A call replaces a
+   * pending timer, and nothing replaces a pending microtask: it runs this tick, with whatever is newest by then.
+   */
+  schedule(ms: number): void;
+  cancel(): void;
+  pending(): boolean;
+}
+
+/** `fn` at the delay each call names: the session's edit cadence (synthesis § 7.1). */
+export function scheduler(fn: () => void, timers: Timers = browserTimers): Scheduled {
+  let handle: unknown;
+  let soon = false;
+  const clear = (): void => {
+    if (handle !== undefined) timers.clearTimer(handle);
+    handle = undefined;
+  };
+  const fire = (): void => {
+    clear();
+    soon = false;
+    fn();
+  };
+  return {
+    schedule: (ms) => {
+      if (soon) return;
+      clear();
+      if (ms > 0) {
+        handle = timers.setTimer(fire, ms);
+        return;
+      }
+      soon = true;
+      queueMicrotask(() => {
+        if (soon) fire();
+      });
+    },
+    cancel: () => {
+      clear();
+      soon = false;
+    },
+    pending: () => soon || handle !== undefined,
+  };
+}
