@@ -90,7 +90,8 @@ function CardNote({ seq, anchor, onClose }: { seq: number; anchor?: Element; onC
       label="Refused"
       role="note"
       onClose={onClose}
-      className="w-72 border-0 p-0"
+      frame=""
+      className="w-72"
     >
       <RefusalNote seq={seq} />
     </AnchoredPopover>
