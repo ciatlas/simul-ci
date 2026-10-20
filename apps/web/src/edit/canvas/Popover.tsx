@@ -47,6 +47,7 @@ export function AnchoredPopover({
   label,
   onClose,
   role = 'dialog',
+  frame = 'border border-border bg-surface p-3',
   className = '',
   children,
 }: {
@@ -55,6 +56,8 @@ export function AnchoredPopover({
   label: string;
   onClose: () => void;
   role?: 'dialog' | 'menu' | 'note';
+  /** Its border, background and padding; a note that draws its own box passes none. */
+  frame?: string;
   className?: string;
   children: ReactNode;
 }) {
@@ -89,7 +92,7 @@ export function AnchoredPopover({
       popover="auto"
       role={role}
       aria-label={label}
-      className={`fixed inset-auto m-0 rounded-lg border border-border bg-surface p-3 text-text text-xs shadow-none ${className}`}
+      className={`fixed inset-auto m-0 rounded-lg text-text text-xs shadow-none ${frame} ${className}`}
     >
       {children}
     </div>

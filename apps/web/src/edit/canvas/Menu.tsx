@@ -60,7 +60,8 @@ export function RowMenu({ node, anchor, onClose }: { node: NodeId; anchor: Eleme
       label="Actions"
       role="menu"
       onClose={onClose}
-      className="w-56 p-1"
+      frame="border border-border bg-surface p-1"
+      className="w-56"
     >
       <div ref={list} role="presentation" className="flex flex-col" onKeyDown={onKeyDown}>
         {items.map((item) => (
