@@ -6,6 +6,7 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider, useSession } from '../src/app/providers';
+import type { FileMeta } from '../src/input/read';
 import { sampleByName } from '../src/input/samples';
 import { planIndex, selectionOf } from '../src/plan/index';
 import { createSessionStore, initialSessionState, type SessionStore, withTexts } from '../src/state/store';
@@ -314,7 +315,8 @@ describe('the YAML pane', () => {
     expect(classes(container).get(43)).toEqual(['cm-sc-deciding:yes']);
     expect(classes(container).get(41)).toEqual(['cm-sc-own:yes']);
     expect(screen.getByText(CI, { selector: 'footer span' })).toBeTruthy();
-    expect(screen.getByText('read-only in this version')).toBeTruthy();
+    // Outside edit mode the footer says so and offers the way in.
+    expect(screen.getByRole('button', { name: 'Edit (E)' })).toBeTruthy();
   });
 
   it('marks the verdicts in the gutter, and a pressed mark selects its node without taking the focus', () => {
@@ -672,5 +674,235 @@ describe('the YAML pane', () => {
     );
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
     expect(screen.getByText('No files are loaded.')).toBeTruthy();
+  });
+});
+
+describe('the YAML pane in edit mode', () => {
+  const CRLF = '.github/workflows/crlf.yml';
+  const crlfText = 'on: push\r\njobs:\r\n  a:\r\n    runs-on: x\r\n    steps: [{ run: echo }]\r\n';
+
+  /** A store in edit mode over the starter and a CRLF workflow, each file read as UTF-8. */
+  function editing(meta: Record<string, Partial<FileMeta>> = {}, outline: Outline = main.outline) {
+    const byPath = { ...starter, [CRLF]: crlfText };
+    const store = createSessionStore(initialSessionState());
+    store.getState().setFiles(byPath, { kind: 'folder', name: 'repo', readAt: 0 });
+    store.setState((s) => ({
+      files: {
+        ...s.files,
+        meta: {
+          ...s.files.meta,
+          ...Object.fromEntries(Object.entries(meta).map(([p, m]) => [p, { ...s.files.meta[p]!, ...m }])),
+        },
+      },
+      focus: CI,
+      edit: { ...s.edit, on: true },
+      ui: {
+        ...s.ui,
+        yamlFile: CRLF,
+        prefs: { ...s.ui.prefs, collapsed: { left: false, right: false, yaml: false } },
+      },
+    }));
+    // The Outline of these texts: until one comes, no file is known not to be generated.
+    store.getState().projectReady(1, outline, store.getState().files.version);
+    const result = render(
+      <AppProvider app={{ store } as unknown as App}>
+        <YamlPane />
+      </AppProvider>,
+    );
+    const view = () => EditorView.findFromDOM(result.container.querySelector<HTMLElement>('.cm-editor')!)!;
+    return { store, view, ...result };
+  }
+
+  const typeAt = (view: EditorView, pos: number, insert: string) =>
+    act(() =>
+      view.dispatch({
+        changes: { from: pos, insert },
+        selection: { anchor: pos + insert.length },
+        userEvent: 'input.type',
+      }),
+    );
+
+  it('edits a writable file only in edit mode, and says so to a screen reader', () => {
+    const { store, view } = editing();
+    expect(view().contentDOM.contentEditable).toBe('true');
+    expect(view().contentDOM.getAttribute('aria-label')).toBe(CRLF);
+    act(() => store.getState().setEdit(false));
+    expect(view().contentDOM.contentEditable).toBe('false');
+    expect(view().contentDOM.getAttribute('aria-label')).toBe(`${CRLF}, read-only`);
+    expect(screen.getByRole('button', { name: 'Edit (E)' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit (E)' }));
+    expect(view().contentDOM.contentEditable).toBe('true');
+  });
+
+  it('hands each change to the store by line and column, a typed line break in the file’s own ending', () => {
+    const { store, view } = editing();
+    const v = view();
+    // The end of `jobs:`, line 2: CodeMirror counts one position per line break, the store two.
+    typeAt(v, v.state.doc.line(2).to, '\n  b: 1');
+    expect(store.getState().files.byPath[CRLF]).toBe(
+      'on: push\r\njobs:\r\n  b: 1\r\n  a:\r\n    runs-on: x\r\n    steps: [{ run: echo }]\r\n',
+    );
+    expect(store.getState().files.meta[CRLF]!.eol).toBe('crlf');
+    // The view was not sent the change back: one doc, the author's, and the cursor where it was.
+    expect(v.state.doc.toString()).toBe(store.getState().files.byPath[CRLF]!.replaceAll('\r\n', '\n'));
+    expect(v.state.selection.main.head).toBe(v.state.doc.line(3).to);
+    expect(screen.getByRole('tab', { name: 'crlf.yml, unsaved' })).toBeTruthy();
+    expect(document.querySelector('footer')?.textContent).toContain('● unsaved ·');
+  });
+
+  it('costs the view one transaction per key, its configuration untouched', () => {
+    const { view } = editing();
+    const v = view();
+    const configOf = (e: EditorView): unknown => (e.state as unknown as { config: object }).config;
+    const before = configOf(v);
+    let dispatched = 0;
+    const original = v.dispatch.bind(v);
+    v.dispatch = ((...args: Parameters<EditorView['dispatch']>) => {
+      dispatched++;
+      return original(...args);
+    }) as EditorView['dispatch'];
+    typeAt(v, 0, '#');
+    typeAt(v, 1, '!');
+    expect(dispatched).toBe(2);
+    expect(configOf(v)).toBe(before);
+  });
+
+  it('brings an undo back as a change of the document, the cursor mapped through it', () => {
+    const { store, view } = editing();
+    const v = view();
+    typeAt(v, 0, '# a\n');
+    act(() => v.dispatch({ selection: { anchor: v.state.doc.line(4).from } }));
+    act(() => {
+      store.getState().undo();
+    });
+    expect(store.getState().files.byPath[CRLF]).toBe(crlfText);
+    expect(v.state.doc.toString()).toBe(crlfText.replaceAll('\r\n', '\n'));
+    // The cursor stays on the line it was on, now line 3.
+    expect(v.state.doc.lineAt(v.state.selection.main.head).number).toBe(3);
+    act(() => {
+      store.getState().redo();
+    });
+    expect(v.state.doc.line(1).text).toBe('# a');
+  });
+
+  it('gives the editor’s undo keys and the browser’s undo to the store', () => {
+    const { store, view } = editing();
+    const v = view();
+    typeAt(v, 0, 'x');
+    act(() => {
+      v.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+    });
+    expect(store.getState().files.byPath[CRLF]).toBe(crlfText);
+    // Mod+Shift+Z redoes, also when the browser reports the letter in lowercase.
+    act(() => {
+      v.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          metaKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(store.getState().files.byPath[CRLF]).toBe(`x${crlfText}`);
+    act(() => {
+      v.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+    });
+    expect(store.getState().files.byPath[CRLF]).toBe(crlfText);
+    act(() => {
+      v.contentDOM.dispatchEvent(
+        new InputEvent('beforeinput', { inputType: 'historyRedo', cancelable: true, bubbles: true }),
+      );
+    });
+    expect(store.getState().files.byPath[CRLF]).toBe(`x${crlfText}`);
+    act(() => {
+      v.contentDOM.dispatchEvent(
+        new InputEvent('beforeinput', { inputType: 'historyUndo', cancelable: true, bubbles: true }),
+      );
+    });
+    expect(store.getState().files.byPath[CRLF]).toBe(crlfText);
+  });
+
+  it('hands the focus to the editor once Edit (E) has made the file writable', async () => {
+    const { store, view } = editing();
+    act(() => store.getState().setEdit(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit (E)' }));
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    expect(document.activeElement).toBe(view().contentDOM);
+  });
+
+  it('refuses a generated file until the author unlocks it', () => {
+    const generated = {
+      ...main.outline,
+      files: [
+        ...main.outline.files,
+        { path: CRLF, kind: 'workflow' as const, errors: [], generated: 'DO NOT EDIT' },
+      ],
+    };
+    const { view } = editing({}, generated);
+    expect(view().contentDOM.contentEditable).toBe('false');
+    // The marker is the Outline's; this text does not hold it, so no line is named.
+    expect(document.querySelector('footer')?.textContent).toContain('Generated (DO NOT EDIT)');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit anyway' }));
+    expect(view().contentDOM.contentEditable).toBe('true');
+  });
+
+  it('keeps a mixed or a not-UTF-8 file read-only, and converts mixed line endings as one undoable entry', () => {
+    const mixed = editing({ [CRLF]: { eol: 'mixed' } });
+    expect(mixed.view().contentDOM.contentEditable).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: 'Convert to LF' }));
+    expect(mixed.store.getState().files.byPath[CRLF]).toBe(crlfText.replaceAll('\r\n', '\n'));
+    expect(mixed.store.getState().edit.past.at(-1)).toMatchObject({
+      label: 'Converted crlf.yml to LF',
+      origin: 'convert',
+    });
+    expect(mixed.view().contentDOM.contentEditable).toBe('true');
+    cleanup();
+    const latin = editing({ [CRLF]: { utf8: false } });
+    expect(latin.view().contentDOM.contentEditable).toBe('false');
+    expect(screen.getByText('Not UTF-8: read-only')).toBeTruthy();
+  });
+
+  it('shows a converted file as the store holds it, the cursor kept, and keys land where the author sees them', () => {
+    const mixedText = 'on: push\njobs:\n  a:\r\n    runs-on: x\r\n    steps: [{ run: echo }]\r\n';
+    const { store, view } = editing({ [CRLF]: { eol: 'mixed' } });
+    act(() => store.setState((s) => withTexts(s, { [CRLF]: mixedText })));
+    act(() => store.getState().setYamlFile(CRLF));
+    fireEvent.click(screen.getByRole('button', { name: 'Convert to CRLF' }));
+    const v = view();
+    const want = mixedText.replace(/\r?\n/g, '\r\n');
+    expect(store.getState().files.byPath[CRLF]).toBe(want);
+    expect(v.state.doc.sliceString(0, v.state.doc.length, '\r\n')).toBe(want);
+    typeAt(v, v.state.doc.line(3).to, '!');
+    expect(store.getState().files.byPath[CRLF]).toBe(want.replace('  a:', '  a:!'));
+    act(() => {
+      store.getState().undo();
+      store.getState().undo();
+    });
+    expect(v.state.doc.toString()).toBe(mixedText.replaceAll('\r\n', '\n'));
+  });
+
+  it('keeps the file typed in shown, whichever file the selection follows', () => {
+    const { store, view } = editing();
+    act(() => store.getState().setYamlFile(undefined));
+    act(() => store.getState().select(CI, undefined));
+    typeAt(view(), 0, 'x');
+    expect(store.getState().ui.yamlFile).toBe(CI);
+  });
+
+  it('closes the typing group when the editor loses the focus', () => {
+    const { store, view } = editing();
+    typeAt(view(), 0, 'x');
+    expect(store.getState().edit.group).toBeDefined();
+    act(() => {
+      view().contentDOM.dispatchEvent(new FocusEvent('blur'));
+    });
+    expect(store.getState().edit.group).toBeUndefined();
+    expect(store.getState().edit.past.map((t) => t.label)).toEqual(['Typing in crlf.yml']);
   });
 });

@@ -1,3 +1,6 @@
+import { useEffect } from 'react';
+import { redoLabel, undoLabel } from '../state/history';
+import { dirtyPaths } from '../state/store';
 import { CopyAsTest } from '../testcase/CopyAsTest';
 import { useSession } from './providers';
 import { SourceMenu } from './SourceMenu';
@@ -10,14 +13,17 @@ const THEME_LABEL = { system: 'Theme: system', light: 'Theme: light', dark: 'The
  * What the Shortcuts switch turns on and off (app/shortcuts.ts); the canvas's own keys need the focus in it. The
  * switch says on or off in words, so its state does not lean on a colour.
  */
-const KEYS_HINT = 'The single keys t, f, ., 0, r, c, 1 to 4, [, ] and \\ act on the page while this is on';
+const KEYS_HINT = 'The single keys t, f, ., 0, r, c, e, 1 to 4, [, ] and \\ act on the page while this is on';
+
+const button =
+  'rounded border border-border bg-surface px-2 py-1 text-text hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
 
 /** The page's chrome: the ways in, the scenario id, the engine, the view, the page keys and the theme. */
 export function TopBar() {
   const scenarioId = useSession((s) => s.plan?.plan.scenario.id);
   const engine = useSession((s) => s.engine);
   const ms = useSession((s) => (s.plan ? s.plan.ms.simulate + s.plan.ms.derive : undefined));
-  const stale = useSession((s) => s.stale);
+  const stale = useSession((s) => s.staleShown);
   const theme = useSession((s) => s.ui.prefs.theme);
   const keys = useSession((s) => s.ui.prefs.keys);
   const setPrefs = useSession((s) => s.setPrefs);
@@ -49,6 +55,7 @@ export function TopBar() {
                 : `${ms.toFixed(1)} ms`)}
         </span>
         <ViewToggle />
+        <EditControls />
         <CopyAsTest />
         <button
           type="button"
@@ -73,5 +80,83 @@ export function TopBar() {
         </button>
       </div>
     </header>
+  );
+}
+
+/**
+ * Edit mode's switch (`e`, `edit=1`), and in edit mode Undo and Redo, each naming the entry it would take back or do
+ * again ("Undo Typing in ci.yml"; Mod+Z, Mod+Shift+Z and Mod+Y do the same). The page's title starts with "• " while
+ * a file has unsaved edits.
+ */
+function EditControls() {
+  const on = useSession((s) => s.edit.on);
+  const keys = useSession((s) => s.ui.prefs.keys);
+  const undo = useSession((s) => undoLabel(s.edit));
+  const redo = useSession((s) => redoLabel(s.edit));
+  const dirty = useSession((s) => dirtyPaths(s.files).length > 0);
+  const setEdit = useSession((s) => s.setEdit);
+  const doUndo = useSession((s) => s.undo);
+  const doRedo = useSession((s) => s.redo);
+  useEffect(() => {
+    document.title = dirty ? '• simulci' : 'simulci';
+  }, [dirty]);
+  return (
+    <>
+      <button
+        type="button"
+        className={button}
+        role="switch"
+        aria-checked={on}
+        aria-keyshortcuts={keys ? 'e' : undefined}
+        onClick={() => setEdit(!on)}
+      >
+        Edit{' '}
+        <span aria-hidden="true" className="font-mono">
+          {on ? 'on' : 'off'}
+        </span>
+      </button>
+      {on && (
+        <>
+          <HistoryButton verb="Undo" entry={undo} keys="Control+Z Meta+Z" act={doUndo} />
+          <HistoryButton
+            verb="Redo"
+            entry={redo}
+            keys="Control+Shift+Z Meta+Shift+Z Control+Y Meta+Y"
+            act={doRedo}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+/** Undo or Redo, named by the entry it would take back or do again; disabled with none. */
+function HistoryButton({
+  verb,
+  entry,
+  keys,
+  act,
+}: {
+  verb: 'Undo' | 'Redo';
+  entry: string | undefined;
+  keys: string;
+  act: () => boolean;
+}) {
+  const name = entry === undefined ? verb : `${verb} ${entry}`;
+  // aria-disabled rather than disabled: a button that empties its history keeps the focus.
+  return (
+    <button
+      type="button"
+      className={button}
+      aria-disabled={entry === undefined}
+      aria-label={name}
+      title={entry === undefined ? `Nothing to ${verb.toLowerCase()}` : name}
+      aria-keyshortcuts={keys}
+      onClick={() => {
+        if (entry !== undefined) act();
+      }}
+    >
+      {verb}
+    </button>
   );
 }

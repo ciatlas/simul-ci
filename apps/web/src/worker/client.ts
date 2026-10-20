@@ -70,6 +70,12 @@ interface Pending {
   replay?: boolean;
 }
 
+/** The project the client last knew loaded, and the load that gave it. */
+interface Previous {
+  project: number | undefined;
+  load: Body | undefined;
+}
+
 const MIN_WATCHDOG_MS = 3000;
 const MAX_RESTARTS = 2;
 
@@ -90,8 +96,12 @@ export function createEngineClient(options: ClientOptions): EngineClient {
   let nextId = 1;
   let lastMs = 0;
   let restarts = 0;
+  /** What stalled last: a load whose replay is answered was a passing stall, which no later one adds to. */
+  let stalledKind: Kind | undefined;
   let lastLoad: Body | undefined;
   let lastProject: number | undefined;
+  /** The load whose answer named `lastProject`: what a replay must be for the requests about it to follow it. */
+  let lastLoaded: Body | undefined;
   const inFlight = new Map<Kind, Pending>();
   const waiting = new Map<Kind, Pending>();
   const listeners: ((restarts: number, project: number | undefined) => void)[] = [];
@@ -100,7 +110,7 @@ export function createEngineClient(options: ClientOptions): EngineClient {
   const post = (pending: Pending): void => {
     const id = nextId++;
     pending.id = id;
-    pending.timer = setTimer(() => stalled(), Math.max(MIN_WATCHDOG_MS, 20 * lastMs));
+    pending.timer = setTimer(() => stalled(pending.body.type), Math.max(MIN_WATCHDOG_MS, 20 * lastMs));
     inFlight.set(pending.body.type, pending);
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a Worker's postMessage takes a transfer list, not an origin
     worker.postMessage({ ...pending.body, id });
@@ -121,10 +131,10 @@ export function createEngineClient(options: ClientOptions): EngineClient {
     if (kind === undefined) return; // not the request in flight: a stale or replayed answer
     const pending = inFlight.get(kind)!;
     inFlight.delete(kind);
-    const previous = lastProject;
-    learn(response);
+    const previous = { project: lastProject, load: lastLoaded };
+    learn(response, pending);
     settle(pending, response);
-    if (pending.replay) resume(previous, response);
+    if (pending.replay) replayed(previous, response, pending.body);
     const next = waiting.get(kind);
     if (next) {
       waiting.delete(kind);
@@ -132,13 +142,26 @@ export function createEngineClient(options: ClientOptions): EngineClient {
     }
   };
 
+  /**
+   * A restarted worker answered the replayed load: the waiting requests go on. A load that stalled and loads now
+   * means the engine works; a stalled simulate counts on until a plan comes, so a plan that always stalls still ends
+   * in a failure rather than in restarts without end.
+   */
+  const replayed = (previous: Previous, response: EngineResponse, body: Body): void => {
+    resume(previous, response, body);
+    if (response.type === 'loaded' && stalledKind === 'load') restarts = 0;
+  };
+
   /** What a reply teaches the client: how long a plan takes, which project is loaded, that the engine is well. */
-  const learn = (response: EngineResponse): void => {
+  const learn = (response: EngineResponse, pending: Pending): void => {
     if (response.type === 'plan') {
       lastMs = response.ms.simulate + response.ms.derive;
       restarts = 0;
     }
-    if (response.type === 'loaded') lastProject = response.project;
+    if (response.type === 'loaded') {
+      lastProject = response.project;
+      lastLoaded = pending.body;
+    }
   };
 
   const onReady = (response: ReadyResponse): void => {
@@ -179,9 +202,10 @@ export function createEngineClient(options: ClientOptions): EngineClient {
     waiting.clear();
   };
 
-  const stalled = (): void => {
+  const stalled = (kind: Kind): void => {
     if (failure !== undefined) return;
     restarts++;
+    stalledKind = kind;
     if (restarts > MAX_RESTARTS) {
       failAll('the engine stopped responding');
       worker.terminate();
@@ -210,21 +234,34 @@ export function createEngineClient(options: ClientOptions): EngineClient {
   /** A fresh worker gets the newest load first, else the last one sent; the other requests wait for its answer. */
   const replayLoad = (): void => {
     const load = waiting.get('load') ?? (lastLoad ? { body: lastLoad, resolve: () => undefined } : undefined);
-    if (!load) return resume(lastProject);
+    if (!load) return resume({ project: lastProject, load: lastLoaded });
     waiting.delete('load');
     load.replay = true;
     post(load);
   };
 
   /**
-   * The fresh worker numbers projects from 1 again: the project id the replayed load answers replaces the old one
-   * in the waiting requests, and the restart listeners learn it so later requests carry it.
+   * The fresh worker numbers projects from 1 again. When the replayed load is the one the old project came from, its
+   * answer's id replaces the old one in the waiting requests, and the restart listeners learn it so later requests
+   * carry it. When it is a newer load, the old project's texts are gone: a request about it is answered `stale`, as
+   * the old worker would have answered it once the newer load was in, never sent to texts it was not asked about.
    */
-  const resume = (previous: number | undefined, answer?: EngineResponse): void => {
+  const resume = (previous: Previous, answer?: EngineResponse, replay?: Body): void => {
     const project = answer?.type === 'loaded' ? answer.project : undefined;
-    for (const p of waiting.values()) {
+    const same = replay === previous.load;
+    for (const [kind, p] of waiting) {
       const body = p.body as { type: string; project?: number };
-      if (body.type !== 'load' && project !== undefined && body.project === previous) body.project = project;
+      if (body.type === 'load' || project === undefined || body.project !== previous.project) continue;
+      if (same) body.project = project;
+      else {
+        waiting.delete(kind);
+        settle(p, {
+          id: 0,
+          type: 'error',
+          kind: 'stale',
+          message: `project ${previous.project} is not loaded`,
+        });
+      }
     }
     replaying = false;
     flushWaiting();

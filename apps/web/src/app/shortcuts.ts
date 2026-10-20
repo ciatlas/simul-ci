@@ -4,17 +4,22 @@ import { cardOf } from '../graph/navigate';
 import { planIndex, resolveSelection } from '../plan/index';
 import type { PanelTab, Prefs } from '../state/prefs';
 import type { SessionActions, SessionState, SessionStore } from '../state/store';
+import { historyCommand } from '../lib/history-keys';
 import { caseAvailability } from '../testcase/case';
 
 /**
  * The page's keys outside the canvas (synthesis § 11): `t` switches between the graph and the text, `f` fits, `.`
  * centres the selection, `0` shows 100 %; `r` jumps to the Reasons tab and `1`–`4` open a tab of the right panel;
  * `[`, `]` and `\` close and open the scenario column, the right panel and the YAML pane; `c` opens Copy as test
- * case while there is a plan and a focused workflow. None fires while the author types (an input, a textarea, a
- * select, an editable region such as the YAML pane), inside an open dialog, or once something on the way handled
- * the key (the canvas, a tree item: they prevent its default). None fires while the author has turned them off
- * (`prefs.keys`, the top bar's Shortcuts button; WCAG 2.1.4); the canvas's own keys need the focus in the canvas
- * and stay. Below 1024 px the text view is the only one, so `t` has nothing to switch.
+ * case while there is a plan and a focused workflow; `e` turns edit mode on and off. None fires while the author
+ * types (an input, a textarea, a select, an editable region such as the YAML pane), inside an open dialog, or once
+ * something on the way handled the key (the canvas, a tree item: they prevent its default). None fires while the
+ * author has turned them off (`prefs.keys`, the top bar's Shortcuts button; WCAG 2.1.4); the canvas's own keys need
+ * the focus in the canvas and stay. Below 1024 px the text view is the only one, so `t` has nothing to switch.
+ *
+ * In edit mode Mod+Z undoes and Mod+Shift+Z or Mod+Y redoes the page's one edit history (synthesis § 6) wherever no
+ * field keeps its own undo: whatever `prefs.keys` says, since a modifier makes them no single keys. The YAML pane
+ * binds the same keys itself.
  */
 
 export type PageCommand =
@@ -24,6 +29,7 @@ export type PageCommand =
   | 'actualSize'
   | 'reasons'
   | 'case'
+  | 'edit'
   | `panel:${PanelTab}`
   | `pane:${Pane}`;
 
@@ -47,6 +53,7 @@ const COMMANDS = new Map<string, PageCommand>([
   ['0', 'actualSize'],
   ['r', 'reasons'],
   ['c', 'case'],
+  ['e', 'edit'],
   ['1', 'panel:reasons'],
   ['2', 'panel:unknowns'],
   ['3', 'panel:node'],
@@ -55,6 +62,13 @@ const COMMANDS = new Map<string, PageCommand>([
   [']', 'pane:right'],
   ['\\', 'pane:yaml'],
 ]);
+
+/**
+ * Where an undo key is not the page's: a field or an editable region keeps its own undo until it commits, and an open
+ * dialog keeps the keys. A read-only YAML pane is none of these: Mod+Z there undoes the page's last edit.
+ */
+const HISTORY_OWNERS =
+  'input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog, [role="dialog"]';
 
 /** Where a key is not the page's: form fields, editable regions, the YAML pane even read-only, an open dialog. */
 const OWNERS =
@@ -81,16 +95,20 @@ function held(event: PageKey): boolean {
   return event.altKey || event.ctrlKey;
 }
 
-function ownedElsewhere(target: EventTarget | null): boolean {
+function ownedElsewhere(target: EventTarget | null, owners = OWNERS): boolean {
   const el = target as Partial<HTMLElement> | null;
   if (!el || typeof el.closest !== 'function') return false;
-  return el.isContentEditable === true || el.closest(OWNERS) !== null;
+  return el.isContentEditable === true || el.closest(owners) !== null;
 }
 
 /** Listens for the page keys on the window; the returned function stops. */
 export function installShortcuts(store: SessionStore, win: Window = window): () => void {
   const onKey = (event: KeyboardEvent): void => {
     const s = store.getState();
+    if (historyKey(event, s)) {
+      event.preventDefault();
+      return;
+    }
     if (!s.ui.prefs.keys) return;
     const command = keyFor(event);
     if (command && run(command, s, win)) event.preventDefault();
@@ -98,6 +116,20 @@ export function installShortcuts(store: SessionStore, win: Window = window): () 
   win.addEventListener('keydown', onKey);
   return () => win.removeEventListener('keydown', onKey);
 }
+
+/**
+ * Mod+Z, Mod+Shift+Z and Mod+Y in edit mode, where no field or editor owns the key: true when one was run, so the
+ * browser's own (an input's undo, nothing at all on the page) does not run too.
+ */
+export function historyKey(event: HistoryKey, s: SessionState & SessionActions): boolean {
+  const command =
+    s.edit.on && !ownedElsewhere(event.target, HISTORY_OWNERS) ? historyCommand(event) : undefined;
+  if (command === 'redo') s.redo();
+  else if (command === 'undo') s.undo();
+  return command !== undefined;
+}
+
+type HistoryKey = PageKey & { shiftKey?: boolean; code?: string };
 
 /** Runs a command; false when it has nothing to act on, so the key goes on as if unheard. */
 function run(command: PageCommand, s: SessionState & SessionActions, win: Window): boolean {
@@ -111,6 +143,10 @@ function run(command: PageCommand, s: SessionState & SessionActions, win: Window
   }
   if (command.startsWith('pane:')) {
     togglePaneKeepingFocus(s, command.slice('pane:'.length) as Pane, win.document);
+    return true;
+  }
+  if (command === 'edit') {
+    s.setEdit(!s.edit.on);
     return true;
   }
   if (command === 'case') {

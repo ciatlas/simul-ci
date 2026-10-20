@@ -1,5 +1,6 @@
 import type { RunPlan } from '@simulci/engine';
 import { useEffect, useState } from 'react';
+import { heldSentence } from '../engine/hold';
 import { summarize } from '../plan/summary';
 import type { Pin } from '../state/store';
 import { useSession } from './providers';
@@ -14,38 +15,42 @@ interface Line {
   key: string;
 }
 
-/** The key of every sentence but a pin's. */
+/** The key of every sentence but a pin's and the hold's. */
 const SUMMARY = 'summary';
 
 /**
  * One sentence per plan, for the eye and the screen reader, half a second behind so bursts read once. The plan that
- * answers a pin says what the pin changed ("pinned; deploy now runs"); every other plan says its summary. While the
- * inputs have changed since the plan, the sentence is set in italics: the top bar says "· stale" in words, and the
- * sentence keeps the contrast of the rest of the line.
+ * answers a pin says what the pin changed ("pinned; deploy now runs"); every other plan says its summary. While an
+ * edit broke the YAML, the line says what the plan waits for instead (synthesis § 7.2). While the inputs or the texts
+ * have changed since the plan, the sentence is set in italics: the top bar says "· stale" in words, and the sentence
+ * keeps the contrast of the rest of the line.
  */
 export function StatusBar() {
   const plan = useSession((s) => s.plan?.plan);
   const pin = useSession((s) => s.pin);
   const project = useSession((s) => s.project.status);
-  const stale = useSession((s) => s.stale);
+  const waits = useSession((s) => (s.project.held ? heldSentence(s.project.held) : undefined));
+  const stale = useSession((s) => s.staleShown);
   const [line, setLine] = useState<Line>({ text: '', key: SUMMARY });
 
   // Keyed on the plan, not the pin: a pin is answered together with its plan, and one made since says nothing until
   // its own plan comes, so each plan reads one sentence.
   useEffect(() => {
-    const next = plan
-      ? planLine(plan, pin)
-      : { text: project === 'loading' ? 'loading the files…' : '', key: SUMMARY };
+    const next = waits
+      ? { text: waits, key: 'held' }
+      : plan
+        ? planLine(plan, pin)
+        : { text: project === 'loading' ? 'loading the files…' : '', key: SUMMARY };
     const t = setTimeout(() => setLine(next), 500);
     return () => clearTimeout(t);
-  }, [plan, project]);
+  }, [plan, project, waits]);
 
   return (
     <footer
       aria-live="polite"
       className="flex items-center gap-3 border-border border-t bg-chrome px-4 py-1 text-muted text-xs"
     >
-      <span key={line.key} className={stale ? 'italic' : undefined}>
+      <span key={line.key} className={stale && line.key !== 'held' ? 'italic' : undefined}>
         {line.text}
       </span>
     </footer>
