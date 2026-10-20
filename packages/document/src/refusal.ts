@@ -1,4 +1,4 @@
-import type { WorkflowOp } from './ops/types';
+import type { FilterKey, WorkflowOp } from './ops/types';
 import type { Eol, YamlPath } from './types';
 
 /** Why an edit cannot be made, in the terms the author sees it. */
@@ -342,6 +342,51 @@ export function stale(file: string, line: number): Refusal {
     `${fileName(file)} changed at line ${line} while the edit was prepared; try again.`,
     { line },
   );
+}
+
+/** A file the op would create is there already: the view thought it missing. */
+export function exists(file: string): Refusal {
+  return refuse('stale', file, `${fileName(file)} exists already; try again.`);
+}
+
+/** `branches` next to `branches-ignore` (or tags, paths): the fix switches the filter there to the one asked for. */
+export function exclusiveFilter(
+  file: string,
+  event: string,
+  present: FilterKey,
+  wanted: FilterKey,
+  line: number | undefined,
+): Refusal {
+  const fix: Fix = {
+    kind: 'ops',
+    label: `Switch to ${wanted}`,
+    ops: [{ op: 'switchFilter', file, event, from: present, to: wanted }],
+    retry: true,
+  };
+  return refuse(
+    'exclusive-filter',
+    file,
+    `${event} already uses \`${present}\`; GitHub accepts one of the two.`,
+    {
+      at: ['on', event, present],
+      ...(line === undefined ? {} : { line }),
+      fixes: [fix],
+    },
+  );
+}
+
+/** A case for a test file whose `workflow:` names another workflow; the fix puts it in a file of its own. */
+export function otherWorkflow(
+  file: string,
+  workflow: string,
+  line: number | undefined,
+  fixes: Fix[],
+): Refusal {
+  return refuse('other-workflow', file, `${fileName(file)} tests ${workflow}.`, {
+    at: ['workflow'],
+    ...(line === undefined ? {} : { line }),
+    fixes,
+  });
 }
 
 export function mixedEol(file: string): Refusal {

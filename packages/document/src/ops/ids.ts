@@ -42,10 +42,19 @@ function slug(text: string | undefined): string {
   return /^\d/.test(words) ? `step-${words}` : words;
 }
 
+/** What an id names, as a sentence starts with it. */
+const NAMES = {
+  job: 'Job ids',
+  step: 'Step ids',
+  output: 'Output ids',
+  input: 'Input names',
+  dimension: 'Matrix keys',
+} as const;
+
 /** Refuses an id that is not one, or one a sibling has whatever its case, offering a free one. */
 export function checkId(
   doc: WorkflowDocument,
-  kind: 'job' | 'step' | 'output',
+  kind: keyof typeof NAMES,
   id: string,
   taken: readonly string[],
   retry: (id: string) => WorkflowOp,
@@ -55,12 +64,11 @@ export function checkId(
     taken,
   );
   const fix = { kind: 'ops' as const, label: `Use ${free}`, ops: [retry(free)], retry: false };
-  const Kind = { job: 'Job', step: 'Step', output: 'Output' }[kind];
   if (!ID.test(id))
     return refuse(
       'invalid-id',
       doc.path,
-      `${Kind} ids start with a letter or \`_\`, then letters, digits, \`-\` or \`_\`: \`${id}\` is not one.`,
+      `${NAMES[kind]} start with a letter or \`_\`, then letters, digits, \`-\` or \`_\`: \`${id}\` is not one.`,
       { fixes: [fix] },
     );
   const same = taken.find((t) => sameId(t, id));

@@ -97,6 +97,16 @@ function readPlace(js: unknown, place: Place): unknown {
   return Array.isArray(js) && js.length === 1 ? js[0] : undefined;
 }
 
+/**
+ * A text without the characters of a set that end it (by hand: a `[…]+$` regex is polynomial on a text holding many
+ * of them before something else).
+ */
+export function trimEnd(text: string, chars: string): string {
+  let end = text.length;
+  while (end > 0 && chars.includes(text[end - 1]!)) end--;
+  return text.slice(0, end);
+}
+
 /** A multi-line string as a block scalar: its header and its lines, not yet indented. */
 export interface Block {
   header: string;
@@ -111,7 +121,7 @@ export interface Block {
  */
 export function blockOf(value: string, folded = false, keep = false): Block | undefined {
   if (ESCAPE_ONLY.test(value)) return undefined;
-  const content = value.replace(/\n+$/, '');
+  const content = trimEnd(value, '\n');
   const trailing = value.length - content.length;
   // A new `|+` would take in the blank lines that follow it in the file: only one already there stays kept.
   if (trailing > 1 && !keep) return undefined;

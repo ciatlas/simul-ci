@@ -8,6 +8,7 @@ import type { Fp, JobField, NewStep, StepField, WorkflowOp } from '../src/ops/ty
 import { BOM, crlf, fixtures, workflows } from './corpus';
 import { normalized, opExpected } from './ops-model';
 import { same } from './model';
+import { jobReferences, stepReferences } from './refs';
 import { runs } from './runs';
 import { valueOf } from './walk';
 
@@ -66,13 +67,130 @@ function fingerprint(doc: WorkflowDocument, job: string, index: number): Fp {
   return Object.fromEntries(Object.entries({ id, name, uses, runHead }).filter(([, v]) => v !== undefined));
 }
 
-/** An op over what the document holds now. */
+/** An op over what the document holds now, and the references a rename of it reads. */
 function pickOp(doc: WorkflowDocument, rand: Rand): WorkflowOp | undefined {
   const jobs = doc.jobs();
   const job = pick(rand, jobs);
   if (!job) return undefined;
-  const kind = pick(rand, Object.keys(JOB_OPS))!;
-  return JOB_OPS[kind]!(doc, rand, job.id, job.steps.length);
+  const ops = { ...JOB_OPS, ...MORE_OPS };
+  const kind = pick(rand, Object.keys(ops))!;
+  return ops[kind]!(doc, rand, job.id, job.steps.length);
+}
+
+const EVENTS = ['push', 'pull_request', 'workflow_dispatch', 'release', 'issues'];
+const FILTERS = ['branches', 'branches-ignore', 'tags', 'tags-ignore', 'paths', 'paths-ignore'] as const;
+const PATTERNS = ['main', 'release/**', 'v*', '!docs/**', '**.md', 'src/**'];
+const CRONS = ['0 4 * * 1', '*/15 * * * *', '30 5 * * *'];
+const MATRIX: Json[] = ['ubuntu-latest', 'macos-latest', '22', '24', 26, '3.10', true, '${{ inputs.x }}'];
+
+const some = <T>(rand: Rand, items: readonly T[]): T[] => items.filter(() => rand() < 0.4);
+const eventsIn = (doc: WorkflowDocument): string[] => {
+  const on = doc.get(['on'])?.value;
+  if (typeof on === 'string') return [on];
+  if (Array.isArray(on)) return on.filter((e): e is string => typeof e === 'string');
+  return typeof on === 'object' && on !== null ? Object.keys(on) : [];
+};
+
+/** The trigger, matrix and rename ops: each over the document's events, the job's matrix or its ids. */
+const MORE_OPS: typeof JOB_OPS = {
+  addEvent: (_, rand) => ({ op: 'addEvent', file: FILE, event: pick(rand, EVENTS)! }),
+  removeEvent: (doc, rand) => {
+    const event = pick(rand, eventsIn(doc));
+    return event === undefined ? undefined : { op: 'removeEvent', file: FILE, event };
+  },
+  setFilter: (doc, rand) => ({
+    op: 'setFilter',
+    file: FILE,
+    event: pick(rand, eventsIn(doc)) ?? 'push',
+    filter: pick(rand, FILTERS)!,
+    patterns: rand() < 0.25 ? null : some(rand, PATTERNS),
+  }),
+  setTypes: (doc, rand) => ({
+    op: 'setTypes',
+    file: FILE,
+    event: pick(rand, eventsIn(doc)) ?? 'pull_request',
+    types: rand() < 0.25 ? null : some(rand, ['opened', 'synchronize', 'closed']),
+  }),
+  switchFilter: (doc, rand) => {
+    const event = pick(rand, eventsIn(doc));
+    const value = event === undefined ? undefined : doc.get(['on', event])?.value;
+    const keys = typeof value === 'object' && value !== null ? Object.keys(value) : [];
+    const from = pick(
+      rand,
+      FILTERS.filter((f) => keys.includes(f)),
+    );
+    if (event === undefined || from === undefined) return undefined;
+    const to = from.endsWith('-ignore') ? from.slice(0, -'-ignore'.length) : `${from}-ignore`;
+    return { op: 'switchFilter', file: FILE, event, from, to: to as (typeof FILTERS)[number] };
+  },
+  setSchedule: (_, rand) => ({
+    op: 'setSchedule',
+    file: FILE,
+    crons: some(rand, CRONS).map((cron) => (rand() < 0.5 ? { cron } : { cron, timezone: 'Europe/Berlin' })),
+  }),
+  setDispatchInput: (_, rand) => ({
+    op: 'setDispatchInput',
+    file: FILE,
+    name: pick(rand, ['deploy', 'target', 'dry-run'])!,
+    input:
+      rand() < 0.25
+        ? null
+        : {
+            ...(rand() < 0.5 ? { description: 'What to do' } : {}),
+            ...(rand() < 0.5 ? { required: rand() < 0.5 } : {}),
+            ...(rand() < 0.5 ? { type: 'choice' as const, options: some(rand, ['a', 'b', 'c']) } : {}),
+            ...(rand() < 0.3 ? { default: 'a' } : {}),
+          },
+  }),
+  setMatrixDim: (_, rand, job) => ({
+    op: 'setMatrixDim',
+    file: FILE,
+    job,
+    dim: pick(rand, ['os', 'node', 'python'])!,
+    values: rand() < 0.2 ? null : some(rand, MATRIX),
+  }),
+  setMatrixEntry: (doc, rand, job) => {
+    const list = pick(rand, ['include', 'exclude'] as const)!;
+    const items = doc.get(['jobs', job, 'strategy', 'matrix', list])?.value;
+    const length = Array.isArray(items) ? items.length : 0;
+    const index = length > 0 && rand() < 0.6 ? at(rand, length) : 'append';
+    const entry =
+      rand() < 0.3 ? null : { os: pick(rand, ['linux', 'windows'])!, ...(rand() < 0.5 ? { node: 26 } : {}) };
+    return { op: 'setMatrixEntry', file: FILE, job, list, index, entry };
+  },
+  setStrategyField: (_, rand, job) => ({
+    op: 'setStrategyField',
+    file: FILE,
+    job,
+    field: pick(rand, ['fail-fast', 'max-parallel'] as const)!,
+    value: pick(rand, [true, false, 'false', 2, '3', '${{ inputs.n }}', null])!,
+  }),
+  renameJob: (_, rand, job) => ({
+    op: 'renameJob',
+    file: FILE,
+    job,
+    to: `${job.slice(0, 3)}_${at(rand, 1e6)}`,
+  }),
+  renameStepId: (doc, rand, job, steps) => {
+    const index = at(rand, steps);
+    return steps > 0
+      ? {
+          op: 'renameStepId',
+          file: FILE,
+          job,
+          index,
+          fp: fingerprint(doc, job, index),
+          to: `s_${at(rand, 1e6)}`,
+        }
+      : undefined;
+  },
+};
+
+/** What the worker would find for a rename, built from the document (E2's `referencesOf` by its structure). */
+function refsFor(doc: WorkflowDocument, op: WorkflowOp) {
+  if (op.op === 'renameJob') return jobReferences(doc, op.job);
+  if (op.op === 'renameStepId') return stepReferences(doc, op.job, op.index);
+  return undefined;
 }
 
 const JOB_OPS: Record<
@@ -177,7 +295,8 @@ function sequence(original: string, stream: readonly number[]): void {
   for (let n = 0; n < 12; n++) {
     const op = pickOp(doc, rand);
     if (!op) continue;
-    const result = planOp(op, { doc: () => doc });
+    const refs = refsFor(doc, op);
+    const result = planOp(op, { doc: () => doc, ...(refs ? { refs } : {}) });
     if (!result.ok) {
       expect(
         result.reason,

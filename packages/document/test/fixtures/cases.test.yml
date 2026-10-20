@@ -1,0 +1,12 @@
+# Route tests for ci.yml.
+workflow: ci.yml
+
+cases:
+  - name: a push to main
+    when: {event: push, branch: main}
+    then: { run: [build] }
+
+  - name: a pull request
+    when: {event: pull_request, base: main, head: feat/x}
+    then:
+      run: [build]

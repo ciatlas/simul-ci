@@ -12,7 +12,21 @@ export { freeId, ID, sameId, stepIdFor } from './ops/ids';
 export { ORDER, orderFor } from './ops/order';
 export { planOp } from './ops/plan';
 export { fingerprint } from './ops/steps';
-export type { FixOp, Fp, JobField, NewJob, NewStep, OpContext, StepField, WorkflowOp } from './ops/types';
+export { caseFileText } from './ops/cases';
+export type {
+  CaseJson,
+  DispatchInput,
+  FilterKey,
+  FixOp,
+  Fp,
+  JobField,
+  NewJob,
+  NewStep,
+  OpContext,
+  Reference,
+  StepField,
+  WorkflowOp,
+} from './ops/types';
 export {
   convertEol,
   dealias,

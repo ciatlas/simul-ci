@@ -43,6 +43,8 @@ export interface Draft {
   label: string;
   select?: YamlPath;
   warnings?: Warning[];
+  /** The ids a rename changes, for the plan comparison to follow them. */
+  renames?: Rename[];
   /** The line ending the edit writes when it is not the file's (`convertEol`). */
   eol?: Eol;
 }
@@ -90,6 +92,7 @@ export function verify(doc: WorkflowDocument, draft: Draft): EditPlan<TextEdit[]
     documents: { [doc.path]: next },
   };
   if (draft.select) plan.select = { file: doc.path, path: draft.select };
+  if (draft.renames) plan.renames = draft.renames;
   return plan;
 }
 

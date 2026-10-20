@@ -1,0 +1,18 @@
+workflow: ci.yml
+cases:
+  - name: push to main
+    when: { event: push, branch: main }
+    then:
+      build: success
+  - name: a pull request
+    when:
+      event: pull_request
+    then:
+      build: success
+  # deploy: maybe — vars.DEPLOY → pin: vars: {"DEPLOY":"true"}
+  - name: a release
+    when: { event: release, action: published, tag: v1.2.0 }
+    allowMaybe: true
+    then:
+      run: [ build, publish ]
+      maybe: [ deploy ]

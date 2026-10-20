@@ -1,4 +1,4 @@
-import { blockOf, indentLines, inlineScalar, type Place, type Scalar } from './scalar';
+import { blockOf, indentLines, inlineScalar, trimEnd, type Place, type Scalar } from './scalar';
 import { familyOf, type Style } from './style';
 import type { Json, YamlPath } from './types';
 
@@ -137,6 +137,46 @@ export function renderItem(
   return [rendered.head === '' ? dash : `${dash} ${rendered.head}`, ...rendered.rest];
 }
 
+/**
+ * A map on one line in flow (`{ event: push, branch: main }`), padded inside its braces or not; its lists of scalars
+ * padded as the file pads them. Undefined when a value cannot go there: a string holding `${{` (G5) or a line break, a
+ * map inside a list, or a scalar that does not read back.
+ */
+export function flowMap(value: { [key: string]: Json }, style: Style, padded: boolean): string | undefined {
+  const pairs: string[] = [];
+  for (const [key, child] of Object.entries(value)) {
+    const name = inlineScalar(key, 'flowKey', style);
+    const text = flowValue(child, style, padded);
+    if (name === undefined || text === undefined) return undefined;
+    pairs.push(`${name}: ${text}`);
+  }
+  const pad = padded && pairs.length > 0 ? ' ' : '';
+  return `{${pad}${pairs.join(', ')}${pad}}`;
+}
+
+function flowValue(value: Json, style: Style, padded: boolean): string | undefined {
+  if (Array.isArray(value)) return flowItems(value, style);
+  if (value !== null && typeof value === 'object') return flowMap(value, style, padded);
+  return flowScalar(value, style);
+}
+
+/** A list of scalars in brackets, padded as the file pads them; none for a list holding a collection. */
+function flowItems(value: Json[], style: Style): string | undefined {
+  const items: string[] = [];
+  for (const item of value) {
+    const text = item !== null && typeof item === 'object' ? undefined : flowScalar(item, style);
+    if (text === undefined) return undefined;
+    items.push(text);
+  }
+  const pad = style.flowPadding && items.length > 0 ? ' ' : '';
+  return `[${pad}${items.join(', ')}${pad}]`;
+}
+
+const flowScalar = (value: Scalar, style: Style): string | undefined =>
+  typeof value === 'string' && (value.includes('${{') || value.includes('\n'))
+    ? undefined
+    : inlineScalar(value, 'flow', style);
+
 /** A map key: plain when it reads back as itself, else quoted. */
 function keyText(key: string, style: Style): string | undefined {
   return inlineScalar(key, 'key', style);
@@ -145,7 +185,7 @@ function keyText(key: string, style: Style): string | undefined {
 /** Every line break YAML 1.1 parsers like GitHub's know (yaml 2.9 knows only CR and LF). */
 const BREAK = /\r\n|[\r\n\u{85}\u{2028}\u{2029}]/u;
 const UNPRINTABLE = /(?!\t)\p{Cc}|[\u{feff}\u{fffe}\u{ffff}]/gu;
-const TRAILING_BREAKS = /[\r\n\u{85}\u{2028}\u{2029}]+$/u;
+const BREAKS = '\r\n\u0085\u2028\u2029';
 
 /**
  * Comment lines at a column: `# text`, or `#` alone for an empty line. A comment holding a line break is written as
@@ -153,7 +193,7 @@ const TRAILING_BREAKS = /[\r\n\u{85}\u{2028}\u{2029}]+$/u;
  */
 export const commentLines = (comments: readonly string[], column: number): string[] =>
   comments
-    .flatMap((c) => c.replace(TRAILING_BREAKS, '').split(BREAK))
+    .flatMap((c) => trimEnd(c, BREAKS).split(BREAK))
     .map((c) => c.replace(UNPRINTABLE, ''))
     .map((c) => `${' '.repeat(column)}#${c === '' ? '' : ` ${c}`}`);
 
@@ -162,5 +202,36 @@ export const commentLines = (comments: readonly string[], column: number): strin
  * end with a break, which the YAML spec (and GitHub's parser) reads as part of the value, though yaml 2.9 does not.
  */
 export function opensBlock(lines: readonly string[]): boolean {
-  return lines.some((line) => /(?:^|[\s:-])[|>][1-9]?\+?(?:[ \t]+#.*)?$/.test(line));
+  return lines.some(endsInHeader);
+}
+
+/**
+ * Whether a line ends with the header of a block scalar that keeps its last break (`|`, `>`, `|2+`) at the start,
+ * after a space, a `:` or a `-`, maybe with a comment after it. By hand: the regex for it is polynomial on a line of
+ * many `>`s and tabs. Each candidate scans only the blanks up to the next character, so the scan is linear.
+ */
+function endsInHeader(line: string): boolean {
+  // A comment runs to the end of the line: past the last line terminator in it, if any.
+  const lastBreak = Math.max(...['\r', '\n', '\u2028', '\u2029'].map((c) => line.lastIndexOf(c)));
+  for (let at = 0; at < line.length; at++) {
+    const end = headerAt(line, at);
+    if (end !== -1 && (end === line.length || commentAt(line, end, lastBreak))) return true;
+  }
+  return false;
+}
+
+/** Where a header that starts at `at` ends (`|`, `>`, then an indentation digit, then `+`); -1 when none starts there. */
+function headerAt(line: string, at: number): number {
+  const opens = line[at] === '|' || line[at] === '>';
+  if (!opens || (at > 0 && !/[\s:-]/.test(line[at - 1]!))) return -1;
+  let end = at + 1;
+  if (/[1-9]/.test(line[end] ?? '')) end++;
+  return line[end] === '+' ? end + 1 : end;
+}
+
+/** Whether blanks and then a comment run from `from` to the end of the line. */
+function commentAt(line: string, from: number, lastBreak: number): boolean {
+  let hash = from;
+  while (line[hash] === ' ' || line[hash] === '\t') hash++;
+  return hash > from && line[hash] === '#' && hash > lastBreak;
 }

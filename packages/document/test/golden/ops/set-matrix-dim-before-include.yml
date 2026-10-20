@@ -1,0 +1,27 @@
+on:
+  push:
+    branches: [main]
+    tags:
+      - v*
+    paths: [src/**]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node:
+          - 22
+          - 24
+        arch: [x64, arm64]
+        include:
+          - os: ubuntu-latest
+            node: 26
+    steps:
+      - run: echo
+  deploy:
+    needs:
+      - build
+    runs-on: [self-hosted, linux]
+    steps:
+      - run: echo

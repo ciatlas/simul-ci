@@ -1,5 +1,6 @@
 import type { Json } from '@simulci/document';
 import type { NewStep, WorkflowOp } from '../src/ops/types';
+import { MORE_MODEL } from './ops-model-more';
 
 /**
  * The job and step ops' meaning over plain JSON, written apart from the ops: what the property compares the text's
@@ -16,7 +17,7 @@ type Apply = (root: Map, jobs: Map, op: never, style: Style) => void;
 export function opExpected(js: unknown, op: WorkflowOp, style: Style): unknown {
   const root = clone(js) as Map;
   const jobs = isMap(root.jobs) ? root.jobs : {};
-  MODEL[op.op]?.(root, jobs, op as never, style);
+  (MODEL[op.op] ?? MORE_MODEL[op.op])?.(root, jobs, op as never, style);
   return normalize(root);
 }
 

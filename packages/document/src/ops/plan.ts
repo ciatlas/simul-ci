@@ -5,11 +5,23 @@ import { fileName, refuse, type Fix, type Refusal } from '../refusal';
 import { locate } from '../tree';
 import { verify, type Draft, type EditPlan, type Warning } from '../verify';
 import { setBinding, setOutput } from './bindings';
+import { addCase, createFile } from './cases';
 import { fixDraft } from './fixes';
 import { labelOf } from './labels';
 import { addJob, removeJob, setJobField, setWorkflowField } from './jobs';
+import { setMatrixDim, setMatrixEntry, setStrategyField } from './matrix';
 import { setNeeds } from './needs';
+import { renameJob, renameStepId } from './rename';
 import { addStep, moveStep, removeStep, setStepField } from './steps';
+import {
+  addEvent,
+  removeEvent,
+  setDispatchInput,
+  setFilter,
+  setSchedule,
+  setTypes,
+  switchFilter,
+} from './triggers';
 import type { OpContext, WorkflowOp } from './types';
 
 type Planned = EditPlan<Record<string, TextEdit[]>>;
@@ -17,7 +29,7 @@ type Planned = EditPlan<Record<string, TextEdit[]>>;
 /**
  * Plans an op against the open documents: one draft, checked (G6) before it is offered, or the refusal with its
  * fixes. A file's lock answers before anything the op asks. Planning never throws for the author's input. Every op
- * of this set writes one file.
+ * writes one file; `createFile` writes one that is not open yet.
  */
 export function planOp(op: WorkflowOp, ctx: OpContext): Planned {
   return planned(op, ctx, FIX_DEPTH);
@@ -27,12 +39,18 @@ export function planOp(op: WorkflowOp, ctx: OpContext): Planned {
 const FIX_DEPTH = 3;
 
 function planned(op: WorkflowOp, ctx: OpContext, depth: number): Planned {
+  if (op.op === 'createFile') return createFile(op, ctx);
   const doc = ctx.doc(op.file);
   if (!doc) return refuse('not-found', op.file, `${fileName(op.file)} is not open.`);
   const locked = editable(doc, op.op === 'convertEol');
   if (locked) return locked;
-  const draft = draftOf(doc, op, ctx.shared);
+  const draft = draftOf(doc, op, ctx);
   if (isRefusal(draft)) return depth > 0 ? throughFixes(draft, op, ctx, depth) : draft;
+  return checked(doc, op, draft);
+}
+
+/** A draft checked (G6), under the op's label, with the warning for a reusable workflow's callers. */
+function checked(doc: WorkflowDocument, op: WorkflowOp, draft: Draft): Planned {
   // Copies and line-ending conversions keep the value: the workflows that call this one plan as before.
   const changes = draft.edits.length > 0 && !FIX_OPS.has(op.op);
   const plan = verify(doc, {
@@ -117,9 +135,10 @@ function runOps(ops: readonly WorkflowOp[], ctx: OpContext): OpContext | undefin
   return current;
 }
 
-type Planner = (doc: WorkflowDocument, op: never, shared?: 'all') => Draft | Refusal;
+type Planner = (doc: WorkflowDocument, op: never, shared?: 'all', ctx?: OpContext) => Draft | Refusal;
 
-const PLANNERS: Record<WorkflowOp['op'], Planner> = {
+/** The op's planner against its file's document; `createFile` has no document yet and is planned on its own. */
+const PLANNERS: Record<Exclude<WorkflowOp['op'], 'createFile'>, Planner> = {
   setWorkflowField,
   addJob,
   removeJob,
@@ -131,13 +150,30 @@ const PLANNERS: Record<WorkflowOp['op'], Planner> = {
   removeStep,
   moveStep,
   setStepField,
+  setMatrixDim,
+  setMatrixEntry,
+  setStrategyField,
+  addEvent,
+  removeEvent,
+  setFilter,
+  setTypes,
+  setSchedule,
+  setDispatchInput,
+  switchFilter,
+  addCase,
+  renameJob,
+  renameStepId,
   dealias: fixDraft,
   dealiasAnchor: fixDraft,
   convertEol: fixDraft,
 };
 
-function draftOf(doc: WorkflowDocument, op: WorkflowOp, shared?: 'all'): Draft | Refusal {
-  return PLANNERS[op.op](doc, op as never, shared);
+function draftOf(
+  doc: WorkflowDocument,
+  op: Exclude<WorkflowOp, { op: 'createFile' }>,
+  ctx: OpContext,
+): Draft | Refusal {
+  return PLANNERS[op.op](doc, op as never, ctx.shared, ctx);
 }
 
 /** An edit to a workflow other workflows call changes their plans too. */

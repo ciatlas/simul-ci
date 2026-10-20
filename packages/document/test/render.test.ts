@@ -1,8 +1,9 @@
+import * as fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { WorkflowDocument, type Style } from '@simulci/document';
 import { applyEdits } from '../src/edits';
-import { renderItem, renderPair, renderValue } from '../src/fragment';
-import { blockOf, inlineScalar, readsBack, writeScalar, type Scalar } from '../src/scalar';
+import { commentLines, opensBlock, renderItem, renderPair, renderValue } from '../src/fragment';
+import { blockOf, inlineScalar, readsBack, trimEnd, writeScalar, type Scalar } from '../src/scalar';
 import { ownStart } from '../src/spans';
 import { isFlow, locate } from '../src/tree';
 import type { YamlPath } from '../src/types';
@@ -210,5 +211,57 @@ describe('the in-place scalar writer', () => {
 
   it('writes nothing for the value already there', () => {
     expect(write('a: 1\n', ['a'], 1)).toBe('a: 1\n');
+  });
+});
+
+/**
+ * The scans that replaced regexes CodeQL found polynomial (js/polynomial-redos): each agrees with the regex it
+ * replaced on short inputs, and stays linear on the long input that made the regex slow (seconds at 20k repeats).
+ */
+describe('linear scans in place of polynomial regexes', () => {
+  const HEADER = /(?:^|[\s:-])[|>][1-9]?\+?(?:[ \t]+#.*)?$/;
+  const TRAILING = /[\r\n\u{85}\u{2028}\u{2029}]+$/u;
+  const BREAKS = '\r\n\u0085\u2028\u2029';
+  /** Runs `f` and fails when it takes longer than a linear scan of a few hundred thousand characters could. */
+  const fast = <T>(f: () => T): T => {
+    const start = performance.now();
+    const out = f();
+    expect(performance.now() - start).toBeLessThan(1000);
+    return out;
+  };
+
+  it('a block header at the end of a line, as the regex found it', () => {
+    const line = fc.string({
+      unit: fc.constantFrom('|', '>', '-', ':', ' ', '\t', '#', '+', '2', 'a', '\n', '\u2028'),
+      maxLength: 12,
+    });
+    fc.assert(
+      fc.property(line, (l) => opensBlock([l]) === HEADER.test(l)),
+      { numRuns: 2000 },
+    );
+  });
+
+  it('a block header on a long line of `>`s and tabs', () => {
+    expect(fast(() => opensBlock([`>\t#${'\t>\t#'.repeat(200_000)}\u2028`]))).toBe(false);
+    expect(fast(() => opensBlock([`${'> #'.repeat(200_000)}\u2028`]))).toBe(false);
+    expect(fast(() => opensBlock([`run: ${'x'.repeat(200_000)} | # done`]))).toBe(true);
+  });
+
+  it('the line breaks that end a text, as the regex found them', () => {
+    const text = fc.string({
+      unit: fc.constantFrom('a', '\n', '\r', '\u0085', '\u2028', ' '),
+      maxLength: 12,
+    });
+    fc.assert(
+      fc.property(text, (t) => trimEnd(t, BREAKS) === t.replace(TRAILING, '')),
+      { numRuns: 2000 },
+    );
+  });
+
+  it('a block scalar and comment lines from a text with many line breaks inside', () => {
+    const many = `a${'\n'.repeat(200_000)}b`;
+    expect(fast(() => trimEnd(many, '\n'))).toBe(many);
+    expect(fast(() => blockOf(`a${'\n'.repeat(100_000)}b\n`))?.header).toBe('|');
+    expect(fast(() => commentLines([`${'\u2028'.repeat(200_000)}x`], 0))).toHaveLength(200_001);
   });
 });
