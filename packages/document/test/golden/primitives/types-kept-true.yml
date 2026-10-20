@@ -1,0 +1,21 @@
+name: events
+on:
+  push:
+    branches: [main] # protected
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'true'
+      - name: Test
+        run: npm test
+      - run: |
+          echo one
+          echo two

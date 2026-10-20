@@ -1,0 +1,11 @@
+workflow: ci.yml
+cases:
+  - name: push to main
+    when: { event: push, branch: main, actor: octocat }
+    then:
+      build: success
+  - name: a pull request
+    when:
+      event: pull_request
+    then:
+      build: success

@@ -1,0 +1,10 @@
+on: push
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - run: make
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./deploy.sh

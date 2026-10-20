@@ -1,0 +1,2 @@
+workflow: ci.yml
+cases: [{name: push, when: {event: push}, then: {build: success}}]

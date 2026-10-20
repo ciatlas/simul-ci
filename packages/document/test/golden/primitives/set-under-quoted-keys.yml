@@ -1,0 +1,7 @@
+'on':
+  push:
+"jobs":
+  'build':
+    "runs-on": macos-latest
+    steps:
+      - run: make

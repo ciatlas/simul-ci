@@ -8,7 +8,8 @@ export class Lines {
   readonly starts: readonly number[];
 
   constructor(readonly text: string) {
-    const starts = [0];
+    // A byte order mark is no column: the first line starts after it, and nothing is ever written before it.
+    const starts = [text.startsWith('\uFEFF') ? 1 : 0];
     for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) starts.push(at + 1);
     this.starts = starts;
   }
@@ -57,6 +58,21 @@ export class Lines {
     const indent = text.length - body.length;
     if (body === '') return { kind: 'blank', indent };
     return { kind: body.startsWith('#') ? 'comment' : 'content', indent };
+  }
+
+  /**
+   * The indentation of the comment that follows an offset, past blank lines, from the line the offset starts (or the
+   * next one); undefined when content or the end comes first. A block scalar written right before it with lines as
+   * deep would take it into its value.
+   */
+  commentAfter(offset: number): number | undefined {
+    const first = this.start(this.lineAt(offset)) === offset ? this.lineAt(offset) : this.lineAt(offset) + 1;
+    for (let line = first; line < this.count; line++) {
+      const { kind, indent } = this.kind(line);
+      if (kind === 'blank') continue;
+      return kind === 'comment' ? indent : undefined;
+    }
+    return undefined;
   }
 
   /** The 0-based column of an offset. */

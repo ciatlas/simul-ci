@@ -16,7 +16,7 @@ import {
 import * as refusals from './refusal';
 import type { Refusal } from './refusal';
 import { inferStyle, textStyle, type Style } from './style';
-import { entriesOf, type Tree } from './tree';
+import { entriesOf, toJson, type Tree } from './tree';
 import type { FileKind, Span, YamlPath } from './types';
 
 export interface OpenOptions {
@@ -49,6 +49,8 @@ export const PARSE_OPTIONS = { strict: false } as const;
 
 const MAX_BYTES = 512 * 1024;
 
+const UNREAD = Symbol('unread');
+
 /**
  * One version of a file's text and what a parse of it says: the YAML tree, its anchors, its style and whether ops may
  * edit it. The text is the state; this is an index over it, immutable, so `apply` returns a new one.
@@ -69,6 +71,7 @@ export class WorkflowDocument {
   readonly tree: Tree;
   readonly #options: OpenOptions;
   #jobs: JobInfo[] | undefined;
+  #value: unknown = UNREAD;
 
   private constructor(text: string, options: OpenOptions, parsed: Parsed) {
     this.path = options.path;
@@ -118,6 +121,15 @@ export class WorkflowDocument {
   /** The offset of a 1-based line and column, as core's `Loc`. */
   offsetOf(line: number, column: number): number {
     return this.tree.lines.offsetOf(line, column);
+  }
+
+  /**
+   * The text's value as plain JSON, aliases resolved, as core reads it; undefined when an alias dangles or the aliases
+   * expand past yaml's guard. Computed once.
+   */
+  value(): unknown {
+    if (this.#value === UNREAD) this.#value = toJson(this.tree, this.tree.doc?.contents ?? null);
+    return this.#value;
   }
 
   jobs(): JobInfo[] {
