@@ -22,13 +22,14 @@ export function EditHost() {
   // Each opening is a fresh popover, its fields read anew, even of the same kind.
   const [shown, setShown] = useState<{ open: Open; n: number }>();
   const open = shown?.open;
-  const [ask, setAsk] = useState<Ask>();
+  // Each question is a dialog of its own: one closing settles only itself, never the one asked after it.
+  const [ask, setAsk] = useState<{ ask: Ask; n: number }>();
   const [note, setNote] = useState<{ seq: number; anchor?: Element }>();
   const [added, setAdded] = useState<{ card: NodeId; files: number }>();
   const ui = useMemo<GestureUi>(
     () => ({
       open: (next) => setShown((was) => ({ open: next, n: (was?.n ?? 0) + 1 })),
-      confirm: setAsk,
+      confirm: (next) => setAsk((was) => ({ ask: next, n: (was?.n ?? 0) + 1 })),
       refused: (seq, anchor) => setNote(anchor ? { seq, anchor } : { seq }),
       added: (card, files) => setAdded({ card, files }),
     }),
@@ -36,30 +37,41 @@ export function EditHost() {
   );
   useEffect(() => gestures.register(store, gesturesOf(store, ui)), [store, ui]);
   const close = useCallback(() => setShown(undefined), []);
-  const closeAsk = useCallback(() => setAsk(undefined), []);
+  const closeAsk = useCallback((n: number) => setAsk((was) => (was?.n === n ? undefined : was)), []);
   const closeNote = useCallback(() => setNote(undefined), []);
   const focused = useCallback(() => setAdded(undefined), []);
   useFocusAdded(added, focused);
   return (
     <>
-      {open?.kind === 'addJob' && <AddJobPopover key={shown?.n} open={open} ui={ui} onClose={close} />}
-      {open?.kind === 'needs' && <NeedsPopover key={shown?.n} open={open} ui={ui} onClose={close} />}
-      {open?.kind === 'menu' && (
-        <RowMenu key={shown?.n} node={open.node} anchor={open.anchor} onClose={close} />
-      )}
-      {ask && <ConfirmDialog ask={ask} onClose={closeAsk} />}
-      {note && <CardNote seq={note.seq} anchor={note.anchor} onClose={closeNote} />}
+      {open && <Opened key={shown.n} open={open} ui={ui} onClose={close} />}
+      {ask && <ConfirmDialog key={ask.n} ask={ask.ask} n={ask.n} onClose={closeAsk} />}
+      {note && <CardNote key={note.seq} seq={note.seq} anchor={note.anchor} onClose={closeNote} />}
     </>
   );
 }
 
-/** A refused canvas gesture's sentence and fixes under its card, while that refusal is the store's. */
+/** What a gesture opened. */
+function Opened({ open, ui, onClose }: { open: Open; ui: GestureUi; onClose: () => void }) {
+  if (open.kind === 'addJob') return <AddJobPopover open={open} ui={ui} onClose={onClose} />;
+  if (open.kind === 'needs') return <NeedsPopover open={open} ui={ui} onClose={onClose} />;
+  return <RowMenu node={open.node} anchor={open.anchor} onClose={onClose} />;
+}
+
+/**
+ * A refused canvas gesture's sentence and fixes under its card, while that refusal is the store's. It shows a frame
+ * after the gesture: a drag ends on pointerup, whose light dismiss would close a popover shown in it at once.
+ */
 function CardNote({ seq, anchor, onClose }: { seq: number; anchor?: Element; onClose: () => void }) {
   const live = useSession((s) => s.edit.refused?.seq === seq);
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setSettled(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
   useEffect(() => {
     if (!live) onClose();
   }, [live, onClose]);
-  if (!live || !anchor) return null;
+  if (!live || !anchor || !settled) return null;
   return (
     <AnchoredPopover
       anchor={anchor}

@@ -22,7 +22,7 @@ const GAP = 8;
 const MARGIN = 8;
 
 /** Where a box of `size` goes beside (`right`, else left of) or under (`below`, else above) its anchor, in the window. */
-export function placeAt(
+function placeAt(
   anchor: Box | undefined,
   size: { width: number; height: number },
   view: { width: number; height: number },

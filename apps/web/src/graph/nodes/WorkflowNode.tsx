@@ -77,21 +77,7 @@ function WorkflowNodeView({ data }: NodeProps<WorkflowFlowNode>) {
         </span>
         <span className="sr-only">{countsText(scope.counts)}</span>
         {data.caller !== undefined && <span className="sc-scope-caller">called by {data.caller}</span>}
-        {data.editable && (
-          <button
-            type="button"
-            className="sc-add-job nodrag nopan"
-            tabIndex={state.selected ? 0 : -1}
-            aria-keyshortcuts="A"
-            onClick={(e) => {
-              e.stopPropagation();
-              act.selectFocus();
-              gestures.of(store)?.addJob();
-            }}
-          >
-            + Add job
-          </button>
-        )}
+        {data.editable && <AddJob tabStop={state.selected} />}
         {deep && (
           <button
             type="button"
@@ -105,6 +91,27 @@ function WorkflowNodeView({ data }: NodeProps<WorkflowFlowNode>) {
         )}
       </div>
     </div>
+  );
+}
+
+/** + Add job in the title bar of the workflow being edited: a job of its own, after the others. */
+function AddJob({ tabStop }: { tabStop: boolean }) {
+  const { store } = useApp();
+  const add = (e: MouseEvent): void => {
+    e.stopPropagation();
+    cardActions(store).selectFocus();
+    gestures.of(store)?.addJob();
+  };
+  return (
+    <button
+      type="button"
+      className="sc-add-job nodrag nopan"
+      tabIndex={tabStop ? 0 : -1}
+      aria-keyshortcuts="A"
+      onClick={add}
+    >
+      + Add job
+    </button>
   );
 }
 

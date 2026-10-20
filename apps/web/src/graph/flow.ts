@@ -162,11 +162,12 @@ function emitInside(ctx: Context, scope: ScopeModel, laid: ScopeLayout, faded: b
   }
   for (const e of scope.edges)
     if (placed.has(e.source) && placed.has(e.target)) ctx.out.edges.push(edgeOf(ctx, scope.id, e, faded));
-  if (scope.id === ctx.view.editing) ctx.out.edges.push(...pendingEdges(ctx, scope, placed));
+  ctx.out.edges.push(...pendingEdges(ctx, scope, placed));
 }
 
-/** The needs written since the picture, between two cards it places, that it does not draw yet. */
+/** In the workflow being edited, the needs written since the picture between two cards it places, not drawn yet. */
 function pendingEdges(ctx: Context, scope: ScopeModel, placed: ReadonlySet<NodeId>): NeedsFlowEdge[] {
+  if (scope.id !== ctx.view.editing) return [];
   const drawn = new Set(scope.edges.map((e) => e.id));
   return (ctx.view.pending ?? []).flatMap(({ source, target }) => {
     const id = `${source}->${target}`;
@@ -399,20 +400,18 @@ export function edgeIdOf(el: unknown): string | undefined {
   return e.getAttribute?.('data-id') ?? undefined;
 }
 
-/** An edit key on the canvas: remove the selection, move the selected step, or take the focused edge's need away. */
-export type EditKey = 'remove' | 'up' | 'down' | { source: NodeId; target: NodeId };
+/** An edit key on the canvas: remove the selection, or take the focused edge's need away. */
+export type EditKey = 'remove' | { source: NodeId; target: NodeId };
 
 /**
  * What a key press on the canvas asks of the edit runtime (synthesis § 4.2): Delete or Backspace removes the need of
- * the focused edge, else the selection; Alt+↑ and Alt+↓ move the selected step. Typed into a field, or with Ctrl or
- * Meta, it is none.
+ * the focused edge, else the selection. Typed into a field, or with Alt, Ctrl or Meta, it is none.
  */
 export function editKey(
   e: KeyPress & { shiftKey?: boolean },
   model: GraphModel | undefined,
 ): EditKey | undefined {
-  if (!canvasKey(e) || e.shiftKey) return undefined;
-  if (e.altKey) return e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : undefined;
+  if (!canvasKey(e) || e.shiftKey || e.altKey) return undefined;
   if (e.key !== 'Delete' && e.key !== 'Backspace') return undefined;
   const edge = edgeIdOf(e.target);
   if (edge === undefined) return 'remove';

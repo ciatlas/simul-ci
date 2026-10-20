@@ -574,3 +574,44 @@ test('Show … in Unknowns in a reason puts the focus on that unknown’s row, i
   await expect(row).toBeFocused();
   await expect(row).toBeInViewport();
 });
+
+test('by the keys alone, edit mode adds a job and sets what it needs, and axe finds nothing in what opens', async ({
+  page,
+}) => {
+  await openStarter(page);
+  await page.keyboard.press('e');
+  // The canvas offers its gestures once the edit runtime is in.
+  await expect(page.getByRole('button', { name: '+ Add job' })).toBeAttached();
+  await jobNode(page, 'build').focus();
+  await expect(jobNode(page, 'build').locator('.sc-card')).toHaveAttribute('data-selected', 'self');
+
+  await page.keyboard.press('a');
+  const add = page.getByRole('dialog', { name: 'Add a job after build' });
+  await expect(add.getByRole('textbox', { name: 'Id' })).toBeFocused();
+  await expectAxeClean(page, 'Add job');
+  await page.keyboard.type('lint');
+  await page.keyboard.press('Enter');
+  await expect(add).toHaveCount(0);
+  await expect(jobNode(page, 'lint')).toBeFocused();
+
+  await page.keyboard.press('n');
+  const needs = page.getByRole('dialog', { name: 'What lint needs' });
+  await expect(needs.getByRole('combobox', { name: 'Add a need to lint' })).toBeFocused();
+  await expectAxeClean(page, 'What it needs');
+  await page.keyboard.type('test');
+  await page.keyboard.press('Enter');
+  await expect(jobNode(page, 'lint')).toHaveAttribute('aria-label', /needs build, test$/, { timeout: 3000 });
+  await page.keyboard.press('Escape');
+  await expect(needs).toHaveCount(0);
+  await expect(jobNode(page, 'lint')).toBeFocused();
+
+  // Delete asks about a job others need; Escape keeps it.
+  await jobNode(page, 'build').focus();
+  await page.keyboard.press('Delete');
+  const ask = page.getByRole('dialog', { name: 'Remove job build?' });
+  await expect(ask.getByRole('button', { name: 'Remove build' })).toBeFocused();
+  await expectAxeClean(page, 'the question before removing a job');
+  await page.keyboard.press('Escape');
+  await expect(ask).toHaveCount(0);
+  await expect(jobNode(page, 'build')).toBeVisible();
+});

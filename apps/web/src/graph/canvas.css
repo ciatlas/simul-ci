@@ -717,9 +717,13 @@
   stroke-width: 2.5;
 }
 
+/*
+ * At the level of the edges inside a workflow: above the frame even while it is selected (1000), with its jobs (1001),
+ * which come later and so paint over it.
+ */
 .sc-edge-remove {
   position: absolute;
-  z-index: 600;
+  z-index: 1001;
   width: 18px;
   height: 18px;
   padding: 0;

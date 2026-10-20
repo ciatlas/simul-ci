@@ -12,12 +12,8 @@ export interface Gestures {
   addJob(after?: string): boolean;
   /** Opens What it needs under the selected job. */
   needs(): boolean;
-  /** Opens the palette: a step after the selected step, else the selected job's last; or `at` a place in a job. */
-  palette(at?: { job: string; index: number }): boolean;
-  /** Removes the selected job or step, asking first when the removal warns or takes needs with it. */
+  /** Removes the selected job, asking first when the removal warns or takes needs with it. */
   remove(): boolean;
-  /** Moves the selected step up or down within its job. */
-  move(by: -1 | 1): boolean;
   /** Whether a drag from one job's handle may end on another's: the second would then need the first. */
   canConnect(source: NodeId, target: NodeId): boolean;
   /** The second job needs the first; a refused drag says why. */
@@ -37,6 +33,11 @@ export interface PendingEdge {
 
 const registered = new WeakMap<SessionStore, Gestures>();
 const waiting = new WeakMap<SessionStore, (g: Gestures) => boolean>();
+const watchers = new WeakMap<SessionStore, Set<() => void>>();
+
+const told = (store: SessionStore): void => {
+  for (const watcher of watchers.get(store) ?? []) watcher();
+};
 const pending = new WeakMap<SessionStore, readonly PendingEdge[]>();
 const listeners = new WeakMap<SessionStore, Set<() => void>>();
 
@@ -44,12 +45,22 @@ export const gestures = {
   /** The edit runtime registers its gestures while edit mode shows; the returned function takes them back. */
   register(store: SessionStore, impl: Gestures): () => void {
     registered.set(store, impl);
+    told(store);
     const asked = waiting.get(store);
     waiting.delete(store);
     asked?.(impl);
     return () => {
-      if (registered.get(store) === impl) registered.delete(store);
+      if (registered.get(store) !== impl) return;
+      registered.delete(store);
+      told(store);
     };
+  },
+  /** Calls `watcher` when the gestures come or go: the canvas offers its handles, ✕ and + only while they answer. */
+  watch(store: SessionStore, watcher: () => void): () => void {
+    const own = watchers.get(store) ?? new Set();
+    watchers.set(store, own);
+    own.add(watcher);
+    return () => own.delete(watcher);
   },
   of: (store: SessionStore): Gestures | undefined => registered.get(store),
   /**

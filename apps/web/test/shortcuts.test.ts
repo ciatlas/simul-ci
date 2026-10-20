@@ -16,6 +16,7 @@ import {
   shownView,
 } from '../src/app/shortcuts';
 import { ViewToggle } from '../src/app/ViewToggle';
+import { type Gestures, gestures } from '../src/edit/gestures';
 import { viewport } from '../src/graph/commands';
 import type { GraphState, JobModel, ScopeModel } from '../src/graph/types';
 import { createSessionStore, type PlanState, type SessionStore } from '../src/state/store';
@@ -183,6 +184,32 @@ describe('the page key listener', () => {
     store.getState().select(CI, 'build/inner');
     expect(press('i')).toBe(true);
     expect(store.getState().propertyFocus).toBeUndefined();
+  });
+
+  it('opens Add job with a and What it needs with n in edit mode, through the edit runtime, waiting for it', () => {
+    const asked: string[] = [];
+    const impl = {
+      addJob: () => asked.push('addJob') > 0,
+      needs: () => asked.push('needs') > 0,
+    } as unknown as Gestures;
+    store.getState().select(CI, 'build');
+    expect(press('a')).toBe(true);
+    expect(press('n')).toBe(true);
+    store.getState().setEdit(true);
+    // Before the runtime is in, the key waits for it: the last one asked runs once it registers.
+    expect(press('a')).toBe(false);
+    const stopGestures = gestures.register(store, impl);
+    expect(asked).toEqual(['addJob']);
+    expect(press('n')).toBe(false);
+    expect(asked).toEqual(['addJob', 'needs']);
+    // What it needs is a job's; a called workflow's job is not this file's. Add job also works for the workflow.
+    store.getState().select(CI, undefined);
+    expect(press('n')).toBe(true);
+    expect(press('a')).toBe(false);
+    store.getState().select(CI, 'build/inner');
+    expect(press('n')).toBe(true);
+    expect(asked).toEqual(['addJob', 'needs', 'addJob']);
+    stopGestures();
   });
 
   it('switches between the graph and the text with t, and has nothing to switch below 1024 px', () => {

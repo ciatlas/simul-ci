@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react';
+import { useCallback, useEffect, useId, useRef } from 'react';
 import { useModal } from '../../app/modal';
 import type { Ask } from './actions';
 
@@ -7,9 +7,10 @@ import type { Ask } from './actions';
  * (synthesis § 4.2, resolved contradiction 30): what goes with it, and the button that removes. A native modal dialog,
  * as the page's others are; Escape and Cancel close it with nothing written, and the browser gives the focus back.
  */
-export function ConfirmDialog({ ask, onClose }: { ask: Ask; onClose: () => void }) {
+export function ConfirmDialog({ ask, n, onClose }: { ask: Ask; n: number; onClose: (n: number) => void }) {
   const id = useId();
-  const dialog = useModal(onClose);
+  const closed = useCallback(() => onClose(n), [onClose, n]);
+  const dialog = useModal(closed);
   const remove = useRef<HTMLButtonElement>(null);
   // After the modal opens (its own effect, above), the button the author came for takes the focus.
   useEffect(() => remove.current?.focus(), []);
