@@ -1,0 +1,139 @@
+---
+title: Getting started
+description: Plan a run of your workflows, then keep it with a route test.
+---
+
+simulci reads the workflows under `.github/workflows` and a scenario (an event, a branch, the changed files) and
+prints which jobs and steps run (`●`), skip (`○`) or might run (`◐`), and why. It never runs anything.
+
+## Install
+
+simulci needs Node.js 22 or later. Run it with `npx`, or add it to the repository:
+
+```sh
+npm install --save-dev simulci
+```
+
+## Plan a run
+
+Take this workflow, `.github/workflows/ci.yml`:
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - id: build
+        run: ./build.sh
+      - if: steps.build.outputs.changed == 'true'
+        run: ./deploy.sh
+```
+
+A pull request runs `test` and skips `deploy`, and the plan says which line decided:
+
+```sh
+npx simulci plan --event pull_request --head feat/x
+```
+
+```text
+pull_request:1/merge · 1 of 1 workflows triggered
+● .github/workflows/ci.yml — types opened|synchronize|reopened: true
+  ● test
+    ● actions/checkout@v5
+    ● ~npm-test
+  ○ deploy — if: github.ref == 'refs/heads/main' → false
+```
+
+A push to `main` that changes only docs starts nothing:
+
+```sh
+npx simulci plan --event push --branch main --changed docs/intro.md
+```
+
+```text
+push:main · 0 of 1 workflows triggered
+○ .github/workflows/ci.yml — paths-ignore [docs/**] ← ["docs/intro.md"]: false
+```
+
+When something only a runner knows decides a step, here what `./build.sh` writes to `$GITHUB_OUTPUT`, the step
+might run, and the plan names the unknown and the mock that would pin it:
+
+```sh
+npx simulci plan --event push --branch main --changed src/app.ts
+```
+
+```text
+push:main · 1 of 1 workflows triggered
+● .github/workflows/ci.yml — paths-ignore [docs/**] ← ["src/app.ts"]: true
+  ● test
+    ● actions/checkout@v5
+    ● ~npm-test
+  ● deploy
+    ● build
+    ◐ ~deploy-sh — if: steps.build.outputs.changed == 'true' → ? one of true, false (.github/workflows/ci.yml#deploy/steps.build.outputs.changed) [steps.build.outputs.changed]
+
+Unknowns:
+  .github/workflows/ci.yml#deploy/steps.build.outputs.changed · affects 1 · pin: assume {"step":"deploy.build","outputs":{"changed":""}}
+```
+
+Pin it with `--assume deploy.build.outputs.changed=true` and the step runs.
+
+## Write a first test
+
+Route tests live in `.github/simulci/tests/*.test.yml`. `simulci plan --as-test` prints a plan as a case to start
+from; keep the assertions that matter:
+
+```yaml title=".github/simulci/tests/ci.test.yml"
+workflow: ci.yml
+cases:
+  - name: a pull request tests but never deploys
+    when: { event: pull_request, head: feat/x }
+    then:
+      run: [test]
+      skip: [deploy: if]
+
+  - name: a docs-only push starts nothing
+    when: { event: push, branch: main, changed: [docs/intro.md] }
+    then: { because: paths-ignore }
+```
+
+```sh
+npx simulci test
+```
+
+```text
+.github/simulci/tests/ci.test.yml → ci.yml
+  ✓ a pull request tests but never deploys
+  ✓ a docs-only push starts nothing
+
+2 passed · 0 failed · 0 invalid · 0 skipped · exit 0
+```
+
+When the workflow changes and a case no longer holds, the failure says what was expected and which line decided:
+
+```text
+  ✗ a pull request tests but never deploys
+      run[1]: expected deploy to run; it skips
+            parent yes (ci.yml)
+          → if: github.ref == 'refs/heads/main' → false
+              ← github.ref = refs/pull/1/merge
+              at .github/workflows/ci.yml:17:9
+        at 6:19
+```
+
+Run the tests on every pull request with the [GitHub Action](/docs/action).
