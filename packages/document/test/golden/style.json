@@ -43,6 +43,28 @@
     },
     "commentGap": 1
   },
+  "cases.test.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
   "ci.test.yml": {
     "indent": 2,
     "indentSeq": true,
@@ -219,6 +241,28 @@
     },
     "commentGap": 1
   },
+  "nightly.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
   "no-lists.yml": {
     "indent": 2,
     "indentSeq": true,
@@ -231,6 +275,28 @@
       "matrix": null,
       "runs-on": null,
       "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "on-flow.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
     },
     "ifStyle": "bare",
     "eol": "\n",

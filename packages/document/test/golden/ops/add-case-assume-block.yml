@@ -1,0 +1,20 @@
+workflow: ci.yml
+cases:
+  - name: push to main
+    when: { event: push, branch: main }
+    then:
+      build: success
+  - name: a pull request
+    when:
+      event: pull_request
+    then:
+      build: success
+  - name: push with an assumption
+    when:
+      event: push
+      branch: main
+      assume:
+        - job: build
+          result: failure
+    then:
+      conclusion: failure

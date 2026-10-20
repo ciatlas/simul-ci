@@ -1,0 +1,25 @@
+name: nightly
+on:
+  schedule:
+    - cron: '0 5 * * 1' # Mondays
+    - cron: 30 5 * * *
+  push:
+    branches-ignore: [docs/**]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.10', '3.12']
+        include:
+          - { os: ubuntu-latest, python: '3.13', experimental: true }
+        exclude:
+          - { os: windows-latest, python: '3.10' }
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pytest

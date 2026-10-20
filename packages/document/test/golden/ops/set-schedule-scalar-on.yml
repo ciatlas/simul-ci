@@ -1,0 +1,10 @@
+on:
+  push:
+  schedule:
+    - cron: '0 4 * * 1'
+      timezone: America/New_York
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo

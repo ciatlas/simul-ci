@@ -1,0 +1,9 @@
+on: # every change
+  push:
+  pull_request:
+    paths: [src/**]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo

@@ -635,13 +635,9 @@ function addDraft(doc: WorkflowDocument, path: YamlPath, value: Json, options: S
     const at = reach(doc, path, options);
     return isRefusal(at) ? at : refusals.notFound(doc.path, path);
   }
+  // Each map created on the way is placed by its own parent's order: a function of the path reaches every level.
   if (!parent) {
-    const deep = setDraft(
-      doc,
-      mapPath,
-      { [key]: value },
-      { ...options, order: orderAt(options.order, mapPath.slice(0, -1)) },
-    );
+    const deep = setDraft(doc, mapPath, { [key]: value }, options);
     const expect = (js: unknown) => equivalents(doc, path).reduce((j, p) => setIn(j, p, value), js);
     return isRefusal(deep) ? deep : { ...deep, expect, select: path };
   }

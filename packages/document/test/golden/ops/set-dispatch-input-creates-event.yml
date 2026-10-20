@@ -1,0 +1,12 @@
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        default: true
+        type: boolean
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo

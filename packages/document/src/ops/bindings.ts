@@ -54,7 +54,7 @@ export function setBinding(doc: WorkflowDocument, op: Op<'setBinding'>, shared?:
 }
 
 /** A key as the map writes it whatever its case (`CI` for `ci`): GitHub reads one key per name. */
-function keyIn(doc: WorkflowDocument, mapPath: YamlPath, name: string): string {
+export function keyIn(doc: WorkflowDocument, mapPath: YamlPath, name: string): string {
   const map = doc.get(mapPath)?.value;
   const keys = typeof map === 'object' && map !== null && !Array.isArray(map) ? Object.keys(map) : [];
   return keys.find((key) => sameId(key, name)) ?? name;

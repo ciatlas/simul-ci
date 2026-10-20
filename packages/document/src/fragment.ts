@@ -137,6 +137,46 @@ export function renderItem(
   return [rendered.head === '' ? dash : `${dash} ${rendered.head}`, ...rendered.rest];
 }
 
+/**
+ * A map on one line in flow (`{ event: push, branch: main }`), padded inside its braces or not; its lists of scalars
+ * padded as the file pads them. Undefined when a value cannot go there: a string holding `${{` (G5) or a line break, a
+ * map inside a list, or a scalar that does not read back.
+ */
+export function flowMap(value: { [key: string]: Json }, style: Style, padded: boolean): string | undefined {
+  const pairs: string[] = [];
+  for (const [key, child] of Object.entries(value)) {
+    const name = inlineScalar(key, 'flowKey', style);
+    const text = flowValue(child, style, padded);
+    if (name === undefined || text === undefined) return undefined;
+    pairs.push(`${name}: ${text}`);
+  }
+  const pad = padded && pairs.length > 0 ? ' ' : '';
+  return `{${pad}${pairs.join(', ')}${pad}}`;
+}
+
+function flowValue(value: Json, style: Style, padded: boolean): string | undefined {
+  if (Array.isArray(value)) return flowItems(value, style);
+  if (value !== null && typeof value === 'object') return flowMap(value, style, padded);
+  return flowScalar(value, style);
+}
+
+/** A list of scalars in brackets, padded as the file pads them; none for a list holding a collection. */
+function flowItems(value: Json[], style: Style): string | undefined {
+  const items: string[] = [];
+  for (const item of value) {
+    const text = item !== null && typeof item === 'object' ? undefined : flowScalar(item, style);
+    if (text === undefined) return undefined;
+    items.push(text);
+  }
+  const pad = style.flowPadding && items.length > 0 ? ' ' : '';
+  return `[${pad}${items.join(', ')}${pad}]`;
+}
+
+const flowScalar = (value: Scalar, style: Style): string | undefined =>
+  typeof value === 'string' && (value.includes('${{') || value.includes('\n'))
+    ? undefined
+    : inlineScalar(value, 'flow', style);
+
 /** A map key: plain when it reads back as itself, else quoted. */
 function keyText(key: string, style: Style): string | undefined {
   return inlineScalar(key, 'key', style);
