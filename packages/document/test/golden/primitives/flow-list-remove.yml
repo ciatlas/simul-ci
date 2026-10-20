@@ -1,0 +1,17 @@
+on:
+  pull_request:
+    types: [ synchronize ]
+    paths: [ 'src/**' ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    needs: [ lint ]
+    if: ${{ always() }}
+    steps:
+    - run: make
+    - run: make test
+  lint:
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    steps:
+    - run: make lint

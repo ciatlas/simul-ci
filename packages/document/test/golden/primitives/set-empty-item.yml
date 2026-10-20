@@ -1,0 +1,37 @@
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+jobs:
+  flow-steps:
+    runs-on: [self-hosted, linux]
+    steps:
+      - {uses: actions/checkout@v4}
+      - { run: echo, shell: bash }
+  expanded:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Expanded
+        run: echo expanded
+      - name: Compact
+        run: echo compact
+  blocks:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    steps:
+      - run: |+
+          keep
+
+      - run: |
+          	a tab inside the block
+          last
+      - name: after
+        run: echo
+  empty:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo filled
+      - run: echo

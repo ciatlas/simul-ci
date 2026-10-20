@@ -58,7 +58,7 @@ export function locate(tree: Tree, path: YamlPath, resolve?: Resolve): Located |
   for (const [at, segment] of path.entries()) {
     if (isAlias(node)) {
       out.alias ??= { node, at };
-      if (!resolve) return out;
+      if (!resolve) return { ...out, node };
       node = resolve(node) ?? null;
     }
     const hop = step(node, segment);

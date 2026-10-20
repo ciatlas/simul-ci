@@ -6,7 +6,21 @@ export { WorkflowDocument, PARSE_OPTIONS, unitPathAt, yamlPathOf } from './docum
 export type { OpenOptions, Status, YamlProblem } from './document';
 export type { AnchorDef, AnchorIndex, AliasUse, MergeKey } from './anchors';
 export type { TextEdit } from './edits';
+export type { InsertOptions } from './insert';
 export type { JobInfo, NodeInfo, StepInfo } from './paths';
-export type { Fix, Refusal, RefusalReason } from './refusal';
+export {
+  convertEol,
+  dealias,
+  dealiasAnchor,
+  insert,
+  move,
+  remove,
+  renameKey,
+  replaceAt,
+  set,
+} from './primitives';
+export type { Fix, FixOp, Refusal, RefusalReason } from './refusal';
+export type { OrderOf, ScalarKind, SetOptions } from './set';
 export type { ListFamily, Style } from './style';
 export type { Eol, FileKind, Json, Span, YamlPath } from './types';
+export type { EditPlan, Rename, Warning } from './verify';

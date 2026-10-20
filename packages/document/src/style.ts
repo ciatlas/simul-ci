@@ -1,6 +1,6 @@
 import { isMap, isScalar, isSeq, type CST, type ParsedNode, type YAMLSeq } from 'yaml';
 import { walkTokens } from './cst';
-import { itemSpan } from './spans';
+import { endsInKeep, itemSpan } from './spans';
 import { entriesOf, isFlow, locate, walkNodes, type Collection, type Tree } from './tree';
 import type { Eol, YamlPath } from './types';
 
@@ -217,14 +217,17 @@ function blankSteps(tree: Tree): boolean {
  */
 export function blankSeparated(tree: Tree, collection: Collection): boolean | undefined {
   if (isFlow(collection) || collection.items.length < 2) return undefined;
-  const gaps = separators(tree, collection);
+  const gaps = separators(tree, collection).filter((gap) => gap !== undefined);
+  if (gaps.length === 0) return undefined;
   return gaps.filter(Boolean).length * 2 >= gaps.length;
 }
 
 /** For each item after the first, whether a blank line comes right before it (and its leading comments). */
-function separators(tree: Tree, collection: Collection): boolean[] {
+/** Whether a blank line comes before each item but the first; undefined after a kept block scalar, whose own it is. */
+function separators(tree: Tree, collection: Collection): (boolean | undefined)[] {
   const { lines } = tree;
   return collection.items.slice(1).map((_, i) => {
+    if (endsInKeep(collection.items[i]!)) return undefined;
     const line = lines.lineAt(itemSpan(tree, collection, i + 1).from);
     return line > 0 && lines.kind(line - 1).kind === 'blank';
   });

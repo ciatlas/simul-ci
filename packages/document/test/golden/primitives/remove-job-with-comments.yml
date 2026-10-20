@@ -1,0 +1,17 @@
+# A header comment: the file's, not the first key's.
+name: comments # inline after a scalar
+
+on: # inline after a key
+  push:
+    branches: [main] # protected
+  pull_request:
+
+jobs:
+    # After a blank line: nobody's.
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo test
+  # Dangling at the end of jobs, at the jobs' column: nobody's.
+# Dangling at column 0.
