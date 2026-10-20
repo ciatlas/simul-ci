@@ -217,6 +217,19 @@ describe('the getting-started example', () => {
     expect(code).toBe(0);
     expect(out).toBe(all[all.indexOf(test) + 2]!.text);
   });
+
+  it('fails the way the page shows when the first case also expects deploy', () => {
+    const test = all.find((b) => b.text.startsWith('workflow: ci.yml'))!;
+    expect(mdx).toContain('Had the first case said `run: [test, deploy]`');
+    writeFileSync(
+      join(dir, '.github/simulci/tests/ci.test.yml'),
+      test.text.replace('run: [test]', 'run: [test, deploy]'),
+    );
+    let out = '';
+    const code = runTestCommand({ dir }, { stdout: (t) => (out += t), stderr: (t) => (out += t), env: {} });
+    expect(code).toBe(1);
+    expect(out).toContain(all.at(-1)!.text);
+  });
 });
 
 /** `--event push --branch main` as `simulci plan` parses it (the examples use flags with one value each). */

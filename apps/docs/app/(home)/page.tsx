@@ -21,7 +21,7 @@ const PARTS = [
 
 export default function HomePage() {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-12 px-4 py-16">
+    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-12 px-4 py-16">
       <section className="flex flex-col gap-5">
         <h1 className="text-4xl font-semibold tracking-tight [font-stretch:110%] sm:text-5xl">
           What your workflow does, before it runs.
@@ -56,6 +56,6 @@ export default function HomePage() {
           </li>
         ))}
       </ul>
-    </main>
+    </div>
   );
 }

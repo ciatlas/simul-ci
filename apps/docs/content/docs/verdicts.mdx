@@ -13,7 +13,8 @@ Every workflow, job, matrix leg and step in a plan has a verdict:
 
 ## Reasons
 
-A verdict carries its chain of reasons, in the order GitHub decides, up to the first one that says no.
+A verdict carries its chain of reasons, in the order GitHub decides; the first one that says no decides it. A
+workflow's chain lists every trigger gate; a job's or a step's ends at the first no.
 
 - A workflow is decided by its trigger: the `event`, its activity `types`, the `schedule`, each filter (`branches`,
   `branches-ignore`, `tags`, `tags-ignore`, `paths`, `paths-ignore`, `workflows`) and a `skip-ci` marker in the
@@ -52,8 +53,9 @@ Unknowns:
   .github/workflows/ci.yml#deploy/steps.build.outputs.changed · affects 1 · pin: assume {"step":"deploy.build","outputs":{"changed":""}}
 ```
 
-Fill in the value and pass it with `--assume`, put it in a test case's `when.assume`, or pin it from the Unknowns
-panel of the [web app](/docs/web-app). An unknown without a pin is one only the run can know.
+Fill in the value: a `scenario` pin goes in a case's `when:` (or the matching `simulci plan` flag), an `assume` pin
+in `--assume` or `when.assume`; the Unknowns panel of the [web app](/docs/web-app) pins both. An unknown without a
+pin is one only the run can know.
 
 ## What it does not know
 

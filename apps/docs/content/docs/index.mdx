@@ -59,6 +59,8 @@ pull_request:1/merge · 1 of 1 workflows triggered
   ○ deploy — if: github.ref == 'refs/heads/main' → false
 ```
 
+`~npm-test` is a `run:` step with neither a `name` nor an `id`; a test names it by its position, `test.#2`.
+
 A push to `main` that changes only docs starts nothing:
 
 ```sh
@@ -95,8 +97,8 @@ Pin it with `--assume deploy.build.outputs.changed=true` and the step runs.
 
 ## Write a first test
 
-Route tests live in `.github/simulci/tests/*.test.yml`. `simulci plan --as-test` prints a plan as a case to start
-from; keep the assertions that matter:
+Route tests live in `.github/simulci/tests/*.test.yml`. `simulci plan --as-test jobs` prints a plan as a case to
+start from; keep the assertions that matter:
 
 ```yaml title=".github/simulci/tests/ci.test.yml"
 workflow: ci.yml
@@ -124,7 +126,7 @@ npx simulci test
 2 passed · 0 failed · 0 invalid · 0 skipped · exit 0
 ```
 
-When the workflow changes and a case no longer holds, the failure says what was expected and which line decided:
+Had the first case said `run: [test, deploy]`, the failure would say what was expected and which line decided:
 
 ```text
   ✗ a pull request tests but never deploys

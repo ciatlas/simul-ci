@@ -7,7 +7,7 @@ const docs = defineDocs({
   docs: {
     schema: pageSchema,
     // The Markdown each page renders from, for llms-full.txt and the copy button.
-    postprocess: { includeProcessedMarkdown: true },
+    postprocess: { includeProcessedMarkdown: { headingIds: false } },
   },
   meta: { schema: metaSchema },
 });

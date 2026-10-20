@@ -25,17 +25,17 @@ JSON schema: [`schemas/scenario/v1.json`](https://ciatlas.github.io/simulci/sche
 | `defaultBranch` | default `main`                                                                              |
 | `repository`    | `owner/name`                                                                                |
 | `message`       | the head commit message, where skip markers are read                                        |
-| `actor`         | `{ login, fork, bot }`: `fork` for a pull request from a fork, `bot` for an app or bot      |
+| `actor`         | `{ login, fork, bot }`: `fork` for a pull request from a fork; `bot` (an app or bot) has no effect yet |
 | `changed`       | the changed files: paths, or `{ path, status, from }` with `status` one of `added`, `modified`, `removed`, `renamed` |
 | `inputs`        | `workflow_dispatch` inputs: strings, booleans, numbers                                      |
 | `vars`          | the variables that exist; any other reads as `''`                                           |
 | `secrets`       | the names of the secrets that exist; `GITHUB_TOKEN` always does                             |
-| `environments`  | the deployment environments that exist                                                      |
+| `environments`  | the deployment environments that exist; no effect on the plan yet                          |
 | `cron`          | for `schedule`: the cron that fired                                                         |
 | `workflow_run`  | for `workflow_run`: `{ name, branch, conclusion }` of the run that triggers this one        |
-| `platform`      | `dotcom` (default) or `ghes`                                                                |
+| `platform`      | `dotcom` (default) or `ghes`; no effect on the plan yet                                    |
 
-Give one of `ref`, `branch` and `tag`. A bare name in `ref` is a branch: write a tag as `tag: v1`, `refs/tags/v1`
+Give at most one of `ref`, `branch` and `tag`. A bare name in `ref` is a branch: write a tag as `tag: v1`, `refs/tags/v1`
 or `tags/v1`. A bare path in `changed` is `modified`.
 Leave `changed` out and it is unknown: a `paths` filter then says `maybe`.
 

@@ -38,19 +38,22 @@ An entry names a step, a job, or a `uses` pattern, and states an `outcome`, `out
 `actions/cache/restore`; `actions/cache@v4` matches that ref only.
 
 A mocked output must be one the step can set when simulci knows the step's outputs: a local action's `action.yml`,
-a shipped model, or a `run:` script whose `$GITHUB_OUTPUT` writes it can read. For other steps any name goes.
+the `actions/cache` model, `dorny/paths-filter` with inline `filters`, or a `run:` script whose `$GITHUB_OUTPUT`
+writes it can read. For other steps any name goes. A job's mocked outputs must be among its `outputs:` (a call job's:
+the called workflow's).
 
 ## Layers
 
 For each field the closest layer wins: `--assume` (or the Action's `assume`) over the case's `when.assume` over the
 file's `given.assume`, all over the shipped models. Within a layer, the entry that names more of the unit wins: a
-step over a job over a `uses` pattern, then more matrix keys, a deeper path, an explicit workflow. Two entries of
-the same rank that set a field to different values conflict. Entries resolve field by field, so a partial entry
-composes with others.
+step over a job over a `uses` pattern with a `job` over a bare `uses` pattern; then a deeper path, more matrix keys,
+a pinned `@ref`, an explicit workflow. Two entries of the same rank that set a field to different values conflict.
+Entries resolve field by field, so a partial entry composes with others.
 
 ## Shipped models
 
-simulci knows what some actions produce, from the scenario and the step's `with:`. `simulci models` lists them:
+simulci knows what some actions produce, from the scenario and the step's `with:`. `simulci models` lists them
+(`--format json` for JSON):
 
 ```text
 actions/cache             v1  as: hit, partial, miss
@@ -74,7 +77,7 @@ A mock that cannot apply makes the case invalid (and is reported by `simulci pla
 | Code    | Means                                                                       |
 | ------- | --------------------------------------------------------------------------- |
 | `SC100` | the entry's unit path does not parse                                        |
-| `SC101` | it sets an output the step does not declare                                 |
+| `SC101` | it sets an output the step or job does not declare                          |
 | `SC102` | it matches nothing in the plan                                              |
 | `SC103` | two entries of the same rank set a field to different values                |
 | `SC105` | `as:` names no preset of the step's model                                   |

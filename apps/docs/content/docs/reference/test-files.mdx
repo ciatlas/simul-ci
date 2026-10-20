@@ -3,7 +3,7 @@ title: Test files
 description: The route-test format, field by field, and its error codes.
 ---
 
-A test file is YAML under `.github/simulci/tests/`, named `*.test.yml`. It is about one workflow; each case is a
+A test file is YAML under `.github/simulci/tests/`, named `*.test.yml` (or `*.test.yaml`). It is about one workflow; each case is a
 scenario and what it must produce. Every key is checked, so a typo is an error, never a test that passes.
 
 ```yaml
@@ -59,7 +59,7 @@ A case asserts something: `then`, or a `snapshot`.
 | `maybe`      | units that might run                                                                 |
 | `conclusion` | the run's conclusion: `success`, `failure`, `cancelled`, a list of them, or `{ unknown: true }` |
 | `checks`     | the workflow's check runs, exactly: a list of names, or a map of name to result       |
-| `unknowns`   | the unknowns left in the plan, exactly, as unit paths                                |
+| `unknowns`   | the unknowns left in the plan, exactly: a unit path and what is unknown of it (`deploy.build.outputs.changed`), or a scenario field (`scenario.changed`) |
 | `units`      | assertions per unit                                                                  |
 
 `run`, `skip` and `maybe` list units, each a unit path or a one-key map of unit path to the reason that decided
@@ -69,7 +69,8 @@ it (`- deploy: if`). A unit not listed is not asserted.
 
 The reasons a `because:` may name: `event`, `types`, `schedule`, `default-branch`, `skip-ci`, `parent`, `if`,
 `matrix`, `limit`, a filter (`branches`, `branches-ignore`, `tags`, `tags-ignore`, `paths`, `paths-ignore`,
-`workflows`), or `filter` for any filter. See [How verdicts work](/docs/verdicts#reasons).
+`workflows`), or `filter` for any filter. `default-branch` is reserved: no plan reports it yet. See
+[How verdicts work](/docs/verdicts#reasons).
 
 ### units
 
@@ -84,12 +85,12 @@ The reasons a `because:` may name: `event`, `types`, `schedule`, `default-branch
 | `result`      | a job or leg      | what `needs.<id>.result` reads                                   |
 | `with`        | a step, or a job that calls a reusable workflow | the values it is given |
 | `inputs`      | a call job, or a step using a composite action | the inputs it receives  |
-| `env`         | any unit          | the environment there                                            |
+| `env`         | any unit          | the `env:` values in scope there, not `$GITHUB_ENV` writes       |
 | `outputs`     | any unit          | its outputs                                                      |
 | `environment` | a job or leg      | its deployment environment                                       |
 | `check`       | a job or leg      | its check name (a job: its names, exactly)                       |
 
-Results are `success`, `failure`, `cancelled` or `skipped`, or a list of them. Values (in `with`, `inputs`, `env`,
+Results are `success`, `failure`, `cancelled` or `skipped`, a list of them, or `{ unknown: true }`. Values (in `with`, `inputs`, `env`,
 `outputs`, `environment`) compare in GitHub's string form: a scalar, a list of accepted values, `{ match: <regex> }`,
 or `{ unknown: true }` for a value the plan must still not know. An unknown value whose candidates are all in a list
 passes it.
@@ -130,7 +131,7 @@ A file or case that cannot be checked is invalid, and `simulci test` exits `2`.
 | `T102`  | a case, or a unit assertion, asserts nothing                                                  |
 | `T103`  | two cases share a name                                                                        |
 | `T104`  | `only` is left in a file under `--ci`                                                         |
-| `T201`  | `workflow:` names a workflow the checkout does not have                                       |
+| `T201`  | `workflow:`, or a unit path's `<file>:` qualifier, names a workflow the checkout does not have |
 | `T202`  | the case's scenario (`when` over `given`) is not valid                                        |
 | `T203`  | the engine failed on the case                                                                 |
 | `T204`  | a unit path names nothing in the plan                                                         |

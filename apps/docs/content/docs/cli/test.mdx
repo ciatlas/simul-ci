@@ -7,7 +7,7 @@ description: Run the route tests under .github/simulci/tests.
 npx simulci test [files...] [flags]
 ```
 
-Runs every `*.test.yml` under `.github/simulci/tests` (or the files named) against the checkout's workflows. The
+Runs every `*.test.yml` or `*.test.yaml` under `.github/simulci/tests` (or the files named) against the checkout's workflows. The
 [test file format](/docs/reference/test-files) says what a case asserts.
 
 | Flag                    | Does                                                                                   |
@@ -15,12 +15,12 @@ Runs every `*.test.yml` under `.github/simulci/tests` (or the files named) again
 | `--dir`                 | the checkout; default `.`                                                              |
 | `-t`, `--filter`        | runs only the cases whose name contains the text                                       |
 | `-u`, `--update`        | writes every snapshot and removes the stale ones                                       |
-| `--ci`                  | never writes a snapshot, fails on a missing one, rejects `only`; default when `CI=true` |
+| `--ci`                  | writes no snapshot unless `-u`, fails on a missing one, rejects `only`; default when `CI=true` |
 | `--strict`              | ignores `allowMaybe`; a stale snapshot fails                                           |
 | `--snapshot-detail`     | `steps` (default) or `legs`: the detail snapshots record                               |
 | `--junit <file>`        | writes a JUnit report                                                                  |
 | `--annotations`         | prints GitHub annotations; default when `GITHUB_ACTIONS=true`                          |
-| `--assume`              | a mock for every case (repeatable)                                                     |
+| `--assume`              | a mock for every case (one; several go in `--assume-file`)                             |
 | `--assume-file <file>`  | a YAML list of mocks for every case                                                    |
 
 `--assume` and `--assume-file` take [assume entries](/docs/reference/mocks); they win over the file's and the case's.
@@ -42,9 +42,8 @@ run it).
 
 ## Snapshots
 
-A case with `snapshot: true` records its workflow's whole plan in
-`.github/simulci/tests/__snapshots__/<file>.snap.json` (`ci.test.yml` → `ci.test.snap.json`), beside its other
-assertions or instead of them.
+A case with `snapshot: true` records its workflow's whole plan in `__snapshots__/<file>.snap.json` beside the test
+file (`ci.test.yml` → `__snapshots__/ci.test.snap.json`), with its other assertions or instead of them.
 
 - Locally, a missing snapshot is written; a changed plan fails with a line diff. `-u` accepts the change.
 - With `--ci`, a missing snapshot fails: run `simulci test -u` and commit it.

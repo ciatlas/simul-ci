@@ -31,8 +31,9 @@ for reading it.
 | `--message` | the head commit message                      | `--message 'docs: x [skip ci]'` |
 | `--dir`     | the checkout to read; default `.`            | `--dir ../app`                  |
 
-Give one of `--ref`, `--branch` and `--tag`. `--changed`, `--input`, `--var` and `--secret` take a comma-separated
-list or repeat; an input of `true`, `false` or a number is typed as one. Changed files left out are unknown, so a
+Give at most one of `--ref`, `--branch` and `--tag`. `--changed`, `--input`, `--var` and `--secret` take a
+comma-separated list (a repeated flag keeps only its last value); an input of `true`, `false` or a number is typed
+as one. Changed files left out are unknown, so a
 `paths` filter cannot decide. The rest of a [scenario](/docs/reference/scenarios) (a pull request's number, the
 default branch, `workflow_run`, …) is written in a test's `when:`.
 
@@ -45,7 +46,7 @@ default branch, `workflow_run`, …) is written in a test's `when:`.
 
 ## Mocks
 
-`--assume` (repeatable) states what only the run knows; `--assume-file` reads a YAML list of entries:
+`--assume` states one entry of what only the run knows; `--assume-file` reads a YAML list of entries, for more:
 
 ```sh
 --assume build=failure                       # a job's outcome
@@ -66,9 +67,10 @@ might run, and the conclusion. `--as-test steps` adds a `units` entry per step. 
 workflow; the default is the first one triggered.
 
 ```sh
-npx simulci plan --event push --branch main --as-test steps > .github/simulci/tests/ci.test.yml
+npx simulci plan --event push --branch main --as-test steps > .github/simulci/tests/push.test.yml
 ```
 
 ## Exit codes
 
-`0` with the plan; `2` when the checkout has no workflows, or an `--assume` entry or file is not valid.
+`0` with the plan, also when a mock cannot apply (its error is printed after the plan); `2` when the checkout has
+no workflows, or an `--assume` entry or file is not in an entry's form.
