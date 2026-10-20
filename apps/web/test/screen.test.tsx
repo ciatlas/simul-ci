@@ -4,7 +4,7 @@ import type { AssumeEntry, ScenarioInput } from '@simulci/engine';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
 import { installShortcuts } from '../src/app/shortcuts';
@@ -27,6 +27,15 @@ vi.mock('../src/yaml/YamlPane', async (importOriginal) => {
       return createElement(built.YamlPane);
     },
   };
+});
+
+/**
+ * The YAML pane's module (CodeMirror under the mock above), imported before any test opens the pane, as the page's
+ * lazy import would fetch it. A test's wait then covers what it checks, the editor or its error boundary, and not the
+ * module's cold import, which a CI runner busy with other test files has made take over a second.
+ */
+beforeAll(async () => {
+  await import('../src/yaml/YamlPane');
 });
 
 /** The screen over the starter sample: a push to main that changes src/, simulated by the worker's own `handle`. */
