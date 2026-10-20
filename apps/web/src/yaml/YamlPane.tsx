@@ -145,15 +145,15 @@ function useEditor(host: RefObject<HTMLDivElement | null>, { files, path, node, 
   useLayoutEffect(() => {
     if (!view || path === undefined || text === undefined) return;
     const scroll = docs.show(view, path, { epoch, rev }, text, editsFor(files, path));
-    view.dispatch({
-      effects: [
-        // A state made earlier may hold the other theme, or be read-only where the file is writable now.
-        ...themed(view),
-        ...configured(view, editing(path)),
-        ...lineEffects(lines),
-        ...scroll,
-      ],
-    });
+    const effects = [
+      // A state made earlier may hold the other theme, or be read-only where the file is writable now.
+      ...themed(view),
+      ...configured(view, editing(path)),
+      ...lineEffects(lines),
+      ...scroll,
+    ];
+    // A key typed changes the text and nothing else here: no second transaction for it.
+    if (effects.length > 0) view.dispatch({ effects });
   }, [view, docs, editing, path, epoch, rev, text, lines, files, writableNow]);
   useSelectionScroll(view, node, lines.plan, nearest, epoch);
   useReveal(view, path, reveal);

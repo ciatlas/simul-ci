@@ -152,12 +152,16 @@ test('a generated file refuses edits until the author unlocks it', async ({ page
   await expect(editor(page)).toHaveAttribute('contenteditable', 'false');
   await footer(page).getByRole('button', { name: 'Edit anyway' }).click();
   await expect(editor(page)).toHaveAttribute('contenteditable', 'true');
+  // The button goes; the focus goes to the text it unlocked, not to the page.
+  await expect(editor(page)).toBeFocused();
   await endOfLine(page, 2);
   await page.keyboard.type(' # edited');
   await expect(footer(page)).toContainText('● unsaved');
 });
 
-test('an edit of the sample survives a reload, as the edited copy it became', async ({ page }) => {
+test('an edit of the sample survives a reload, as the edited copy it became, still unsaved', async ({
+  page,
+}) => {
   await openStarter(page);
   await editMode(page);
   await skipDeploy(page);
@@ -172,9 +176,15 @@ test('an edit of the sample survives a reload, as the edited copy it became', as
   await expect(page.getByRole('navigation', { name: 'Source' })).toContainText(
     'edited copy of the starter sample',
   );
+  // Still unsaved: the buffers keep the text the edit was made to, so opening another sample asks.
+  await expect(page).toHaveTitle('• simulci');
+  await page.getByRole('navigation', { name: 'Source' }).getByRole('combobox').selectOption('monorepo');
+  await expect(page.getByRole('dialog', { name: 'Unsaved edits' })).toContainText(
+    'ci.yml has unsaved edits.',
+  );
 });
 
-test('opening a sample while a file has unsaved edits asks first: Cancel keeps them, Discard opens the sample', async ({
+test('opening a sample or pasting over a file with unsaved edits asks first: Cancel keeps them, Discard goes on', async ({
   page,
 }) => {
   await openStarter(page);
@@ -188,6 +198,21 @@ test('opening a sample while a file has unsaved edits asks first: Cancel keeps t
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/);
+
+  // Pasting over the edited file asks too; Cancel keeps the edits, and the paste dialog with what was pasted.
+  await page.getByRole('navigation', { name: 'Source' }).getByRole('button', { name: 'Paste YAML' }).click();
+  const paste = page.getByRole('dialog', { name: 'Paste a workflow or an action' });
+  await paste.getByLabel('Path in the repository').fill(CI);
+  await paste.getByLabel('YAML').fill('on: push\n');
+  await paste.getByRole('button', { name: 'Add' }).click();
+  await expect(dialog).toContainText(`ci.yml has unsaved edits. Pasting ${CI} drops them.`);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(paste.getByLabel('YAML')).toHaveValue('on: push\n');
+  await paste.getByRole('button', { name: 'Cancel' }).click();
+  await expect(paste).toHaveCount(0);
+  await expect(jobNode(page, 'deploy')).toHaveAttribute('aria-label', /^skipped deploy/);
+
   await sample.selectOption('monorepo');
   await dialog.getByRole('button', { name: 'Discard edits' }).click();
   await expect(page.getByRole('navigation', { name: 'Source' })).toContainText('sample: monorepo');

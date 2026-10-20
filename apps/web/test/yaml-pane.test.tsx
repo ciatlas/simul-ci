@@ -750,6 +750,23 @@ describe('the YAML pane in edit mode', () => {
     expect(document.querySelector('footer')?.textContent).toContain('● unsaved ·');
   });
 
+  it('costs the view one transaction per key, its configuration untouched', () => {
+    const { view } = editing();
+    const v = view();
+    const configOf = (e: EditorView): unknown => (e.state as unknown as { config: object }).config;
+    const before = configOf(v);
+    let dispatched = 0;
+    const original = v.dispatch.bind(v);
+    v.dispatch = ((...args: Parameters<EditorView['dispatch']>) => {
+      dispatched++;
+      return original(...args);
+    }) as EditorView['dispatch'];
+    typeAt(v, 0, '#');
+    typeAt(v, 1, '!');
+    expect(dispatched).toBe(2);
+    expect(configOf(v)).toBe(before);
+  });
+
   it('brings an undo back as a change of the document, the cursor mapped through it', () => {
     const { store, view } = editing();
     const v = view();

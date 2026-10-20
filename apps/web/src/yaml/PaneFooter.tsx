@@ -88,7 +88,8 @@ function FileState({ path, state: f }: { path: string; state: FooterState }) {
       <span className="flex shrink-0 items-center gap-1">
         {f.dirty && (
           <span className="text-text">
-            <span aria-hidden="true">● </span>unsaved ·
+            {/* The space reads "unsaved · CRLF" as text too; the gap draws it. */}
+            <span aria-hidden="true">● </span>unsaved ·{' '}
           </span>
         )}
         <Why path={path} state={f} />
