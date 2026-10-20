@@ -357,6 +357,15 @@ describe('the ways in', () => {
     expect(toStored({ kind: 'sample', name: 'starter' }, files)).toEqual({ kind: 'sample', name: 'starter' });
     const buffers = [{ path: 'action.yml', text: 'x' }];
     expect(toStored({ kind: 'paste', buffers }, files)).toEqual({ kind: 'paste', buffers });
+    // Pasted buffers keep the texts their edits were made to, where those are not the text.
+    const edited = [...buffers, { path: 'new.yml', text: 'n' }];
+    expect(
+      toStored({ kind: 'paste', buffers: edited }, { ...files, 'new.yml': 'n' }, undefined, {
+        'action.yml': 'x',
+        'gone.yml': 'g',
+      }),
+    ).toEqual({ kind: 'paste', buffers: edited, base: { 'new.yml': null, 'gone.yml': 'g' } });
+    expect(toStored({ kind: 'paste', buffers }, files, undefined, files)).toEqual({ kind: 'paste', buffers });
     expect(toStored({ kind: 'folder', name: 'repo', readAt: 1 }, files)).toEqual({
       kind: 'copy',
       name: 'repo',
@@ -411,7 +420,7 @@ describe('the sources of a session', () => {
     await Promise.resolve();
     expect(await kv.get('current')).toEqual({ kind: 'sample', name: 'starter' });
 
-    expect(sources.paste('', 'on: push\njobs: {}')).toEqual({ ok: true, path: DEFAULT_PASTE_PATH });
+    expect(sources.paste('', 'on: push\njobs: {}')).toMatchObject({ ok: true, path: DEFAULT_PASTE_PATH });
     expect(store.getState().source).toEqual({
       kind: 'paste',
       buffers: [{ path: DEFAULT_PASTE_PATH, text: 'on: push\njobs: {}' }],

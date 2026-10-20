@@ -9,12 +9,14 @@ import { dirtyPaths, type RestoreConflict, type SessionState, type Source } from
  * The crash snapshot (synthesis § 5.6): a folder's unsaved edits survive a closed tab, a crash or a reload. Its files
  * stay on disk, so the source store keeps only its handle (or, for a copy, the buffers as read); the edits are kept
  * apart, under `edits` in the same IndexedDB store: per dirty file the fingerprint of the text it was edited from and
- * the text now. Pasted and edited-sample buffers need none: they carry their edits themselves (`state/buffers.ts`).
+ * the text now. One snapshot per folder, the eight folders edited last: a folder waiting for Reopen, or one the
+ * author left for another, keeps its edits while another is edited. Pasted and edited-sample buffers need none:
+ * they carry their edits themselves (`state/buffers.ts`).
  *
  * When a folder's files come in, from the last visit, after Reopen, or picked again, the snapshot that belongs to it
  * comes back: every file whose text is still the one it was edited from, as one undoable `restore` entry; every
- * other as a conflict the author settles, Restore mine or Keep disk. Until then the writer waits, so typing cannot
- * replace edits not yet restored.
+ * other as a conflict the author settles, Restore mine or Keep disk. Until a conflict is settled its kept text stays
+ * in the snapshot beside whatever the author types meanwhile (`withConflicts`).
  */
 
 export interface EditsSnapshot {
@@ -29,36 +31,70 @@ export interface EditsSnapshot {
 
 const EDITS_KEY = 'edits';
 
+/** How many folders' edits are kept: the ones edited last. */
+export const MAX_SNAPSHOTS = 8;
+
 export interface SnapshotStore {
-  load(): Promise<EditsSnapshot | undefined>;
-  save(snapshot: EditsSnapshot): Promise<void>;
-  clear(): Promise<void>;
+  /** The snapshot taken of this source, if one is kept. */
+  find(source: Source): Promise<EditsSnapshot | undefined>;
+  /** Keeps this snapshot as its source's, the newest first; past `MAX_SNAPSHOTS` the oldest goes. */
+  save(snapshot: EditsSnapshot, source: Source): Promise<void>;
+  /** Lets this source's snapshot go. */
+  drop(source: Source): Promise<void>;
 }
 
+/**
+ * The snapshots under one key, read and written one operation at a time, so two saves never interleave their read
+ * and their write.
+ */
 export function snapshotStore(kv: KeyValueStore = openKeyValue(DB_NAME, STORE_NAME)): SnapshotStore {
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = <T>(op: () => Promise<T>): Promise<T> => {
+    const next = queue.then(op, op);
+    queue = next.catch(() => undefined);
+    return next;
+  };
+  const read = async (): Promise<EditsSnapshot[]> => {
+    try {
+      const stored = await kv.get<unknown>(EDITS_KEY);
+      return Array.isArray(stored) ? stored.filter(isSnapshot) : [];
+    } catch {
+      return [];
+    }
+  };
+  const write = async (list: EditsSnapshot[]): Promise<void> => {
+    try {
+      if (list.length > 0) await kv.set(EDITS_KEY, list);
+      else await kv.delete(EDITS_KEY);
+    } catch {
+      // A refused write (private window, quota): the edits are still on the page.
+    }
+  };
+  const indexOf = async (list: EditsSnapshot[], source: Source): Promise<number> => {
+    for (const [i, snapshot] of list.entries()) if (await belongs(snapshot, source)) return i;
+    return -1;
+  };
   return {
-    load: async () => {
-      try {
-        const stored = await kv.get<unknown>(EDITS_KEY);
-        return isSnapshot(stored) ? stored : undefined;
-      } catch {
-        return undefined;
-      }
-    },
-    save: async (snapshot) => {
-      try {
-        await kv.set(EDITS_KEY, snapshot);
-      } catch {
-        // A refused write (private window, quota): the edits are still on the page.
-      }
-    },
-    clear: async () => {
-      try {
-        await kv.delete(EDITS_KEY);
-      } catch {
-        // Nothing to clear then.
-      }
-    },
+    find: (source) =>
+      serial(async () => {
+        const list = await read();
+        return list[await indexOf(list, source)];
+      }),
+    save: (snapshot, source) =>
+      serial(async () => {
+        const list = await read();
+        const i = await indexOf(list, source);
+        if (i >= 0) list.splice(i, 1);
+        await write([snapshot, ...list].slice(0, MAX_SNAPSHOTS));
+      }),
+    drop: (source) =>
+      serial(async () => {
+        const list = await read();
+        const i = await indexOf(list, source);
+        if (i < 0) return;
+        list.splice(i, 1);
+        await write(list);
+      }),
   };
 }
 
@@ -118,7 +154,7 @@ export function snapshotOf(s: Pick<SessionState, 'source' | 'files'>, at: number
 }
 
 /** Whether a snapshot was taken of this source: the same directory for a folder, the same name for a copy. */
-export async function belongs(snapshot: EditsSnapshot, source: Source): Promise<boolean> {
+async function belongs(snapshot: EditsSnapshot, source: Source): Promise<boolean> {
   if (source.kind !== 'folder' || snapshot.source.name !== source.name) return false;
   if (snapshot.source.kind === 'copy') return source.handle === undefined;
   const stored = snapshot.source.handle;
@@ -171,3 +207,25 @@ function cleanly(files: SessionState['files'], path: string, kept: EditsSnapshot
 /** "14:02": when the snapshot was taken, as the notice says it. */
 export const clockOf = (at: number): string =>
   new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/**
+ * The snapshot to write while restore conflicts wait: the edits on the page, and for each file still to be settled
+ * the text the snapshot kept for it, so neither typing meanwhile nor the kept text is lost to a crash.
+ */
+export function withConflicts(
+  current: EditsSnapshot | undefined,
+  kept: EditsSnapshot,
+  conflicts: readonly RestoreConflict[],
+  at: number,
+): EditsSnapshot | undefined {
+  if (conflicts.length === 0) return current;
+  const out: EditsSnapshot = current
+    ? { ...current, files: { ...current.files }, created: { ...current.created } }
+    : { v: 1, source: kept.source, files: {}, created: {}, at };
+  for (const { path } of conflicts) {
+    const file = kept.files[path];
+    if (file) out.files[path] = file;
+    else if (Object.hasOwn(kept.created, path)) out.created[path] = kept.created[path]!;
+  }
+  return out;
+}

@@ -7,7 +7,7 @@ import type { SessionStore } from '../state/store';
  * is open at a time.
  */
 export interface ReplacePrompt {
-  ask(what: string): Promise<ReplaceChoice>;
+  ask(what: string, paths: readonly string[]): Promise<ReplaceChoice>;
   answer(choice: ReplaceChoice): void;
 }
 
@@ -15,9 +15,9 @@ export function createReplacePrompt(store: SessionStore): ReplacePrompt {
   let seq = 0;
   let open: ((choice: ReplaceChoice) => void) | undefined;
   return {
-    ask: (what) => {
+    ask: (what, paths) => {
       open?.('cancel');
-      store.getState().setReplacing({ seq: ++seq, what });
+      store.getState().setReplacing({ seq: ++seq, what, paths });
       return new Promise((resolve) => {
         open = resolve;
       });

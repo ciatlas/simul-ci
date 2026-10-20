@@ -223,6 +223,8 @@ export interface Replacing {
   seq: number;
   /** What would replace the files, as the prompt names it: "the sample starter", "the folder repo". */
   what: string;
+  /** The edited files it would drop; edited buffers a paste leaves standing are not among them. */
+  paths: readonly string[];
 }
 
 /** What an edit asked of the store came to: applied, or nothing changed (a refusal says why, if there was one). */
@@ -238,7 +240,13 @@ export interface Held {
 
 export interface SessionActions {
   /** New files from a source; a file `meta` does not cover is a string no file was read for (a paste, a sample). */
-  setFiles: (byPath: Record<string, string>, source: Source, meta?: Record<string, FileMeta>) => void;
+  /** `base` gives the texts some files' edits were made to (`null`: created since), as stored buffers keep them. */
+  setFiles: (
+    byPath: Record<string, string>,
+    source: Source,
+    meta?: Record<string, FileMeta>,
+    base?: BaseDiff,
+  ) => void;
   forgetSource: () => void;
   /** A source that has no files until the author acts: a stored folder waiting for Reopen. */
   awaitReopen: (source: Source) => void;
@@ -385,6 +393,9 @@ function restoreOf(s: SessionState, conflict: RestoreConflict): history.TxInput 
   return { label: `Restored unsaved edits to ${name}`, origin: 'restore', files: [file] };
 }
 
+/** Per path whose text is not its base: the base, or `null` when it has none (a file created since). */
+export type BaseDiff = Record<string, string | null>;
+
 /**
  * The files whose text is not what was read or last saved: edited, created since, or removed since. A selector, never
  * stored: undoing back to the base leaves nothing unsaved.
@@ -429,10 +440,10 @@ export function createSessionStore(initial: SessionState = initialSessionState()
     };
     return {
       ...initial,
-      setFiles: (byPath, source, meta) =>
+      setFiles: (byPath, source, meta, base) =>
         set((s) => ({
           source,
-          files: sourceFiles(s.files, byPath, metaOf(byPath, meta)),
+          files: sourceFiles(s.files, byPath, metaOf(byPath, meta), base),
           ...UNLOADED,
           edit: freshEdit(s.edit),
           error: s.error?.kind === 'source' ? undefined : s.error,
@@ -648,15 +659,23 @@ const contextOf = (s: SessionState): history.Context => ({
   },
 });
 
-/** The files of a new source: a new epoch, every file at the new version, its text as read and as opened. */
+/**
+ * The files of a new source: a new epoch, every file at the new version, its text as read and as opened, except
+ * where `diff` gives the text its edits were made to (pasted buffers carry their edits across epochs).
+ */
 function sourceFiles(
   files: SessionState['files'],
   byPath: Record<string, string>,
   meta: Record<string, FileMeta>,
+  diff?: BaseDiff,
 ): SessionState['files'] {
   const version = files.version + 1;
   const revs = Object.fromEntries(Object.keys(byPath).map((path) => [path, version]));
-  return { version, epoch: files.epoch + 1, byPath, meta, revs, base: byPath, opened: byPath };
+  const base = { ...byPath };
+  for (const [path, text] of Object.entries(diff ?? {}))
+    if (text === null) delete base[path];
+    else base[path] = text;
+  return { version, epoch: files.epoch + 1, byPath, meta, revs, base, opened: base };
 }
 
 /**

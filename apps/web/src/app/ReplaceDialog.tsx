@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { dirtyPaths } from '../state/store';
+import type { Replacing } from '../state/store';
 import { useModal } from './modal';
 import { useApp, useSession } from './providers';
 
@@ -13,13 +13,13 @@ const button = 'rounded border border-border px-3 py-1.5 text-sm hover:border-bo
 export function ReplacePrompt() {
   const replacing = useSession((s) => s.replacing);
   // A dialog per question, so each opens as a modal when it mounts.
-  return replacing ? <ReplaceDialog key={replacing.seq} what={replacing.what} /> : null;
+  return replacing ? <ReplaceDialog key={replacing.seq} replacing={replacing} /> : null;
 }
 
-function ReplaceDialog({ what }: { what: string }) {
+function ReplaceDialog({ replacing: { what, paths } }: { replacing: Replacing }) {
   const { prompt } = useApp();
-  const names = useSession((s) => dirtyPaths(s.files).map(baseName).join(', '));
-  const count = useSession((s) => dirtyPaths(s.files).length);
+  const names = paths.map(baseName).join(', ');
+  const count = paths.length;
   const cancel = useCallback(() => prompt.answer('cancel'), [prompt]);
   const dialog = useModal(cancel);
   return (
