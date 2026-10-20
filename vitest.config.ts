@@ -14,6 +14,7 @@ export default defineConfig({
         new URL('./packages/engine/src/render/index.ts', import.meta.url),
       ),
       '@simulci/document/edits': fileURLToPath(new URL('./packages/document/src/edits.ts', import.meta.url)),
+      '@simulci/document': src('document'),
       '@simulci/engine': src('engine'),
       '@simulci/node': src('node'),
     },

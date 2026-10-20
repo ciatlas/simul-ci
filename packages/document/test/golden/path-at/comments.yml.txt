@@ -1,0 +1,34 @@
+  1 ·
+  2 name
+  3 ·
+  4 on
+  5 on.push
+  6 on.push.branches
+  7 on.pull_request
+  8 ·
+  9 jobs
+ 10 jobs
+ 11 jobs.build
+ 12 jobs.build.runs-on
+ 13 jobs.build.steps
+ 14 jobs.build.steps
+ 15 jobs.build.steps.0  →  jobs.build.steps.0.name
+ 16 jobs.build.steps.0.run
+ 17 jobs.build.steps
+ 18 jobs.build.steps
+ 19 jobs.build.steps.1  →  jobs.build.steps.1.uses
+ 20 jobs.build.steps
+ 21 jobs.build.steps.2  →  jobs.build.steps.2.run
+ 22 jobs.build.steps.2.run
+ 23 jobs.build.steps.2.run
+ 24 jobs
+ 25 jobs
+ 26 jobs
+ 27 jobs.test
+ 28 jobs.test.needs
+ 29 jobs.test.runs-on
+ 30 jobs.test.steps
+ 31 jobs.test.steps.0  →  jobs.test.steps.0.run
+ 32 ·
+ 33 ·
+ 34 ·
