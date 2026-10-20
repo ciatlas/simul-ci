@@ -72,7 +72,7 @@
       }
     },
     {
-      "files": ["apps/web/src/edit/load.ts", "apps/web/src/edit/types.ts"],
+      "files": ["apps/web/src/edit/load.ts", "apps/web/src/edit/types.ts", "apps/web/src/edit/gestures.ts"],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -85,7 +85,7 @@
               },
               {
                 "name": "@simulci/document",
-                "message": "load.ts and types.ts are the page's side of the edit runtime: they hold none of the document model",
+                "message": "load.ts, types.ts and gestures.ts are the page's side of the edit runtime: they hold none of the document model",
                 "allowTypeImports": true
               }
             ]

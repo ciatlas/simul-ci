@@ -1,6 +1,7 @@
 import type { NodeId } from '@simulci/engine';
 import { type KeyboardEvent, type MouseEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useApp, useSession } from '../app/providers';
+import { gestures } from '../edit/gestures';
 import { MARK_LABEL, Mark } from '../graph/Mark';
 import { planIndex, resolveSelection, selectionOf } from '../plan/index';
 import type { PlanState } from '../state/store';
@@ -19,7 +20,8 @@ import {
 /**
  * The plan as a tree (synthesis § 11): the accessible baseline of the canvas, with the same selection. One tab stop
  * (a roving tabindex), the WAI-ARIA tree keys, Enter or a click selects. A selection made elsewhere opens its
- * ancestors and takes the tab stop, but focus stays where the author left it.
+ * ancestors and takes the tab stop, but focus stays where the author left it. In edit mode a row's actions (add a job,
+ * what it needs, a step, remove, move) open in a menu at it: the context menu key, Shift+F10 or a right click.
  */
 export function OutlineTree() {
   const plan = useSession((s) => s.plan);
@@ -62,7 +64,14 @@ function PlanTree({ plan }: { plan: PlanState }) {
     }
     setOpen((o) => toggled(o, 'open' in move ? move.open : move.close));
   };
+  const actions = (id: NodeId, at: HTMLElement | undefined): boolean =>
+    at !== undefined && store.getState().edit.on && (gestures.of(store)?.menu(id, at) ?? false);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const menu = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey);
+    if (menu && stop !== undefined && actions(stop, items.current.get(stop))) {
+      e.preventDefault();
+      return;
+    }
     const move = treeKey(e, stop, rows);
     if (!move) return;
     e.preventDefault();
@@ -87,6 +96,10 @@ function PlanTree({ plan }: { plan: PlanState }) {
             }}
             onChoose={() => choose(row.node.id)}
             onToggle={() => setOpen((o) => toggled(o, row.node.id))}
+            onMenu={(el) => {
+              setActive(row.node.id);
+              return actions(row.node.id, el);
+            }}
           />
         ))}
       </div>
@@ -105,9 +118,11 @@ interface ItemProps {
   register: (el: HTMLElement | null) => void;
   onChoose: () => void;
   onToggle: () => void;
+  /** Opens the row's actions in edit mode: true when they opened. */
+  onMenu: (el: HTMLElement) => boolean;
 }
 
-function Item({ row, selected, tabbable, register, onChoose, onToggle }: ItemProps) {
+function Item({ row, selected, tabbable, register, onChoose, onToggle, onMenu }: ItemProps) {
   const { node } = row;
   return (
     <div
@@ -121,6 +136,9 @@ function Item({ row, selected, tabbable, register, onChoose, onToggle }: ItemPro
       aria-selected={selected}
       tabIndex={tabbable ? 0 : -1}
       onClick={onChoose}
+      onContextMenu={(e) => {
+        if (onMenu(e.currentTarget)) e.preventDefault();
+      }}
       className={`${ROW} ${node.verdict === 'no' ? 'text-muted' : 'text-text'}`}
       style={{ paddingLeft: `${(row.level - 1) * 12 + 2}px` }}
     >

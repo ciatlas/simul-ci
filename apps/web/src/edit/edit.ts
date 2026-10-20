@@ -4,5 +4,6 @@
  * and by `React.lazy` (Properties, the status line's refusal), so the build names its chunk `edit-*` after it and the
  * page keeps none of it.
  */
+export { EditHost } from './canvas/EditHost';
 export { Properties } from './property/Properties';
 export { RefusalLine } from './Refusal';

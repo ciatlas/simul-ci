@@ -3,8 +3,11 @@ import {
   type AriaLabelConfig,
   Background,
   BackgroundVariant,
+  type Connection,
   Controls,
+  type EdgeMouseHandler,
   type NodeMouseHandler,
+  type OnConnectEnd,
   type OnMove,
   ReactFlow,
   ReactFlowProvider,
@@ -25,6 +28,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useApp, useSession } from '../app/providers';
+import { gestures, pendingEdges } from '../edit/gestures';
 import { markEdit } from '../lib/marks';
 import type { SessionState, SessionStore } from '../state/store';
 import { cardActions, selectedNode } from './card';
@@ -32,6 +36,8 @@ import { type ViewportCommands, viewport } from './commands';
 import { NeedsEdge } from './edges/NeedsEdge';
 import {
   cardFocus,
+  edgeIdOf,
+  editKey,
   type Flow,
   type FlowNode,
   type FlowView,
@@ -63,6 +69,13 @@ import './canvas.css';
  * changed flash once, and the cards an edit added get a ring for two seconds. For an author who asked for less motion
  * nothing on the canvas moves by itself: the viewport jumps, nothing flashes or rings, and index.css turns the
  * recolour transitions off.
+ *
+ * In edit mode the focused workflow's picture is the builder's (synthesis § 4.5): a drag from one job's handle onto
+ * another's makes the second need the first, through ops like every other gesture, and a drag the document refuses
+ * (the same job, another workflow, a need it has, a loop) draws a red line and connects nothing; an edge takes the
+ * focus and shows ✕, and Delete on it removes the need; Delete on the canvas removes the selected job or step, and
+ * Alt+↑/↓ move the selected step. Nodes stay where ELK put them. A need just written is drawn dashed until a picture of
+ * its texts is on screen.
  */
 
 const NODE_TYPES = { workflow: WorkflowNode, job: JobNode };
@@ -77,6 +90,7 @@ const DESCRIPTION =
 const ARIA: Partial<AriaLabelConfig> = {
   'node.a11yDescription.default': DESCRIPTION,
   'node.a11yDescription.keyboardDisabled': DESCRIPTION,
+  'edge.a11yDescription.default': 'Delete removes this need.',
 };
 
 /** The props that never change: a read view, single selection, our keys, our pan on focus and double-click. */
@@ -100,6 +114,13 @@ const FIXED = {
   deleteKeyCode: null,
   elevateNodesOnSelect: true,
   ariaLabelConfig: ARIA,
+} as const;
+
+/** What edit mode changes for the workflow being edited: its jobs connect, its edges take the focus. */
+const EDITING = {
+  nodesConnectable: true,
+  edgesFocusable: true,
+  edgesReconnectable: false,
 } as const;
 
 const WAITING: Record<SessionState['project']['status'], string> = {
@@ -147,11 +168,15 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
   const wrapper = useRef<HTMLDivElement>(null);
   const placed = useRef<NodeId>(undefined);
   const act = useMemo(() => cardActions(store), [store]);
-  const flow = useFlow(store, graph, { selected, hovered });
+  const editing = useEditing(graph);
+  const hot = useHotEdge();
+  const pending = usePendingEdges(store, graph.for.files);
+  const flow = useFlow(store, graph, { selected, hovered, editing, hotEdge: hot.id, pending });
   const start = useStartView(store, graph.for.epoch);
-  const onKeyDown = useCanvasKeys(store, { wrapper, placed }, graphRef, selected);
+  const onKeyDown = useCanvasKeys(store, { wrapper, placed }, graphRef, selected, editing !== undefined);
   const onFocus = useCardFocus(store, graphRef, placed);
   const onDoubleClick = useDoubleClickZoom();
+  const connect = useConnect(store);
   const onNodeClick: NodeMouseHandler<FlowNode> = (_, node) => act.select(node.id);
   return (
     <div
@@ -159,11 +184,16 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
       className="sc-canvas"
       data-stale={stale || undefined}
       onKeyDown={onKeyDown}
-      onFocus={onFocus}
+      onFocus={(e) => {
+        hot.focus(e.target);
+        onFocus(e);
+      }}
+      onBlur={(e) => hot.blur(e.target)}
       onDoubleClick={onDoubleClick}
     >
       <ReactFlow<FlowNode, NeedsFlowEdge>
         {...FIXED}
+        {...(editing === undefined ? {} : { ...EDITING, ...connect })}
         nodes={flow.nodes}
         edges={flow.edges}
         colorMode={colorMode}
@@ -173,12 +203,83 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
         onPaneClick={act.selectFocus}
         onNodeMouseEnter={hover.enter}
         onNodeMouseLeave={hover.leave}
+        onEdgeMouseEnter={hot.enter}
+        onEdgeMouseLeave={hot.leave}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Controls showInteractive={false} fitViewOptions={FIT} />
       </ReactFlow>
     </div>
   );
+}
+
+/** The depth-0 workflow edit mode is editing, when the picture draws it. */
+function useEditing(graph: GraphState): NodeId | undefined {
+  const focus = useSession((s) => (s.edit.on ? s.focus : undefined));
+  const scope = focus === undefined ? undefined : graph.model.scopes[focus];
+  return scope && scope.caller === undefined ? scope.id : undefined;
+}
+
+/** How long an edge stays hot after the pointer leaves it: time to reach its ✕, which then holds itself by hover. */
+const COOL_MS = 400;
+
+/** The edge that shows its ✕: the one the focus is on, else the one under the pointer. */
+function useHotEdge() {
+  const [pointer, setPointer] = useState<string>();
+  const [focused, setFocused] = useState<string>();
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return useMemo(() => {
+    const enter: EdgeMouseHandler<NeedsFlowEdge> = (_, edge) => {
+      clearTimeout(timer.current);
+      setPointer(edge.id);
+    };
+    const leave: EdgeMouseHandler<NeedsFlowEdge> = () => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setPointer(undefined), COOL_MS);
+    };
+    return {
+      id: focused ?? pointer,
+      enter,
+      leave,
+      focus: (el: EventTarget) => {
+        const id = edgeIdOf(el);
+        if (id !== undefined) setFocused(id);
+      },
+      blur: (el: EventTarget) => {
+        if (edgeIdOf(el) !== undefined) setFocused(undefined);
+      },
+    };
+  }, [pointer, focused]);
+}
+
+/** The needs written and not drawn yet; a picture of their texts or newer ones settles them. */
+function usePendingEdges(store: SessionStore, files: number) {
+  const subscribe = useCallback((changed: () => void) => pendingEdges.subscribe(store, changed), [store]);
+  const pending = useSyncExternalStore(subscribe, () => pendingEdges.of(store));
+  useEffect(() => pendingEdges.settle(store, files), [store, files]);
+  return pending;
+}
+
+/**
+ * A drag between two handles, as the edit runtime answers it: whether it may end where it is, the need it writes, and
+ * for a drop the runtime refused, the reason it gives (a loop's sentence) in the status line.
+ */
+function useConnect(store: SessionStore) {
+  return useMemo(() => {
+    const onConnectEnd: OnConnectEnd = (_, state) => {
+      if (state.isValid !== false || !state.toNode || !state.fromNode || !state.fromHandle) return;
+      const from = state.fromHandle.type === 'source';
+      const [source, target] = from ? [state.fromNode, state.toNode] : [state.toNode, state.fromNode];
+      gestures.of(store)?.connect(source.id, target.id);
+    };
+    return {
+      isValidConnection: (c: Connection | NeedsFlowEdge): boolean =>
+        gestures.of(store)?.canConnect(c.source, c.target) ?? false,
+      onConnect: (c: Connection): void => gestures.of(store)?.connect(c.source, c.target),
+      onConnectEnd,
+    };
+  }, [store]);
 }
 
 /**
@@ -221,16 +322,16 @@ function Waiting() {
 function useFlow(
   store: SessionStore,
   graph: GraphState,
-  { selected, hovered }: Pick<FlowView, 'selected' | 'hovered'>,
+  { selected, hovered, editing, hotEdge, pending }: Omit<FlowView, 'lit' | 'flash'>,
 ): Flow {
   const lit = useLit(graph.model);
   const flash = useFlash(store, graph);
   const last = useRef<Flow>(undefined);
   return useMemo(() => {
-    const view = { selected, hovered, lit, flash };
+    const view = { selected, hovered, lit, flash, editing, hotEdge, pending };
     last.current = keepUnchanged(last.current, toFlow(graph.model, graph.layout, view));
     return last.current;
-  }, [graph, selected, hovered, lit, flash]);
+  }, [graph, selected, hovered, lit, flash, editing, hotEdge, pending]);
 }
 
 /** The cards the unknown hovered in the Unknowns tab lights, while one is. */
@@ -329,23 +430,44 @@ interface FocusRefs {
 
 /**
  * The canvas keys on the wrapper: `navigate()` answers, with the last needs edge remembered for Alt to cycle, and the
- * card the keys are moving the focus to until it has it.
+ * card the keys are moving the focus to until it has it. In edit mode the edit keys go first: Delete removes the
+ * focused edge's need or the selection, Alt+↑/↓ move a selected step (and are ↑/↓ for anything else).
  */
 function useCanvasKeys(
   store: SessionStore,
   refs: FocusRefs,
   graph: RefObject<GraphState | undefined>,
   selected: NodeId | undefined,
+  editing: boolean,
 ): (e: KeyboardEvent<HTMLDivElement>) => void {
   const moving = useRef<NodeId>(undefined);
   const effects = useNavEffects(store, refs, graph, moving);
   const [navigate] = useState(createNavigator);
   return (e) => {
+    if (editing && runEditKey(store, e, graph.current)) {
+      e.preventDefault();
+      return;
+    }
     const action = keyAction(e, navigate, selected, graph.current, moving.current);
     if (!action) return;
     e.preventDefault();
     runNav(action, effects);
   };
+}
+
+/** An edit key on the canvas, run through the edit runtime: false when it is none, or nothing took it. */
+function runEditKey(
+  store: SessionStore,
+  e: KeyboardEvent<HTMLDivElement>,
+  graph: GraphState | undefined,
+): boolean {
+  const key = editKey(e, graph?.model);
+  const edit = key && gestures.of(store);
+  if (!key || !edit) return false;
+  if (key === 'remove') return edit.remove();
+  if (key === 'up' || key === 'down') return edit.move(key === 'up' ? -1 : 1);
+  edit.disconnect(key.source, key.target);
+  return true;
 }
 
 /**

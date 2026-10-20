@@ -1,0 +1,383 @@
+import {
+  freeId,
+  ID,
+  type NewJob,
+  planOp,
+  sameId,
+  type Warning,
+  type WorkflowDocument,
+  type WorkflowOp,
+} from '@simulci/document';
+import type { NodeId } from '@simulci/engine';
+import { listed } from '../../lib/words';
+import { planIndex, selectionOf } from '../../plan/index';
+import type { SessionStore } from '../../state/store';
+import type { Outline } from '../../worker/protocol';
+import { type Dispatched, dispatch, storeLock } from '../dispatch';
+import { documents } from '../documents';
+import { type Gestures, pendingEdges } from '../gestures';
+import { dependentsOf, needsOf, needsTransitively } from '../needs';
+import { type Target, targetOf } from '../selection';
+import type { OpMeta } from '../types';
+
+/**
+ * The structural gestures of the canvas and the outline tree (synthesis § 4.2, § 4.5), as ops through the one dispatch
+ * path. A card is a job of the focused workflow when the plan names it so and the text now still has it; a gesture
+ * made on the plan's picture reads its target with `planned`, so a step picked by its position is refused while the
+ * plan lags the text. Each op carries the revision its gesture read and a label in the past tense, which opens the
+ * status line's sentence (C1). A removal that warns, or that takes needs with it, asks first; a removal that commits
+ * offers Undo in a notice.
+ */
+
+/** What the edit host shows for a gesture: a popover at a card or a row, a confirmation, a refusal at a card. */
+export interface GestureUi {
+  open(open: Open): void;
+  confirm(ask: Ask): void;
+  /** A refused gesture made on the canvas: its sentence at the card, as well as in the status line. */
+  refused(seq: number, anchor?: Element): void;
+  /** A job was added: its card takes the focus once a picture draws it. */
+  added(card: NodeId, files: number): void;
+}
+
+export type Open =
+  | { kind: 'addJob'; file: string; rev: number; after?: string; anchor?: Element }
+  | { kind: 'needs'; file: string; rev: number; job: string; anchor?: Element }
+  | { kind: 'menu'; node: NodeId; anchor: Element };
+
+/** A question before an op: what it takes with it, and the button that runs it. */
+export interface Ask {
+  title: string;
+  lines: string[];
+  action: string;
+  run: () => void;
+}
+
+/** The card of a node on the canvas, when it is drawn. */
+export function cardElement(node: NodeId): Element | undefined {
+  return document.querySelector(`.react-flow__node[data-id="${CSS.escape(node)}"]`) ?? undefined;
+}
+
+/** A job's node id, as the plan spells it: `<path>#<job>`. */
+export const jobNode = (file: string, job: string): NodeId => `${file}#${job}`;
+
+/** Where a popover about a node opens: at its card when drawn, else at what has the focus (an outline row). */
+export function anchorFor(node: NodeId | undefined): Element | undefined {
+  const card = node === undefined ? undefined : cardElement(node);
+  if (card) return card;
+  const active = document.activeElement;
+  return active && active !== document.body ? active : undefined;
+}
+
+/** The job of the focused workflow a canvas node is, in the text now; a leg, a step or a called job is none. */
+export function jobAt(store: SessionStore, node: NodeId): (Target & { job: string }) | undefined {
+  const s = store.getState();
+  if (!s.plan || !s.edit.on || s.focus === undefined) return undefined;
+  const { focus, sel } = selectionOf(planIndex(s.plan), node);
+  if (focus !== s.focus || !sel || /[[./]/.test(sel)) return undefined;
+  const target = targetOf(store, focus, sel, { planned: true });
+  return target?.job !== undefined && !target.step ? { ...target, job: target.job } : undefined;
+}
+
+/** The selection as a place in the focused workflow's text, read as the canvas shows it. */
+export function selected(store: SessionStore): Target | undefined {
+  const s = store.getState();
+  if (!s.edit.on || s.focus === undefined || s.sel?.includes('/')) return undefined;
+  return targetOf(store, s.focus, s.sel, { planned: true });
+}
+
+const docOf = (store: SessionStore, file: string): WorkflowDocument | undefined =>
+  documents(store).of(store.getState(), file);
+
+/** Whether a drag from `source`'s handle may end on `target`'s: two jobs of one file, a need it lacks, no loop. */
+export function canConnect(store: SessionStore, source: NodeId, target: NodeId): boolean {
+  const a = jobAt(store, source);
+  const b = jobAt(store, target);
+  if (!a || !b || a.file !== b.file || sameId(a.job, b.job)) return false;
+  const doc = docOf(store, b.file);
+  const current = doc && needsOf(doc, b.job);
+  if (!doc || !current || current.some((n) => sameId(n, a.job))) return false;
+  return !needsTransitively(doc, a.job, b.job);
+}
+
+/** A drop on another job's handle: it needs the dragged one. A loop is refused with its sentence at the card. */
+export function connect(store: SessionStore, ui: GestureUi, source: NodeId, target: NodeId): void {
+  const a = jobAt(store, source);
+  const b = jobAt(store, target);
+  if (!a || !b || a.file !== b.file) return;
+  const result = addNeed(store, b, a.job);
+  if (result && !result.ok) ui.refused(result.refused.seq, cardElement(target));
+}
+
+/**
+ * One need added to a job's: an op the document refuses when it would loop (with the `cycle` sentence) or when the
+ * needs are not a list of names. A need it has already writes nothing. The new edge is drawn dashed until a picture
+ * of its text has it.
+ */
+export function addNeed(
+  store: SessionStore,
+  at: { file: string; rev: number; job: string },
+  need: string,
+): Dispatched | undefined {
+  const doc = docOf(store, at.file);
+  const current = doc ? needsOf(doc, at.job) : undefined;
+  if (current?.some((n) => sameId(n, need))) return undefined;
+  const result = dispatch(
+    store,
+    { op: 'setNeeds', file: at.file, job: at.job, needs: [...(current ?? []), need] },
+    { revs: { [at.file]: at.rev }, label: `Connected ${need} to ${at.job}` },
+  );
+  if (result.ok && result.changed)
+    pendingEdges.add(store, {
+      source: jobNode(at.file, need),
+      target: jobNode(at.file, at.job),
+      files: store.getState().files.version,
+    });
+  return result;
+}
+
+/** ✕ on an edge, or Delete on it: the need goes, after asking when expressions still read it. */
+export function disconnect(store: SessionStore, ui: GestureUi, source: NodeId, target: NodeId): void {
+  const a = jobAt(store, source);
+  const b = jobAt(store, target);
+  if (a && b && a.file === b.file) removeNeed(store, ui, b, a.job, cardElement(target));
+}
+
+/** One need out of a job's, asking first when its outputs are still read; the notice offers Undo. */
+export function removeNeed(
+  store: SessionStore,
+  ui: GestureUi,
+  at: { file: string; rev: number; job: string },
+  need: string,
+  anchor?: Element,
+): void {
+  const doc = docOf(store, at.file);
+  const current = doc ? needsOf(doc, at.job) : undefined;
+  if (current && !current.some((n) => sameId(n, need))) return;
+  const what = `${at.job}'s need on ${need}`;
+  removal(store, ui, {
+    op: {
+      op: 'setNeeds',
+      file: at.file,
+      job: at.job,
+      needs: (current ?? []).filter((n) => !sameId(n, need)),
+    },
+    meta: { revs: { [at.file]: at.rev }, label: `Removed ${what}` },
+    toast: `Removed ${what}`,
+    ask: { title: `Remove ${what}?`, action: 'Remove the need', lines: [] },
+    anchor,
+  });
+}
+
+/**
+ * Delete on the canvas or the outline: the selected job, asking first when jobs need it (their needs on it go too) or
+ * expressions read it. A leg is not removed on its own; a step is (`removeStepAt`, given by the steps' gestures).
+ */
+export function removeSelectedJob(store: SessionStore, ui: GestureUi, target: Target): boolean {
+  const s = store.getState();
+  const job = target.job;
+  const doc = docOf(store, target.file);
+  if (job === undefined || target.step || !doc || s.sel?.includes('[')) return false;
+  const dependents = dependentsOf(doc, job);
+  const theirs = dependents.length === 1 ? 'its need' : 'their needs';
+  const lines =
+    dependents.length === 0
+      ? []
+      : [
+          `${listed(dependents)} ${dependents.length === 1 ? 'needs' : 'need'} it: ${theirs} on ${job} go too.`,
+        ];
+  removal(store, ui, {
+    op: { op: 'removeJob', file: target.file, job },
+    meta: { revs: { [target.file]: target.rev }, label: `Removed job ${job}` },
+    toast: removedJobText(job, dependents),
+    ask: { title: `Remove job ${job}?`, action: `Remove ${job}`, lines },
+    anchor: cardElement(jobNode(target.file, job)),
+    always: dependents.length > 0,
+  });
+  return true;
+}
+
+/** "Removed lint", "Removed lint and deploy's need on it", "Removed lint and deploy's and preview's needs on it". */
+export function removedJobText(job: string, dependents: readonly string[]): string {
+  if (dependents.length === 0) return `Removed ${job}`;
+  const needs = dependents.length === 1 ? 'need' : 'needs';
+  return `Removed ${job} and ${listed(dependents.map((d) => `${d}'s`))} ${needs} on it`;
+}
+
+interface Removal {
+  op: WorkflowOp;
+  meta: OpMeta & { label: string };
+  toast: string;
+  ask: Omit<Ask, 'run'>;
+  anchor?: Element | undefined;
+  /** Ask even without a warning: the removal takes more than the author pointed at. */
+  always?: boolean;
+}
+
+/**
+ * A removal: planned once to read its warnings, asked about when it warns (a need its reader loses, a step id still
+ * read) or takes more with it, then dispatched with the revision the gesture read, so a text that moved while the
+ * question was open refuses `stale`. The notice it leaves offers Undo while its entry is the newest.
+ */
+export function removal(store: SessionStore, ui: GestureUi, r: Removal): void {
+  const run = (): void => {
+    const result = dispatch(store, r.op, r.meta);
+    if (!result.ok) {
+      ui.refused(result.refused.seq, r.anchor);
+      return;
+    }
+    if (!result.changed) return;
+    const s = store.getState();
+    s.notify(r.toast, s.edit.past.at(-1));
+  };
+  const warnings = warningsOf(store, r.op).filter((w) => w.code !== 'callers');
+  if (warnings.length === 0 && !r.always) return run();
+  ui.confirm({ ...r.ask, lines: [...r.ask.lines, ...warnings.map((w) => w.message)], run });
+}
+
+/** What an op would warn of on the text now, planned and not committed; none when it would be refused. */
+export function warningsOf(store: SessionStore, op: WorkflowOp): Warning[] {
+  const s = store.getState();
+  if (storeLock(s, op.file)) return [];
+  const docs = documents(store);
+  const plan = planOp(op, { doc: (path) => docs.of(s, path) });
+  return plan.ok ? plan.warnings : [];
+}
+
+/** What Add job writes (synthesis § 4.2): its id, runner, needs and, when asked, a first step that checks out. */
+export interface NewJobForm {
+  id: string;
+  after?: string;
+  runsOn: string;
+  needs: string[];
+  checkout?: string;
+}
+
+export function addJobOp(file: string, form: NewJobForm): Extract<WorkflowOp, { op: 'addJob' }> {
+  const labels = form.runsOn
+    .split(',')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
+  const job: NewJob = {};
+  if (labels.length > 0) job['runs-on'] = labels.length === 1 ? labels[0]! : labels;
+  if (form.needs.length > 0) job.needs = form.needs;
+  if (form.checkout) job.steps = [{ uses: form.checkout }];
+  return { op: 'addJob', file, id: form.id, ...(form.after === undefined ? {} : { after: form.after }), job };
+}
+
+/** Adds the job; its card is selected by the op, and takes the focus once a picture draws it. */
+export function addJob(
+  store: SessionStore,
+  ui: GestureUi,
+  at: { file: string; rev: number },
+  form: NewJobForm,
+): Dispatched {
+  const label = `Added job ${form.id}${form.after === undefined ? '' : ` after ${form.after}`}`;
+  const result = dispatch(store, addJobOp(at.file, form), { revs: { [at.file]: at.rev }, label });
+  if (result.ok && result.changed) ui.added(jobNode(at.file, form.id), store.getState().files.version);
+  return result;
+}
+
+/** Why an id typed into Add job cannot be one: the engine's id rule, or a job of the file has it whatever its case. */
+export function idProblem(id: string, taken: readonly string[]): string | undefined {
+  if (!ID.test(id)) return 'Job ids start with a letter or _, then letters, digits, - or _.';
+  const same = taken.find((t) => sameId(t, id));
+  return same === undefined ? undefined : `A job ${same} already exists; ids ignore case.`;
+}
+
+/** The id Add job offers: `job`, else the first free `job-2`, `job-3`. */
+export const offeredId = (doc: WorkflowDocument): string =>
+  freeId(
+    'job',
+    doc.jobs().map((j) => j.id),
+  );
+
+/** The runner Add job offers: the job it follows's own label, else the file's commonest, else `ubuntu-latest`. */
+export function runsOnFor(doc: WorkflowDocument, after: string | undefined): string {
+  const scalar = (id: string): string | undefined => {
+    const value = doc.get(['jobs', id, 'runs-on'])?.value;
+    return typeof value === 'string' && !value.includes('${{') ? value : undefined;
+  };
+  const own = after === undefined ? undefined : scalar(after);
+  if (own !== undefined) return own;
+  const counts = new Map<string, number>();
+  for (const { id } of doc.jobs()) {
+    const label = scalar(id);
+    if (label !== undefined) counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'ubuntu-latest';
+}
+
+/** Checkout as this repository writes it (its commonest ref), else the current major. */
+export function checkoutOf(outline: Outline | undefined): string {
+  const counts = new Map<string, number>();
+  for (const wf of outline?.workflows ?? [])
+    for (const job of wf.jobs)
+      for (const step of job.steps)
+        if (step.uses?.startsWith('actions/checkout@'))
+          counts.set(step.uses, (counts.get(step.uses) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'actions/checkout@v5';
+}
+
+/** The gestures the page asks for, answered on this store with this host's popovers and questions. */
+export function gesturesOf(store: SessionStore, ui: GestureUi): Gestures {
+  return {
+    addJob: (after) => openAddJob(store, ui, after),
+    needs: () => openNeeds(store, ui),
+    palette: () => false,
+    remove: () => {
+      const target = selected(store);
+      return target !== undefined && removeSelectedJob(store, ui, target);
+    },
+    move: () => false,
+    canConnect: (source, target) => canConnect(store, source, target),
+    connect: (source, target) => connect(store, ui, source, target),
+    disconnect: (source, target) => disconnect(store, ui, source, target),
+    menu: (node, at) => openMenu(store, ui, node, at),
+  };
+}
+
+/**
+ * Add job, after the job given, else after the selected job (a leg's or a step's job), else for the workflow alone:
+ * at its card, at the workflow's frame, or at what has the focus.
+ */
+function openAddJob(store: SessionStore, ui: GestureUi, after?: string): boolean {
+  const s = store.getState();
+  const at = s.edit.on && s.focus !== undefined ? targetOf(store, s.focus, undefined) : undefined;
+  const doc = at && docOf(store, at.file);
+  if (!at || !doc) return false;
+  const job = after ?? selected(store)?.job;
+  const known = job === undefined ? undefined : doc.jobs().find((j) => j.id === job)?.id;
+  ui.open({
+    kind: 'addJob',
+    file: at.file,
+    rev: at.rev,
+    ...(known === undefined ? {} : { after: known }),
+    anchor: anchorFor(known === undefined ? at.file : jobNode(at.file, known)),
+  });
+  return true;
+}
+
+/** What it needs, under the selected job's card (a leg's or a step's job). */
+function openNeeds(store: SessionStore, ui: GestureUi): boolean {
+  const target = selected(store);
+  if (target?.job === undefined) return false;
+  ui.open({
+    kind: 'needs',
+    file: target.file,
+    rev: target.rev,
+    job: target.job,
+    anchor: anchorFor(jobNode(target.file, target.job)),
+  });
+  return true;
+}
+
+/** An outline row's actions: the row is selected, so each acts on it as its key would. */
+function openMenu(store: SessionStore, ui: GestureUi, node: NodeId, anchor: Element): boolean {
+  const s = store.getState();
+  if (!s.plan || !s.edit.on) return false;
+  const { focus, sel } = selectionOf(planIndex(s.plan), node);
+  if (focus !== s.focus || sel?.includes('/')) return false;
+  s.select(focus, sel);
+  ui.open({ kind: 'menu', node, anchor });
+  return true;
+}

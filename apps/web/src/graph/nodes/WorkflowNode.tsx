@@ -1,6 +1,7 @@
 import type { NodeProps } from '@xyflow/react';
 import { memo, type MouseEvent, useMemo } from 'react';
 import { useApp } from '../../app/providers';
+import { gestures } from '../../edit/gestures';
 import { cardActions, cardAttrs, countParts, countsText, deepCallee, scopeTitle } from '../card';
 import type { WorkflowFlowNode } from '../flow';
 import { Mark } from '../Mark';
@@ -12,7 +13,8 @@ import { HoverCard } from './HoverCard';
  * card. Laid out, it is a frame with a title bar (mark, name or path, its jobs' counts, who calls it) around its
  * job cards; collapsed, it is one line with its deciding clause: an untriggered workflow, or a callee past depth 2
  * that a click opens (and its Open button, for the keyboard: a tab stop while the workflow is selected). The
- * untriggered workflow being edited is laid out instead, dimmed, its jobs skipped under it.
+ * untriggered workflow being edited is laid out instead, dimmed, its jobs skipped under it. The workflow being edited
+ * has + Add job in its title bar.
  */
 function WorkflowNodeView({ data }: NodeProps<WorkflowFlowNode>) {
   const { store } = useApp();
@@ -75,6 +77,21 @@ function WorkflowNodeView({ data }: NodeProps<WorkflowFlowNode>) {
         </span>
         <span className="sr-only">{countsText(scope.counts)}</span>
         {data.caller !== undefined && <span className="sc-scope-caller">called by {data.caller}</span>}
+        {data.editable && (
+          <button
+            type="button"
+            className="sc-add-job nodrag nopan"
+            tabIndex={state.selected ? 0 : -1}
+            aria-keyshortcuts="A"
+            onClick={(e) => {
+              e.stopPropagation();
+              act.selectFocus();
+              gestures.of(store)?.addJob();
+            }}
+          >
+            + Add job
+          </button>
+        )}
         {deep && (
           <button
             type="button"

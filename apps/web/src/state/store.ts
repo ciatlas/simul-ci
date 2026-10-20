@@ -105,6 +105,8 @@ export interface UnknownFocus {
 export interface Notice {
   id: number;
   text: string;
+  /** The history entry the notice's Undo takes back, while it is the newest (a removal's toast, synthesis § 4.2). */
+  undo?: history.Transaction;
 }
 
 /**
@@ -399,7 +401,7 @@ export interface SessionActions {
   planReceived: (plan: PlanState) => void;
   rejected: (error: SessionError) => void;
   clearError: () => void;
-  notify: (text: string) => number;
+  notify: (text: string, undo?: history.Transaction) => number;
   dismissNotice: (id: number) => void;
 }
 
@@ -800,9 +802,9 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         })),
       rejected: (error) => set((s) => ({ error: replaceError(s.error, error) })),
       clearError: () => set((s) => ({ error: replaceError(s.error, undefined) })),
-      notify: (text) => {
+      notify: (text, undo) => {
         const id = ++noticeId;
-        set((s) => ({ notices: [...s.notices, { id, text }] }));
+        set((s) => ({ notices: [...s.notices, undo ? { id, text, undo } : { id, text }] }));
         return id;
       },
       dismissNotice: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),

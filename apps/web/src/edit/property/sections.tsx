@@ -6,6 +6,7 @@ import { SectionTitle, useSelected } from '../../panels/kit';
 import { decisionOf, planNodes } from '../../plan/nodes';
 import { newestOutline } from '../../state/store';
 import { dispatch } from '../dispatch';
+import { listOf, needsTransitively } from '../needs';
 import { RefusalNote } from '../Refusal';
 import { LineLink } from './Field';
 
@@ -59,28 +60,6 @@ export function Needs({
       ))}
       <RefusalNote seq={refusedSeq} />
     </fieldset>
-  );
-}
-
-/** `needs: build` or `needs: [a, b]` as a list; undefined for anything else (an expression, a map). */
-function listOf(value: Json | undefined): string[] | undefined {
-  if (typeof value === 'string') return [value];
-  if (Array.isArray(value) && value.every((v) => typeof v === 'string')) return value;
-  return undefined;
-}
-
-/** Whether `job` needs `target`, directly or through the jobs it needs. */
-function needsTransitively(
-  doc: WorkflowDocument,
-  job: string,
-  target: string,
-  seen = new Set<string>(),
-): boolean {
-  if (seen.has(job)) return false;
-  seen.add(job);
-  const needs = listOf(doc.get(['jobs', job, 'needs'])?.value) ?? [];
-  return needs.some(
-    (n) => n.toLowerCase() === target.toLowerCase() || needsTransitively(doc, n, target, seen),
   );
 }
 
