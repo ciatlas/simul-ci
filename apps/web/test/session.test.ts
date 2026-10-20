@@ -119,6 +119,22 @@ describe('the session', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it('keeps the event table the worker sends with ready', async () => {
+    const store = createSessionStore();
+    const f = fakeClient();
+    createSession({ store, client: f.client, debounceMs: 100 });
+    const events = { push: { types: [], default: [] } };
+    f.readyResolve({
+      type: 'ready',
+      protocol: 1,
+      engine: { version: '0.1.0', runPlan: 1 },
+      models: [],
+      events,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().engine).toMatchObject({ status: 'ready', events });
+  });
+
   it('loads new files, applies the defaults, simulates at once and re-simulates after a quiet period', async () => {
     const store = createSessionStore();
     const f = fakeClient();

@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from 'react';
+import { lazy, type ReactNode, type RefObject, Suspense, useEffect, useMemo, useRef } from 'react';
 import {
   changedKeepKey,
   deriveForm,
@@ -53,14 +53,29 @@ const GROUPS: Record<GroupId, (props: GroupProps) => ReactNode> = {
   advanced: AdvancedFields,
 };
 
+/** The triggers editor, from the edit runtime's chunk (`edit-*`), fetched when edit mode first shows it. */
+const TriggerRows = lazy(() => import('../edit/edit').then((m) => ({ default: m.TriggerRows })));
+
 export function ScenarioForm() {
   const outline = useSession((s) => s.project.outline);
+  const editing = useSession((s) => s.edit.on);
   // The fields go with the project and come back with the next one, so what they keep in view (the Ref or the
   // changed files under the caret, Merged, the fork) is decided afresh for it, as on a first mount.
-  return outline ? <Fields outline={outline} /> : null;
+  if (!outline) return null;
+  // In edit mode the triggers editor's rows pick the event (synthesis § 4.6), so the form drops its Event field.
+  return editing ? (
+    <>
+      <Suspense fallback={<p className="text-muted text-xs">loading the editor…</p>}>
+        <TriggerRows />
+      </Suspense>
+      <Fields outline={outline} without="event" />
+    </>
+  ) : (
+    <Fields outline={outline} />
+  );
 }
 
-function Fields({ outline }: { outline: Outline }) {
+function Fields({ outline, without }: { outline: Outline; without?: GroupId }) {
   const scenario = useSession((s) => s.scenario);
   const from = useSession((s) => s.scenarioFrom);
   const assumed = useSession((s) => s.assumed);
@@ -97,10 +112,12 @@ function Fields({ outline }: { outline: Outline }) {
       aria-label="Scenario"
     >
       {routed.summary.length > 0 && <Summary issues={routed.summary} />}
-      {model.groups.map((id) => {
-        const Group = GROUPS[id];
-        return <Group key={id} f={f} />;
-      })}
+      {model.groups
+        .filter((id) => id !== without)
+        .map((id) => {
+          const Group = GROUPS[id];
+          return <Group key={id} f={f} />;
+        })}
     </form>
   );
 }

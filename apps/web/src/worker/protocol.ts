@@ -67,6 +67,11 @@ export interface ReadyResponse {
   protocol: typeof PROTOCOL;
   engine: { version: string; runPlan: number };
   models: ModelInfo[];
+  /**
+   * Every event `on:` takes, with its activity types and the ones that apply when `types:` is omitted (both empty for
+   * an event without types): what the triggers editor's Add event offers. Sent once, here.
+   */
+  events?: Record<string, { types: string[]; default: string[] }>;
 }
 
 export interface LoadedResponse {
@@ -135,6 +140,11 @@ export interface OutlineEvent {
   paths?: string[];
   pathsIgnore?: string[];
   crons?: string[];
+  /**
+   * Each of `crons` in words, as GitHub words it (the engine's `describeCron`): `Runs at 06:00, only on Monday`;
+   * null for a cron GitHub would not accept, whose problem is among the file's errors.
+   */
+  cronText?: (string | null)[];
   workflows?: string[];
   /** The line of the event key under `on:`, and of each filter key. */
   loc?: { line: number; filters: Record<string, number> };

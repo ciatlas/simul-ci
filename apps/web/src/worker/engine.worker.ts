@@ -4,6 +4,7 @@ import './csp';
 // oxlint-disable-next-line import/no-unassigned-import -- before the engine's schemas are built
 import './jitless';
 import { SCHEMA_VERSIONS, SHIPPED_MODELS, VERSION } from '@simulci/engine';
+import { eventTable } from './events';
 import { handle, initialState } from './handle';
 import { type EngineResponse, isEngineRequest, PROTOCOL } from './protocol';
 
@@ -24,5 +25,6 @@ const ready: EngineResponse = {
   protocol: PROTOCOL,
   engine: { version: VERSION, runPlan: SCHEMA_VERSIONS.runPlan },
   models: SHIPPED_MODELS.map((m) => ({ id: m.id, version: m.version, presets: [...m.presets] })),
+  events: eventTable(),
 };
 postMessage(ready);

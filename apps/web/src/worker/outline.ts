@@ -1,5 +1,11 @@
 /* oxlint-disable no-restricted-imports -- the worker is where the engine runs */
-import { ACTIVITY_TYPES, type LoadedProject, readSettings, type WorkflowSettings } from '@simulci/engine';
+import {
+  ACTIVITY_TYPES,
+  describeCron,
+  type LoadedProject,
+  readSettings,
+  type WorkflowSettings,
+} from '@simulci/engine';
 import { isMap, isScalar, isSeq, LineCounter, parseDocument } from 'yaml';
 import type { EventLines, FileCache, OnLines } from './cache';
 import type {
@@ -111,7 +117,10 @@ function eventOf(
   if (Array.isArray(config)) {
     // `schedule:` is the list of crons.
     const crons = cronsOf(config);
-    if (crons.length) out.crons = crons;
+    if (crons.length) {
+      out.crons = crons;
+      out.cronText = crons.map((c) => describeCron(c) ?? null);
+    }
     return out;
   }
   if (typeof config !== 'object' || config === null) return out;

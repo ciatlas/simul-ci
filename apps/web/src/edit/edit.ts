@@ -6,3 +6,4 @@
  */
 export { Properties } from './property/Properties';
 export { RefusalLine } from './Refusal';
+export { TriggerRows } from './triggers/TriggerRows';
