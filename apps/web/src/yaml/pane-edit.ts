@@ -1,10 +1,9 @@
 import type { Extension, Transaction } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { regionEdit } from '@simulci/document/edits';
-import { asWritten } from '../input/read';
-import { downloadText } from '../lib/download';
 import { fileLabel } from '../lib/file-label';
 import { markEdit } from '../lib/marks';
+import { downloadOne } from '../state/changes';
 import { stampOf } from '../state/history';
 import { type SessionStore, writable } from '../state/store';
 import { agrees, type Eol, eolOf, toTextEdits } from './bridge';
@@ -129,9 +128,5 @@ export function convertLineEndings(store: SessionStore, path: string, eol: Eol):
 }
 
 /** Hands the file to the browser to save as it would be written: its BOM back, its line endings as they are. */
-export function downloadFile(store: SessionStore, path: string): void {
-  const { byPath, meta } = store.getState().files;
-  const text = byPath[path];
-  if (text !== undefined)
-    downloadText(path.slice(path.lastIndexOf('/') + 1), asWritten(text, meta[path]), 'application/yaml');
-}
+export const downloadFile = (store: SessionStore, path: string): void =>
+  downloadOne(store.getState().files, path);
