@@ -109,6 +109,12 @@ export interface SimulateOptions {
   mocks?: MockLayers;
   /** The action models to use, the shipped ones by default; `[]` switches them off. */
   models?: readonly ActionModel[];
+  /**
+   * Workflow paths whose jobs to plan although the scenario does not trigger them (an editor keeping the workflow it
+   * edits on screen). Each job comes out skipped under the workflow; the workflow's own fields, the run's unknowns and
+   * its checks stay as without the option.
+   */
+  planUntriggered?: string[];
 }
 
 export class MocksError extends Error {
@@ -151,6 +157,7 @@ export function simulate(opts: SimulateOptions): RunPlan {
     opts.maxDepth ?? 10,
     new MockResolver(layers),
     opts.models ?? SHIPPED_MODELS,
+    new Set(opts.planUntriggered),
   ).run();
 }
 
@@ -163,6 +170,16 @@ interface WorkflowContext {
   inputs?: Record<string, Value<Json>>;
   secrets?: string[];
   checkPrefix: string;
+}
+
+/** What a workflow's jobs are planned with: its settings, node id, scenario, trigger decision, inputs and name. */
+interface WorkflowSetup {
+  settings: WorkflowSettings;
+  id: NodeId;
+  scenario: Scenario;
+  triggered: Decision;
+  inputs: Record<string, Value<Json>>;
+  wfName: string;
 }
 
 interface JobContext {
@@ -242,6 +259,8 @@ class Planner {
     private readonly maxDepth: number,
     private readonly mocks: MockResolver,
     private readonly shipped: readonly ActionModel[],
+    /** The depth-0 workflows whose jobs are planned although untriggered (`planUntriggered`). */
+    private readonly untriggered: ReadonlySet<string>,
   ) {
     this.index = loaded.index;
   }
@@ -287,9 +306,36 @@ class Planner {
 
   private planWorkflow(wf: WorkflowDecl, ctx: WorkflowContext): WorkflowPlan {
     const setup = this.setupWorkflow(wf, ctx);
+    const plan = workflowShell(wf, setup.id, setup.settings, setup.triggered, setup.inputs, ctx);
+    if (setup.triggered.verdict === 'no') {
+      if (ctx.depth === 0 && this.untriggered.has(wf.path)) plan.jobs = this.untriggeredJobs(wf, setup, ctx);
+      return plan;
+    }
+    const { jobs, state } = this.planJobs(wf, setup, ctx);
+    plan.jobs = jobs;
+    plan.conclusion = runConclusion(jobs.map((j) => j.result));
+    plan.outputs = this.callOutputs(wf, plan, state);
+    return plan;
+  }
+
+  /**
+   * The jobs of an untriggered workflow, asked for by `planUntriggered`: each is skipped under the workflow. The values
+   * they read are no part of the run, so the unknowns they note are dropped.
+   */
+  private untriggeredJobs(wf: WorkflowDecl, setup: WorkflowSetup, ctx: WorkflowContext): JobPlan[] {
+    const before = new Set(this.unknowns.keys());
+    const { jobs } = this.planJobs(wf, setup, ctx);
+    for (const id of this.unknowns.keys()) if (!before.has(id)) this.unknowns.delete(id);
+    return jobs;
+  }
+
+  /** The jobs in `needs` order, listed as written, and the workflow's context for its outputs. */
+  private planJobs(
+    wf: WorkflowDecl,
+    setup: WorkflowSetup,
+    ctx: WorkflowContext,
+  ): { jobs: JobPlan[]; state: ContextState } {
     const { id, settings, scenario, triggered, inputs, wfName } = setup;
-    const plan = workflowShell(wf, id, settings, triggered, inputs, ctx);
-    if (triggered.verdict === 'no') return plan;
     const base: ContextState = { scenario, workflow: wfName, inputs };
     const wfEnv = this.bindings(wf.env, base);
     const planned = new Map<string, JobPlan>();
@@ -310,14 +356,11 @@ class Planner {
       const settingsOfJob = settings.jobs[jobId] ?? { id: jobId, if: 'success()', steps: [] };
       planned.set(jobId, this.planJob(wf.jobs[jobId]!, { ...jobCtx, settings: settingsOfJob }));
     }
-    plan.jobs = Object.keys(wf.jobs).map((k) => planned.get(k)!);
-    plan.conclusion = runConclusion(plan.jobs.map((j) => j.result));
-    plan.outputs = this.callOutputs(wf, plan, { ...base, env: wfEnv });
-    return plan;
+    return { jobs: Object.keys(wf.jobs).map((k) => planned.get(k)!), state: { ...base, env: wfEnv } };
   }
 
   /** The workflow's settings, node id, scenario (a callee sees the secrets it is given), trigger decision and inputs. */
-  private setupWorkflow(wf: WorkflowDecl, ctx: WorkflowContext) {
+  private setupWorkflow(wf: WorkflowDecl, ctx: WorkflowContext): WorkflowSetup {
     const settings = this.settingsOf(wf);
     const id = ctx.caller === undefined ? wf.path : callNodeId(ctx.caller, wf.path);
     this.settingsDiagnostics(settings, wf.path, id);
