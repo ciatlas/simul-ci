@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { EditorView } from '@codemirror/view';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -6,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { config as zodConfig } from 'zod';
 import { describeViolation } from '../src/worker/csp';
+import { themeFor } from '../src/yaml/extensions';
 // oxlint-disable-next-line import/no-unassigned-import -- what the engine worker imports, for its side effect
 import '../src/worker/jitless';
 import { headersFor, isNotFound, pathOf, readVercelConfig, servesFile } from '../vercel-headers.ts';
@@ -13,7 +15,9 @@ import { headersFor, isNotFound, pathOf, readVercelConfig, servesFile } from '..
 /**
  * What the deployment serves (vercel.json, read the way vercel-headers.ts reads it for `vite preview`), how the
  * preview finds the file a path names, and what the workers load first so that the CSP's refusals inside a worker are
- * seen (csp.ts, in both) and zod causes none (jitless.ts, in the engine worker).
+ * seen (csp.ts, in both) and zod causes none (jitless.ts, in the engine worker). CodeMirror's styles go into a
+ * constructed sheet, which the CSP's style-src allows, rather than a `<style>` element, which it refuses
+ * (patches/style-mod@4.1.4.patch).
  */
 
 const vercel = readVercelConfig();
@@ -32,7 +36,7 @@ const POLICY = {
   'worker-src': "'self'",
   'connect-src': "'none'",
   'img-src': "'self' data:",
-  'style-src': "'self' 'unsafe-inline'",
+  'style-src': "'self'",
   'font-src': "'self'",
   'base-uri': "'none'",
   'frame-ancestors': "'none'",
@@ -143,5 +147,18 @@ describe('the workers under the CSP', () => {
 
   it('build zod parsers without new Function', () => {
     expect(zodConfig().jitless).toBe(true);
+  });
+});
+
+describe('CodeMirror under the CSP', () => {
+  it('mounts its styles in a constructed sheet, never a <style> element', () => {
+    const view = new EditorView({ parent: document.body, extensions: themeFor(false) });
+    try {
+      expect(document.querySelectorAll('style')).toHaveLength(0);
+      const rules = document.adoptedStyleSheets.flatMap((sheet) => [...sheet.cssRules].map((r) => r.cssText));
+      expect(rules.some((rule) => rule.includes('.cm-scroller'))).toBe(true);
+    } finally {
+      view.destroy();
+    }
   });
 });
