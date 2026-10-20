@@ -86,6 +86,28 @@ describe('the replace prompt', () => {
     expect(download.store.getState().source).toEqual({ kind: 'sample', name: 'starter' });
   });
 
+  it('downloads one patch of every edit the replacement drops when asked to', async () => {
+    const { store, sources, downloads } = setup('patch');
+    store
+      .getState()
+      .setFiles(
+        { [CI]: 'on: push\r\n', [RELEASE]: 'on: release\n' },
+        { kind: 'folder', name: 'repo', readAt: 0 },
+        { [CI]: { bom: true, eol: 'crlf', utf8: true } },
+      );
+    edit(store, CI);
+    edit(store, RELEASE);
+    sources.useSample('starter');
+    await settle();
+    expect(downloads.map(([name]) => name)).toEqual(['simulci-changes.patch']);
+    const patch = downloads[0]![1];
+    expect(patch).toContain(`diff --git a/${CI} b/${CI}\n`);
+    // Both sides of the BOM file's first line carry it; its CRLF is kept.
+    expect(patch).toContain('-\uFEFFon: push\r\n+\uFEFF# edited\n+on: push\r\n');
+    expect(patch).toContain(`diff --git a/${RELEASE} b/${RELEASE}\n`);
+    expect(store.getState().source).toEqual({ kind: 'sample', name: 'starter' });
+  });
+
   it('asks only for edits a paste would overwrite: a paste of another file keeps the edited buffers', async () => {
     const { store, sources, asked, dropping } = setup('cancel');
     sources.paste(CI, 'on: push\n');

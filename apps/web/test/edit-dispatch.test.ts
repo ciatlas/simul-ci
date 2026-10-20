@@ -5,6 +5,7 @@
  * op leaves applied by the plan of its texts and no older one; the documents cached by revision.
  */
 import { WorkflowDocument } from '@simulci/document';
+import { loadFiles, simulate } from '@simulci/engine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyFix, dispatch } from '../src/edit/dispatch';
 import { createDocuments, documents } from '../src/edit/documents';
@@ -54,8 +55,23 @@ function opened(
   return store;
 }
 
-const planFor = (files: number, epoch: number): PlanState =>
-  ({ for: { files, epoch, project: 1 } }) as PlanState;
+/** A plan of no workflows: what "this edit changed" compares (C1) needs a real one, the selection only its version. */
+const EMPTY = simulate({ project: loadFiles({}), scenario: { event: 'push' }, detail: 'steps' });
+const planFor = (files: number, epoch: number): PlanState => ({
+  plan: EMPTY,
+  derived: {
+    unitPaths: {},
+    kinds: {},
+    clauses: {},
+    decidingIndex: {},
+    decidingLoc: {},
+    decidingNeeds: {},
+    unknownPaths: {},
+  },
+  text: '',
+  ms: { simulate: 0, derive: 0 },
+  for: { files, epoch, project: 1 },
+});
 
 const text = (store: SessionStore, path = CI): string => store.getState().files.byPath[path]!;
 

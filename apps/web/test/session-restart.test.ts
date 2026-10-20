@@ -51,7 +51,7 @@ const planReply = (id: number, project: number, text: string) => ({
   id,
   type: 'plan',
   project,
-  plan: { workflows: [] },
+  plan: { workflows: [], unknowns: [], detail: 'steps' },
   derived: {},
   text,
   ms: { simulate: 1, derive: 0 },

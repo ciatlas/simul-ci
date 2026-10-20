@@ -2,8 +2,8 @@ import type { NodeId, RunPlan, ScenarioInput, Unknown } from '@simulci/engine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flashOf, litCards, reducedMotion } from '../src/graph/highlight';
 import type { GraphModel, GraphState, JobModel, ScopeModel } from '../src/graph/types';
-import type { VerdictChange } from '../src/plan/changes';
-import type { Pin, PlanState } from '../src/state/store';
+import type { ChangeRow } from '../src/plan/change-rows';
+import type { Change, PlanState } from '../src/state/store';
 
 const CI = 'ci.yml';
 const RELEASE = 'release.yml';
@@ -100,67 +100,118 @@ describe('the cards a hovered unknown lights', () => {
 });
 
 const answer = {} as RunPlan;
-const change = (id: NodeId, kind: VerdictChange['kind'] = 'job'): VerdictChange => ({
-  id,
+const turned = (id: NodeId, kind: ChangeRow['kind'] = 'job'): ChangeRow => ({
+  change: 'changed',
   kind,
   from: 'no',
   to: 'yes',
   label: id,
+  id,
+  card: id,
 });
 
-/** The store's plan answering the pin, and the picture committed for it, as the graph session commits one. */
-function answered(seq: number, changes: VerdictChange[]) {
+/** The store's plan answering the change, and the picture committed for it, as the graph session commits one. */
+function answered(seq: number, rows: ChangeRow[]) {
   const plan = { plan: answer, for: { files: 1, epoch: 1, project: 1 } } as PlanState;
   const graph: GraphState = { model: model(), layout: { scopes: {}, roots: {}, cards: {} }, for: plan.for };
-  const pin: Pin = {
+  const change: Change = {
     seq,
-    scenario: {} as ScenarioInput,
-    assume: [],
-    after: { plan: answer, changes, sentence: 'pinned; deploy now runs' },
+    cause: 'pin',
+    label: 'pinned',
+    waitFor: { scenario: {} as ScenarioInput, assume: [] },
+    after: { plan: answer, rows, sentence: 'pinned; deploy now runs' },
   };
-  return { pin, plan, graph };
+  return { change, plan, graph };
 }
 
-describe('the flash of a pin', () => {
+describe('the flash of a change', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('flashes the cards that show what the pin changed, a step in its job card', () => {
-    const { pin, plan, graph } = answered(4, [
-      change(j('deploy')),
-      change(RELEASE, 'workflow'),
-      change(`${j('test')}/steps.lint`, 'step'),
+  it('flashes the cards that show what the change turned, a step in its job card', () => {
+    const { change, plan, graph } = answered(4, [
+      turned(j('deploy')),
+      turned(RELEASE, 'workflow'),
+      turned(`${j('test')}/steps.lint`, 'step'),
     ]);
-    const flash = flashOf(pin, plan, graph);
+    const flash = flashOf(change, plan, graph);
     expect(flash).toMatchObject({ seq: 4, parity: 'a' });
     expect(sorted(flash!.cards)).toEqual([j('deploy'), j('test'), RELEASE].sort());
+    expect(flash!.ring.size).toBe(0);
   });
 
-  it('alternates its parity from one pin to the next, so the same card flashes again', () => {
-    const changes = [change(j('deploy'))];
-    const first = answered(5, changes);
-    const next = answered(6, changes);
-    expect(flashOf(first.pin, first.plan, first.graph)?.parity).toBe('b');
-    expect(flashOf(next.pin, next.plan, next.graph)?.parity).toBe('a');
+  it('rings an added workflow or job, flashes the card an added step or leg is in, and the card a removed one left', () => {
+    const { change, plan, graph } = answered(3, [
+      { change: 'added', kind: 'job', to: 'yes', label: 'deploy', id: j('deploy'), card: j('deploy') },
+      {
+        change: 'added',
+        kind: 'step',
+        to: 'yes',
+        label: 'test.lint',
+        id: `${j('test')}/~lint`,
+        card: `${j('test')}/~lint`,
+      },
+      {
+        change: 'added',
+        kind: 'leg',
+        to: 'yes',
+        label: 'publish',
+        id: j('publish', RELEASE),
+        card: j('publish', RELEASE),
+      },
+      {
+        change: 'removed',
+        kind: 'step',
+        from: 'yes',
+        label: 'build.#2',
+        id: `${j('build')}/~old`,
+        card: j('build'),
+      },
+      // A removed node nothing of the plan after shows, and a check a job row implies, flash nothing.
+      { change: 'removed', kind: 'job', from: 'yes', label: 'gone', id: j('gone') },
+      {
+        change: 'added',
+        kind: 'check',
+        to: 'yes',
+        label: 'deploy',
+        id: j('deploy'),
+        card: j('deploy'),
+        implied: true,
+      },
+    ]);
+    const flash = flashOf(change, plan, graph)!;
+    expect(sorted(flash.ring)).toEqual([j('deploy')]);
+    expect(sorted(flash.cards)).toEqual([j('build'), j('publish', RELEASE), j('test')].sort());
+  });
+
+  it('alternates its parity from one change to the next, so the same card flashes again', () => {
+    const rows = [turned(j('deploy'))];
+    const first = answered(5, rows);
+    const next = answered(6, rows);
+    expect(flashOf(first.change, first.plan, first.graph)?.parity).toBe('b');
+    expect(flashOf(next.change, next.plan, next.graph)?.parity).toBe('a');
   });
 
   it("waits for the answering plan's picture, and stops at a later plan", () => {
-    const { pin, plan, graph } = answered(4, [change(j('deploy'))]);
-    // The picture of the plan before the pin is still on the canvas.
-    expect(flashOf(pin, plan, { ...graph, for: { files: 1, epoch: 1, project: 1 } })).toBeUndefined();
-    // A plan came after the one that answered the pin.
-    expect(flashOf(pin, { ...plan, plan: {} as RunPlan }, graph)).toBeUndefined();
-    expect(flashOf({ ...pin, after: undefined }, plan, graph)).toBeUndefined();
+    const { change, plan, graph } = answered(4, [turned(j('deploy'))]);
+    // The picture of the plan before the change is still on the canvas.
+    expect(flashOf(change, plan, { ...graph, for: { files: 1, epoch: 1, project: 1 } })).toBeUndefined();
+    // A plan came after the one that answered the change.
+    expect(flashOf(change, { ...plan, plan: {} as RunPlan }, graph)).toBeUndefined();
+    expect(flashOf({ ...change, after: undefined }, plan, graph)).toBeUndefined();
     expect(flashOf(undefined, plan, graph)).toBeUndefined();
-    expect(flashOf(pin, undefined, graph)).toBeUndefined();
+    expect(flashOf(change, undefined, graph)).toBeUndefined();
   });
 
-  it('flashes nothing for an author who asked for less motion', () => {
+  it('flashes and rings nothing for an author who asked for less motion', () => {
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: query === '(prefers-reduced-motion: reduce)',
     }));
-    const { pin, plan, graph } = answered(4, [change(j('deploy'))]);
+    const { change, plan, graph } = answered(4, [
+      turned(j('deploy')),
+      { change: 'added', kind: 'job', to: 'yes', label: 'test', id: j('test'), card: j('test') },
+    ]);
     expect(reducedMotion()).toBe(true);
-    expect(flashOf(pin, plan, graph)).toBeUndefined();
+    expect(flashOf(change, plan, graph)).toBeUndefined();
   });
 
   it('takes motion as wanted where nothing says otherwise', () => {

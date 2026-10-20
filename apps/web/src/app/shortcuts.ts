@@ -4,7 +4,7 @@ import { cardOf } from '../graph/navigate';
 import { planIndex, resolveSelection } from '../plan/index';
 import type { PanelTab, Prefs } from '../state/prefs';
 import type { SessionActions, SessionState, SessionStore } from '../state/store';
-import { historyCommand } from '../lib/history-keys';
+import { historyCommand, letterOf } from '../lib/history-keys';
 import { caseAvailability } from '../testcase/case';
 
 /**
@@ -20,7 +20,7 @@ import { caseAvailability } from '../testcase/case';
  *
  * In edit mode Mod+Z undoes and Mod+Shift+Z or Mod+Y redoes the page's one edit history (synthesis § 6) wherever no
  * field keeps its own undo: whatever `prefs.keys` says, since a modifier makes them no single keys. The YAML pane
- * binds the same keys itself.
+ * binds the same keys itself. Mod+Shift+D opens the Changes dialog (§ 5.2) in edit mode, the YAML pane included.
  */
 
 export type PageCommand =
@@ -108,7 +108,7 @@ function ownedElsewhere(target: EventTarget | null, owners = OWNERS): boolean {
 export function installShortcuts(store: SessionStore, win: Window = window): () => void {
   const onKey = (event: KeyboardEvent): void => {
     const s = store.getState();
-    if (historyKey(event, s)) {
+    if (historyKey(event, s) || changesKey(event, s)) {
       event.preventDefault();
       return;
     }
@@ -133,6 +133,17 @@ export function historyKey(event: HistoryKey, s: SessionState & SessionActions):
 }
 
 type HistoryKey = PageKey & { shiftKey?: boolean; code?: string };
+
+/** Mod+Shift+D in edit mode, a field or the YAML pane included, outside a dialog: true when it opened Changes. */
+export function changesKey(event: HistoryKey, s: SessionState & SessionActions): boolean {
+  const chord = (event.metaKey || event.ctrlKey) && event.shiftKey === true && !event.altKey;
+  if (!s.edit.on || !chord || event.defaultPrevented || letterOf(event) !== 'd') return false;
+  const el = event.target as Partial<HTMLElement> | null;
+  // An open dialog keeps its keys.
+  if (typeof el?.closest === 'function' && el.closest('dialog, [role="dialog"]') !== null) return false;
+  s.setChangesOpen(true);
+  return true;
+}
 
 /** Runs a command; false when it has nothing to act on, so the key goes on as if unheard. */
 function run(command: PageCommand, s: SessionState & SessionActions, win: Window): boolean {

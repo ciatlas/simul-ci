@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { redoLabel, undoLabel } from '../state/history';
 import { dirtyPaths } from '../state/store';
 import { CopyAsTest } from '../testcase/CopyAsTest';
+import { ChangesButton } from './ChangesDialog';
 import { useSession } from './providers';
 import { SourceMenu } from './SourceMenu';
 import { NEXT_THEME } from './theme';
@@ -56,6 +57,7 @@ export function TopBar() {
         </span>
         <ViewToggle />
         <EditControls />
+        <ChangesButton />
         <CopyAsTest />
         <button
           type="button"

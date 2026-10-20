@@ -260,9 +260,10 @@
 }
 
 /*
- * A pin's changes: the cards it changed pulse once in the accent's soft colour and are their own again after a
- * second (highlight.ts FLASH_MS), since the accent is the selection's and never a status. The two keyframes are one
- * pulse under two names, picked by the pin's parity, so a card the next pin changes too plays it again.
+ * A change's cards (a pin's or an edit's): the cards it changed pulse once in the accent's soft colour and are their
+ * own again after a second (highlight.ts FLASH_MS), since the accent is the selection's and never a status. The two
+ * keyframes are one pulse under two names, picked by the change's parity, so a card the next change changes too
+ * plays it again.
  */
 .sc-card[data-flash='a'],
 .sc-scope[data-flash='a'] {
@@ -283,6 +284,37 @@
 @keyframes sc-flash-b {
   30% {
     background-color: var(--accent-soft);
+  }
+}
+
+/*
+ * A card an edit added: a ring in the accent, wider than the selection's outline, for two seconds (highlight.ts
+ * RING_MS), then the card's own outline again, the selection's if it holds it. Two names by the change's parity, as
+ * for the flash.
+ */
+.sc-card[data-added='a'],
+.sc-scope[data-added='a'] {
+  animation: sc-added-a 2s ease-out 1;
+}
+
+.sc-card[data-added='b'],
+.sc-scope[data-added='b'] {
+  animation: sc-added-b 2s ease-out 1;
+}
+
+@keyframes sc-added-a {
+  0%,
+  75% {
+    outline: 2px solid var(--accent);
+    outline-offset: 5px;
+  }
+}
+
+@keyframes sc-added-b {
+  0%,
+  75% {
+    outline: 2px solid var(--accent);
+    outline-offset: 5px;
   }
 }
 

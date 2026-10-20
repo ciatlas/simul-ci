@@ -44,7 +44,7 @@ import {
   runNav,
   toFlow,
 } from './flow';
-import { FLASH_MS, type Flash, flashOf, litCards, reducedMotion } from './highlight';
+import { FLASH_MS, type Flash, flashOf, litCards, RING_MS, reducedMotion } from './highlight';
 import { cardOf, createNavigator } from './navigate';
 import { JobNode } from './nodes/JobNode';
 import { WorkflowNode } from './nodes/WorkflowNode';
@@ -59,9 +59,10 @@ import './canvas.css';
  * Shift and Meta select). The first picture of a source is fitted once; after that the viewport moves only when the
  * author asks, an edit of the texts included, and a picture mounted again opens where it was left. Every node stays mounted (the node
  * count is bounded by workflows and jobs, never legs or steps), so the card with the focus never leaves the page
- * under it. An unknown hovered in the Unknowns tab fades the cards it does not affect; the cards a pin changed flash
- * once. For an author who asked for less motion nothing on the canvas moves by itself: the viewport jumps, nothing
- * flashes, and index.css turns the recolour transitions off.
+ * under it. An unknown hovered in the Unknowns tab fades the cards it does not affect; the cards a pin or an edit
+ * changed flash once, and the cards an edit added get a ring for two seconds. For an author who asked for less motion
+ * nothing on the canvas moves by itself: the viewport jumps, nothing flashes or rings, and index.css turns the
+ * recolour transitions off.
  */
 
 const NODE_TYPES = { workflow: WorkflowNode, job: JobNode };
@@ -110,7 +111,7 @@ const WAITING: Record<SessionState['project']['status'], string> = {
 
 /** Per session, the viewport its picture was last left at, kept while the canvas is unmounted. */
 const memory = new WeakMap<SessionStore, ViewMemory>();
-/** Per session, the last pin whose flash has played, so a picture mounted again does not play it twice. */
+/** Per session, the last change whose flash has played, so a picture mounted again does not play it twice. */
 const flashed = new WeakMap<SessionStore, number>();
 
 export function Canvas() {
@@ -135,7 +136,7 @@ function Flow() {
   return graph ? <Picture key={graph.for.epoch} graph={graph} graphRef={graphRef} /> : <Waiting />;
 }
 
-/** The committed picture with the selection, the hovered node, a hovered unknown and the last pin's flash on it. */
+/** The committed picture with the selection, the hovered node, a hovered unknown and the last change's flash on it. */
 function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<GraphState | undefined> }) {
   const { store } = useApp();
   const selected = useSession(selectedNode);
@@ -214,7 +215,7 @@ function Waiting() {
 }
 
 /**
- * The flow for the picture, with the cards a hovered unknown lights and the last pin's flash on it, each node and
+ * The flow for the picture, with the cards a hovered unknown lights and the last change's flash on it, each node and
  * edge that did not change kept as the object it was.
  */
 function useFlow(
@@ -240,23 +241,25 @@ function useLit(model: GraphModel): ReadonlySet<NodeId> | undefined {
 }
 
 /**
- * The last pin's flash while the picture shows the plan that answered it, until it has played: after FLASH_MS it is
- * taken off the cards, so a card mounted later (a callee opened, the picture mounted again) does not play it.
+ * The last change's flash while the picture shows the plan that answered it, until it has played: after FLASH_MS,
+ * or RING_MS when it rings an added card, it is taken off the cards, so a card mounted later (a callee opened, the
+ * picture mounted again) does not play it.
  */
 function useFlash(store: SessionStore, graph: GraphState): Flash | undefined {
-  const pin = useSession((s) => s.pin);
+  const change = useSession((s) => s.change);
   const plan = useSession((s) => s.plan);
-  const flash = useMemo(() => flashOf(pin, plan, graph), [pin, plan, graph]);
+  const flash = useMemo(() => flashOf(change, plan, graph), [change, plan, graph]);
   const [, played] = useState<number>();
   const seq = flash?.seq;
+  const ms = flash?.ring.size ? RING_MS : FLASH_MS;
   useEffect(() => {
     if (seq === undefined || flashed.get(store) === seq) return undefined;
     const timer = setTimeout(() => {
       flashed.set(store, seq);
       played(seq);
-    }, FLASH_MS);
+    }, ms);
     return () => clearTimeout(timer);
-  }, [store, seq]);
+  }, [store, seq, ms]);
   return flash && flashed.get(store) !== flash.seq ? flash : undefined;
 }
 

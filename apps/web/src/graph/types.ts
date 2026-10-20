@@ -201,7 +201,7 @@ export interface GraphState {
   layout: GraphLayout;
   /**
    * The plan it was built from: that plan's own `for` object (`PlanState['for']`), not a copy, since the flash
-   * compares the two by identity to tell the picture of the pin's plan from an older one.
+   * compares the two by identity to tell the picture of the change's plan from an older one.
    */
   for: { files: number; epoch: number; project: number };
   /** Milliseconds the layout worker took, when it ran. */

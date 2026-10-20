@@ -48,7 +48,8 @@ const tab = (page: Page, name: string): Locator =>
 const panel = (page: Page): Locator => page.getByRole('tabpanel');
 const unknownRow = (page: Page, id: string): Locator => page.locator(`li[data-unknown="${id}"]`);
 const source = (page: Page): Locator => page.getByRole('region', { name: 'Workflow source' });
-const statusLine = (page: Page): Locator => page.getByRole('contentinfo');
+/** The status line's sentence: its live region, without the Details button beside it. */
+const statusLine = (page: Page): Locator => page.getByRole('contentinfo').locator('[aria-live]');
 const caseButton = (page: Page): Locator =>
   page.getByRole('button', { name: 'Copy as test case', exact: true });
 const caseDialog = (page: Page): Locator => page.getByRole('dialog', { name: 'Copy as test case' });
@@ -148,6 +149,25 @@ test.describe('axe finds nothing', () => {
     await unknownRow(page, DETECT).getByRole('button', { name: 'Pin…' }).click();
     await expect(panel(page).getByRole('form', { name: /^Pin build\.detect/ })).toBeVisible();
     await expectAxeClean(page, 'light: the Unknowns tab with the pin editor open');
+  });
+
+  test('with what a pin changed open in Details, in both themes', async ({ page }) => {
+    await openStarter(page);
+    await pinChangedFiles(page);
+    await expect(statusLine(page)).toHaveText(PINNED);
+    await page.getByRole('contentinfo').getByRole('button', { name: 'Details' }).click();
+    await expect(page.getByRole('dialog', { name: 'What changed' })).toBeVisible();
+    await expect(
+      page.getByRole('dialog', { name: 'What changed' }).getByRole('button').first(),
+    ).toBeFocused();
+    await expectAxeClean(page, 'light: Details open');
+    await darkTheme(page);
+    await page.getByRole('contentinfo').getByRole('button', { name: 'Details' }).click();
+    await expect(page.getByRole('dialog', { name: 'What changed' })).toBeVisible();
+    await expectAxeClean(page, 'dark: Details open');
+    // Escape closes it, as the platform's popover does.
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'What changed' })).toBeHidden();
   });
 
   test('in the dark theme, over the graph, the panels and the case dialog', async ({ page }) => {
