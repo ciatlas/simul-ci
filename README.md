@@ -26,8 +26,8 @@ In a workflow, the action runs the route tests (annotations on the test line and
 job summary, `junit`), or prints the plan of a scenario:
 
 ```yaml
-- uses: ciatlas/simulci@v0.1
-- uses: ciatlas/simulci@v0.1
+- uses: ciatlas/simulci@v0.2
+- uses: ciatlas/simulci@v0.2
   with:
     mode: plan
     scenario: '{ event: pull_request, base: main, head: feat/x, changed: [src/a.ts] }'
