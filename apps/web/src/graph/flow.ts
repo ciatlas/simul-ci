@@ -400,23 +400,25 @@ export function edgeIdOf(el: unknown): string | undefined {
   return e.getAttribute?.('data-id') ?? undefined;
 }
 
-/** An edit key on the canvas: remove the selection, or take the focused edge's need away. */
-export type EditKey = 'remove' | { source: NodeId; target: NodeId };
+/** An edit key on the canvas: remove the selection, move the selected step, or take the focused edge's need away. */
+export type EditKey = 'remove' | 'up' | 'down' | { source: NodeId; target: NodeId };
 
 /**
  * What a key press on the canvas asks of the edit runtime (synthesis § 4.2): Delete or Backspace removes the need of
- * the focused edge, else the selection; on a card, only the selection that card holds, so a key never removes another
- * node than the one the focus is on. Typed into a field, or with Alt, Ctrl or Meta, it is none.
+ * the focused edge, else the selection; Alt+↑ and Alt+↓ move the selected step. On a card, only the selection that
+ * card holds, so a key never edits another node than the one the focus is on. Typed into a field, or with Ctrl or
+ * Meta, it is none.
  */
 export function editKey(
   e: KeyPress & { shiftKey?: boolean },
   model: GraphModel | undefined,
   selected: NodeId | undefined,
 ): EditKey | undefined {
-  if (!canvasKey(e) || e.shiftKey || e.altKey) return undefined;
-  if (e.key !== 'Delete' && e.key !== 'Backspace') return undefined;
+  const key = keyOf(e);
+  if (key === undefined) return undefined;
   const card = nodeIdOf(e.target);
-  if (card !== undefined) return model && holder(model, selected) === card ? 'remove' : undefined;
+  if (card !== undefined) return model && holder(model, selected) === card ? key : undefined;
+  if (key !== 'remove') return undefined;
   const edge = edgeIdOf(e.target);
   if (edge === undefined) return 'remove';
   for (const scope of Object.values(model?.scopes ?? {})) {
@@ -424,6 +426,13 @@ export function editKey(
     if (found) return { source: found.source, target: found.target };
   }
   return undefined;
+}
+
+/** Delete or Backspace, Alt+↑ or Alt+↓, given to the canvas. */
+function keyOf(e: KeyPress & { shiftKey?: boolean }): 'remove' | 'up' | 'down' | undefined {
+  if (!canvasKey(e) || e.shiftKey) return undefined;
+  if (e.altKey) return e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : undefined;
+  return e.key === 'Delete' || e.key === 'Backspace' ? 'remove' : undefined;
 }
 
 /** How focus came to a card: `keys` when the canvas keys put it there, `keyboard` when it shows a focus ring. */

@@ -20,7 +20,7 @@ interface MenuItem {
   run: (g: Gestures) => boolean;
 }
 
-/** The actions of a node of the focused workflow: the workflow's, a job's. */
+/** The actions of a node of the focused workflow: the workflow's, a job's, a step's. */
 function menuItems(store: SessionStore, node: NodeId): MenuItem[] {
   const s = store.getState();
   const kind = s.plan && planIndex(s.plan).nodes.get(node)?.kind;
@@ -30,7 +30,15 @@ function menuItems(store: SessionStore, node: NodeId): MenuItem[] {
     return [
       { label: `Add a job after ${name}…`, keys: 'A', run: (g) => g.addJob() },
       { label: `What ${name} needs…`, keys: 'N', run: (g) => g.needs() },
+      { label: `Add a step to ${name}…`, keys: 'S', run: (g) => g.palette() },
       { label: `Remove job ${name}`, keys: 'Delete', run: (g) => g.remove() },
+    ];
+  if (kind === 'step')
+    return [
+      { label: 'Add a step after this one…', keys: 'S', run: (g) => g.palette() },
+      { label: 'Move up', keys: 'Alt+ArrowUp', run: (g) => g.move(-1) },
+      { label: 'Move down', keys: 'Alt+ArrowDown', run: (g) => g.move(1) },
+      { label: 'Remove this step', keys: 'Delete', run: (g) => g.remove() },
     ];
   return [];
 }

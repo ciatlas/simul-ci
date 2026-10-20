@@ -69,13 +69,6 @@ export function PanelSteps({
             className="sc-step-row"
             {...(locked ? {} : drag.target(step.index))}
           >
-            {!locked && <DragHandle {...drag.handle(step.index)} />}
-            {!locked && (
-              <InsertGap
-                label={`Add a step before step ${step.index + 1}`}
-                onInsert={() => insert(step.index)}
-              />
-            )}
             <button
               type="button"
               data-step-name
@@ -89,6 +82,14 @@ export function PanelSteps({
               <span className="mr-1.5 font-mono text-muted text-xs">{step.index + 1}</span>
               {step.name ?? step.uses ?? step.runHead ?? `step ${step.index + 1}`}
             </button>
+            {/* After the name in the DOM, so the row's first control is the step; the handle shows at the left. */}
+            {!locked && <DragHandle {...drag.handle(step.index)} />}
+            {!locked && (
+              <InsertGap
+                label={`Add a step before step ${step.index + 1}`}
+                onInsert={() => insert(step.index)}
+              />
+            )}
           </li>
         ))}
       </ol>

@@ -15,9 +15,9 @@ import { type Ask, type GestureUi, hostUi, type Open } from './ui';
 
 /**
  * The structural gestures' host while edit mode shows (synthesis § 4.2, § 4.5): it registers what the canvas, the
- * page keys and the outline tree ask for (`edit/gestures.ts`), and shows what they open: Add job, What it needs, an
- * outline row's actions, the palette, the question before a removal, and a refused canvas gesture's sentence at its card. A job
- * added takes the focus once its card is drawn, brought into view when it is outside it.
+ * page keys and the outline tree ask for (`edit/gestures.ts`), and shows what they open: Add job, What it needs, the
+ * palette, an outline row's actions, the question before a removal, and a refused canvas gesture's sentence at its
+ * card. A job added takes the focus once its card is drawn, brought into view when it is outside it.
  */
 export function EditHost() {
   const { store } = useApp();

@@ -680,6 +680,7 @@
 
 .sc-step-handle {
   flex: none;
+  order: -1;
   width: 10px;
   color: var(--muted);
   font-size: 10px;

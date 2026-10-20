@@ -365,8 +365,8 @@ function openNeeds(store: SessionStore, ui: GestureUi): boolean {
   return true;
 }
 
-/** The outline rows that have actions: the workflow's and its jobs'. */
-const ACTIONABLE: ReadonlySet<string> = new Set(['workflow', 'job']);
+/** The outline rows that have actions: the workflow's, its jobs' and their steps'. */
+const ACTIONABLE: ReadonlySet<string> = new Set(['workflow', 'job', 'step']);
 
 /** An outline row's actions: the row is selected, so each acts on it as its key would. */
 function openMenu(store: SessionStore, ui: GestureUi, node: NodeId, anchor: Element): boolean {

@@ -74,7 +74,7 @@ import './canvas.css';
  * another's makes the second need the first, through ops like every other gesture, and a drag the document refuses
  * (the same job, another workflow, a need it has, a loop) draws a red line and connects nothing; an edge takes the
  * focus and shows ✕ (a click on it selects the job whose need it is), and Delete on it removes the need; Delete on the
- * canvas removes the selected job. Nodes stay where
+ * canvas removes the selected job or step, and Alt+↑/↓ move the selected step. Nodes stay where
  * ELK put them. A need just written is drawn dashed until a picture of its texts is on screen.
  */
 
@@ -458,7 +458,7 @@ interface FocusRefs {
 /**
  * The canvas keys on the wrapper: `navigate()` answers, with the last needs edge remembered for Alt to cycle, and the
  * card the keys are moving the focus to until it has it. In edit mode the edit keys go first: Delete removes the
- * focused edge's need or the selection.
+ * focused edge's need or the selection, Alt+↑/↓ move a selected step (and are ↑/↓ for anything else).
  */
 function useCanvasKeys(
   store: SessionStore,
@@ -493,6 +493,7 @@ function runEditKey(
   const edit = key && gestures.of(store);
   if (!key || !edit) return false;
   if (key === 'remove') return edit.remove();
+  if (key === 'up' || key === 'down') return edit.move(key === 'up' ? -1 : 1);
   edit.disconnect(key.source, key.target);
   return true;
 }
