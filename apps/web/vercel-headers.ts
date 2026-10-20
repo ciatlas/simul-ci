@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 
@@ -58,6 +58,22 @@ function applyOnWrite(res: ServerResponse, headers: Map<string, string>): void {
 export const isNotFound = (config: VercelConfig, pathname: string, fileExists: boolean): boolean =>
   !fileExists && !config.rewrites.some((rule) => matches(rule.source, pathname));
 
+/** The request's path as the static server reads it: decodeURI keeps an encoded `/` encoded; a bad escape stays. */
+export function pathOf(url: string | undefined): string {
+  const raw = new URL(url ?? '/', 'http://preview').pathname;
+  try {
+    return decodeURI(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** Whether a file of `dist` serves the path: a directory does not, and nothing outside `dist` is looked at. */
+export function servesFile(dist: string, pathname: string): boolean {
+  const file = resolve(dist, `.${pathname}`);
+  return file.startsWith(`${dist}${sep}`) && existsSync(file) && statSync(file).isFile();
+}
+
 /** `vite preview` answers with vercel.json's headers, and with 404 where Vercel would (not with the SPA's page). */
 export function vercelHeaders(config: VercelConfig = readVercelConfig()): Plugin {
   return {
@@ -65,9 +81,9 @@ export function vercelHeaders(config: VercelConfig = readVercelConfig()): Plugin
     configurePreviewServer(server) {
       const dist = resolve(server.config.root, server.config.build.outDir);
       server.middlewares.use((req, res, next) => {
-        const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://preview').pathname);
+        const pathname = pathOf(req.url);
         applyOnWrite(res, headersFor(config, pathname));
-        if (!isNotFound(config, pathname, existsSync(join(dist, pathname)))) return next();
+        if (!isNotFound(config, pathname, servesFile(dist, pathname))) return next();
         res.statusCode = 404;
         res.end();
       });

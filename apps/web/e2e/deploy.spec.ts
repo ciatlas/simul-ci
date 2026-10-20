@@ -1,5 +1,5 @@
 import { expect, type Page, type Response, test } from '@playwright/test';
-import { headersFor, readVercelConfig } from '../vercel-headers';
+import { headersFor, readVercelConfig } from '../vercel-headers.ts';
 
 /**
  * The deployment smoke: the app as a host serves it, the deployment BASE_URL names (the deployment smoke workflow
@@ -14,8 +14,9 @@ import { headersFor, readVercelConfig } from '../vercel-headers';
 const config = readVercelConfig();
 /** The response headers vercel.json sets, in the lower case Playwright reports them in. */
 const SET_BY_CONFIG = new Set(config.headers.flatMap((rule) => rule.headers.map((h) => h.key.toLowerCase())));
+/** Vercel Authentication answers a redirect to vercel.com's login (or a 401), never the app. */
 const PROTECTED =
-  'the deployment answers 401: Vercel Authentication protects it; set Deployment Protection to none for this project (the app and its source are public)';
+  'Vercel Authentication protects the deployment: set Deployment Protection to none for the project, or give the smoke VERCEL_AUTOMATION_BYPASS_SECRET';
 
 /** What vercel.json says the response's path gets and the host did not send, one line per header. */
 function headerProblems(response: Response): string[] {
@@ -69,8 +70,8 @@ test('the starter plan renders under the CSP, both workers, the YAML pane and th
   });
 
   const response = await page.goto('/');
-  expect(response?.status(), PROTECTED).not.toBe(401);
-  expect(response?.status()).toBe(200);
+  expect(new URL(page.url()).origin, PROTECTED).toBe(origin);
+  expect(response?.status(), PROTECTED).toBe(200);
   await page.getByRole('button', { name: /^Starter/ }).click();
   await expect(page.locator('.react-flow__node-job').first()).toBeVisible();
   const workers = page.workers().map((w) => new URL(w.url()).pathname.replace(/-[\w-]+\.js$/, ''));
@@ -92,10 +93,9 @@ test('the starter plan renders under the CSP, both workers, the YAML pane and th
 test('a deep link is the page, and a missing chunk is a 404 rather than the page under its name', async ({
   request,
 }) => {
-  const deep = await request.get('/some/deep/link?wf=ci.yml');
-  expect(deep.status(), PROTECTED).not.toBe(401);
-  expect(deep.status()).toBe(200);
+  const deep = await request.get('/some/deep/link?wf=ci.yml', { maxRedirects: 0 });
+  expect(deep.status(), PROTECTED).toBe(200);
   expect(deep.headers()['content-type']).toMatch(/^text\/html/);
-  const missing = await request.get('/assets/index-missing.js');
+  const missing = await request.get('/assets/index-missing.js', { maxRedirects: 0 });
   expect(missing.status()).toBe(404);
 });

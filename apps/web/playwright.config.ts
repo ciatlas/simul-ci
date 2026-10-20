@@ -11,6 +11,8 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = 4173;
 const CI = Boolean(process.env.CI);
 const DEPLOYMENT = process.env.BASE_URL;
+/** Vercel's Protection Bypass for Automation, for a deployment behind Vercel Authentication. */
+const BYPASS = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -22,7 +24,15 @@ export default defineConfig({
     headless: true,
     trace: 'retain-on-failure',
     // Vercel adds its Toolbar, a script from vercel.live that the CSP refuses, to preview deployments unless asked not to.
-    ...(DEPLOYMENT ? { extraHTTPHeaders: { 'x-vercel-skip-toolbar': '1' } } : {}),
+    // The bypass also sets a cookie, so the requests the page makes itself (workers, chunks, fonts) get through.
+    ...(DEPLOYMENT
+      ? {
+          extraHTTPHeaders: {
+            'x-vercel-skip-toolbar': '1',
+            ...(BYPASS ? { 'x-vercel-protection-bypass': BYPASS, 'x-vercel-set-bypass-cookie': 'true' } : {}),
+          },
+        }
+      : {}),
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   ...(DEPLOYMENT

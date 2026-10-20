@@ -1,20 +1,24 @@
-# Route tests for deploy-smoke.yml: a deployment status starts it, and the smoke job's if reads the status (its state,
-# its creator, the environment's name), which a scenario does not hold.
+# Route tests for deploy-smoke.yml: Vercel's repository_dispatch for a finished deployment starts it, and the smoke
+# job's if reads the payload's project name, which a scenario does not hold.
 workflow: deploy-smoke.yml
 cases:
-  - name: a deployment status may run the smoke, as its state, creator and environment decide
-    when: { event: deployment_status }
+  - name: a finished deployment may run the smoke, as the payload's project decides
+    when:
+      event: repository_dispatch
+      action: vercel.deployment.success
+      assume:
+        - step: smoke.deployment
+          outputs: { sha: 0123456789abcdef0123456789abcdef01234567, url: 'https://simulci-a1b2c3.vercel.app' }
     then:
       maybe: [smoke]
       checks: [Deployment smoke]
-      # What the if reads, all in the event's payload.
-      unknowns:
-        - github.event.deployment_status.state
-        - github.event.deployment.creator.login
-        - github.event.deployment.environment
+      unknowns: [github.event.client_payload.project.name]
+  - name: a failed deployment does not start it
+    when: { event: repository_dispatch, action: vercel.deployment.error }
+    then: { because: types }
   - name: a push does not start it
     when: { event: push, branch: main }
     then: { because: event }
-  - name: a pull request does not either
-    when: { event: pull_request, base: main, head: feat/x }
+  - name: nor does a deployment status, which would run the deployed commit's workflow files
+    when: { event: deployment_status }
     then: { because: event }

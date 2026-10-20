@@ -1,14 +1,19 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { config as zodConfig } from 'zod';
 import { describeViolation } from '../src/worker/csp';
 // oxlint-disable-next-line import/no-unassigned-import -- what the engine worker imports, for its side effect
 import '../src/worker/jitless';
-import { headersFor, isNotFound, readVercelConfig } from '../vercel-headers';
+import { headersFor, isNotFound, pathOf, readVercelConfig, servesFile } from '../vercel-headers.ts';
 
 /**
- * What the deployment serves (vercel.json, read the way vercel-headers.ts reads it for `vite preview`), and the two
- * modules each worker loads first so that the CSP's refusals inside a worker are seen and zod causes none.
+ * What the deployment serves (vercel.json, read the way vercel-headers.ts reads it for `vite preview`), how the
+ * preview finds the file a path names, and what the workers load first so that the CSP's refusals inside a worker are
+ * seen (csp.ts, in both) and zod causes none (jitless.ts, in the engine worker).
  */
 
 const vercel = readVercelConfig();
@@ -34,10 +39,26 @@ const POLICY = {
   'form-action': "'none'",
 };
 
+/** A source's text outside its parenthesised groups, where path-to-regexp and a regular expression read alike. */
+function outsideGroups(source: string): string {
+  let depth = 0;
+  let out = '';
+  for (const char of source) {
+    if (char === '(') depth++;
+    if (depth === 0) out += char;
+    if (char === ')') depth--;
+  }
+  return out;
+}
+
 describe('vercel.json', () => {
-  it('writes every source as a regular expression', () => {
-    for (const { source } of [...vercel.headers, ...vercel.rewrites])
+  it('writes every source so that Vercel and a regular expression read it alike: no :name, nothing special outside a group', () => {
+    for (const { source } of [...vercel.headers, ...vercel.rewrites]) {
       expect(() => new RegExp(source)).not.toThrow();
+      expect(outsideGroups(source)).toMatch(/^[\w/-]*$/);
+    }
+    expect(outsideGroups('/assets/:path*')).not.toMatch(/^[\w/-]*$/);
+    expect(outsideGroups('/theme.js')).not.toMatch(/^[\w/-]*$/);
   });
 
   it('sends the CSP with every response, the page, its scripts and the worker scripts', () => {
@@ -60,9 +81,46 @@ describe('vercel.json', () => {
   });
 });
 
+describe('the preview finds the file a path names', () => {
+  const dist = mkdtempSync(join(tmpdir(), 'simulci-dist-'));
+  mkdirSync(join(dist, 'assets'));
+  writeFileSync(join(dist, 'assets', 'index-a1.js'), '');
+  writeFileSync(join(dist, 'index.html'), '');
+  afterAll(() => rmSync(dist, { recursive: true }));
+
+  it('in dist, never a directory', () => {
+    expect(servesFile(dist, '/assets/index-a1.js')).toBe(true);
+    expect(servesFile(dist, '/index.html')).toBe(true);
+    for (const path of ['/', '/assets', '/assets/', '/assets/index-gone.js'])
+      expect(servesFile(dist, path)).toBe(false);
+  });
+
+  it('never outside dist, and an encoded slash stays part of a name', () => {
+    expect(pathOf('/assets/..%2F..%2Fpackage.json')).toBe('/assets/..%2F..%2Fpackage.json');
+    expect(servesFile(dist, pathOf('/assets/..%2F..%2Fpackage.json'))).toBe(false);
+    expect(servesFile(dist, '/../package.json')).toBe(false);
+    expect(pathOf('/%E0%A4%A')).toBe('/%E0%A4%A');
+    expect(pathOf('/some%20link?wf=ci.yml')).toBe('/some link');
+  });
+});
+
 describe('the workers under the CSP', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('load csp.ts before anything else, and the engine worker jitless.ts before the engine', () => {
+    const imports = (file: string): string[] =>
+      [
+        ...readFileSync(
+          join(dirname(fileURLToPath(import.meta.url)), '../src/worker', file),
+          'utf8',
+        ).matchAll(/^import .*?'([^']+)';$/gm),
+      ].map((m) => m[1]!);
+    const engine = imports('engine.worker.ts');
+    expect(engine.slice(0, 2)).toEqual(['./csp', './jitless']);
+    expect(engine).toContain('@simulci/engine');
+    expect(imports('layout.worker.ts')[0]).toBe('./csp');
   });
 
   it('say what the CSP refused as an error on the console', () => {
