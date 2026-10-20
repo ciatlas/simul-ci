@@ -10,6 +10,7 @@ import {
   type WorkflowOp,
   type YamlPath,
 } from '@simulci/document';
+import { applyEdits, mapOffset } from '@simulci/document/edits';
 import { copyText } from '../lib/clipboard';
 import { fileLabel } from '../lib/file-label';
 import { markEdit } from '../lib/marks';
@@ -45,7 +46,8 @@ export function dispatch(
  * Takes a fix a refusal offered. `ops` runs the fix's ops where the refused op was, then that op again when the fix
  * retries it; `shared-all` runs the refused op (after the fix's own ops) changing every use of the shared anchor;
  * either way the ops before it run first and the ops after it after, all as one transaction. `unlock` lets the
- * generated file be edited and runs the ops again. The others act on the page and commit nothing: undefined.
+ * generated file be edited and runs the ops again. `undo` undoes the change that broke the file, when that is the
+ * newest entry and the file is as it was refused. The others act on the page and commit nothing: undefined.
  */
 export function applyFix(store: SessionStore, refused: Refused, fix: Fix): Dispatched | undefined {
   const { ops, at, meta, refusal } = refused;
@@ -80,12 +82,43 @@ export function applyFix(store: SessionStore, refused: Refused, fix: Fix): Dispa
       actions.revealLine({ file: refusal.file, line: fix.line });
       break;
     case 'undo':
-      actions.refused(undefined);
-      actions.undo();
-      break;
+      return undoLast(store, refused);
     case 'report':
       void copyText(fix.text);
   }
+  return undefined;
+}
+
+/**
+ * "Undo the last change" of a file that no longer parses: only when the newest entry (or the open typing) changed that
+ * file and nothing changed it since the refusal; else another file's edit would be undone, or one undo too many.
+ */
+function undoLast(store: SessionStore, refused: Refused): Dispatched | undefined {
+  const s = store.getState();
+  const { file } = refused.refusal;
+  const last = s.edit.group
+    ? Object.keys(s.edit.group.before)
+    : (s.edit.past.at(-1)?.files.map((f) => f.path) ?? []);
+  if (movedSince(s, refused.meta.revs))
+    return refuse(store, stale(file), refused.ops, refused.at, refused.meta);
+  if (!last.includes(file)) {
+    const line = refused.refusal.line ?? 1;
+    return refuse(
+      store,
+      {
+        ok: false,
+        reason: 'stale',
+        message: `The last change was not to ${fileLabel(file)}; fix it in the YAML pane.`,
+        file,
+        fixes: [{ kind: 'reveal', label: `Show line ${line}`, line }],
+      },
+      refused.ops,
+      refused.at,
+      refused.meta,
+    );
+  }
+  s.refused(undefined);
+  s.undo();
   return undefined;
 }
 
@@ -130,7 +163,7 @@ function planAll(
   const doc = (path: string): WorkflowDocument | undefined => plan.after.get(path)?.doc ?? docs.of(s, path);
   for (const [at, { op, shared }] of ops.entries()) {
     const result = storeLock(s, op.file) ?? planOp(op, shared ? { doc, shared } : { doc });
-    if (!result.ok) return { refusal: result, at };
+    if (!result.ok) return { refusal: placed(result, plan, s), at };
     fold(plan, result, s, docs);
   }
   return plan;
@@ -184,15 +217,27 @@ function commit(
     files,
     ...(after ? { selectionAfter: after } : {}),
   });
-  // Ops plan on the texts of this tick, so a text that moved under them is a fault of the page, said as `stale`.
-  if (!outcome.ok)
-    return outcome.refusal
-      ? refuse(store, stale(outcome.refusal.path), ops, ops.length - 1, meta)
-      : { ...done, changed: false };
+  if (!outcome.ok) return unchanged(store, outcome, done, ops, meta);
   const now = store.getState();
   for (const [path, { doc, lock }] of plan.after) documents(store).seed(now, path, doc, lock);
   markEdit('edit:tx', now.files.version);
   return { ...done, changed: true };
+}
+
+/**
+ * A transaction that did not commit. Ops plan on the texts of this tick, so a text that moved under them is a fault of
+ * the page, said as `stale`; ops that undo one another commit nothing, as a plan with no edits.
+ */
+function unchanged(
+  store: SessionStore,
+  outcome: { refusal?: { path: string } },
+  done: Omit<Extract<Dispatched, { ok: true }>, 'changed'>,
+  ops: PlannedOp[],
+  meta: OpMeta,
+): Dispatched {
+  if (outcome.refusal) return refuse(store, stale(outcome.refusal.path), ops, ops.length - 1, meta);
+  store.getState().refused(undefined);
+  return { ...done, changed: false };
 }
 
 /** Each file's edits, against the text the ops were planned on, or creating it; files left as they are drop out. */
@@ -219,7 +264,8 @@ const textOf = (s: SessionState, path: string): string | undefined =>
 /**
  * Stores a refusal for the status line and the gesture's callout. Its fixes run against the texts it was refused
  * on: the revisions of the files its ops touch are kept, so a fix taken after the text moved refuses `stale` rather
- * than land on lines the refusal did not mean.
+ * than land on lines the refusal did not mean. A fix that replaces the refused op (a free id for a taken one) is not
+ * offered when ops follow it in the gesture: they would still name what it replaced.
  */
 function refuse(
   store: SessionStore,
@@ -233,7 +279,9 @@ function refuse(
   const kept = Object.fromEntries(
     [...touched].flatMap((path) => (revs[path] === undefined ? [] : [[path, revs[path]]])),
   );
-  const stored = { refusal, ops, at, meta: { ...meta, revs: kept } };
+  const fixes =
+    at < ops.length - 1 ? refusal.fixes.filter((f) => f.kind !== 'ops' || f.retry) : refusal.fixes;
+  const stored = { refusal: { ...refusal, fixes }, ops, at, meta: { ...meta, revs: kept } };
   const seq = store.getState().refused(stored);
   return { ok: false, refused: { ...stored, seq } };
 }
@@ -253,25 +301,72 @@ const stale = (path: string): Refusal => ({
 
 /**
  * What locks a file in the store before the document is asked: bytes that are not UTF-8, which would not be written
- * back as read (`not-utf8`), and a file whose generated marker is not known yet (no Outline of the epoch has come).
+ * back as read (`not-utf8`); a carriage return that ends no line, which the store counts as mixed line endings as
+ * the pane does and the document does not (`mixed-eol`; the pane's footer converts it); and a file whose generated
+ * marker is not known yet, because no Outline of the epoch has come or could be made.
  */
 function storeLock(s: SessionState, path: string): Refusal | undefined {
+  const text = textOf(s, path);
   const meta = s.files.meta[path];
-  if (meta && !meta.utf8 && textOf(s, path) !== undefined)
-    return {
-      ok: false,
-      reason: 'not-utf8',
-      message: `${fileLabel(path)} is not valid UTF-8, so simulci keeps it read-only.`,
-      file: path,
-      fixes: [],
-    };
-  if (s.generated === undefined)
-    return {
-      ok: false,
-      reason: 'stale',
-      message: `${fileLabel(path)} is still loading; try again in a moment.`,
-      file: path,
-      fixes: [],
-    };
-  return undefined;
+  if (text !== undefined && meta && !meta.utf8)
+    return locked('not-utf8', path, `${fileLabel(path)} is not valid UTF-8, so simulci keeps it read-only.`);
+  return (meta?.eol === 'mixed' && text !== undefined && loneCr(path, text)) || markerUnknown(s, path);
+}
+
+/** A carriage return that ends no line: the pane's footer converts it, the document's conversion keeps it. */
+function loneCr(path: string, text: string): Refusal | undefined {
+  const at = text.search(/\r(?!\n)/);
+  if (at < 0) return undefined;
+  const line = text.slice(0, at).split('\n').length;
+  return locked(
+    'mixed-eol',
+    path,
+    `${fileLabel(path)} has a carriage return that ends no line (line ${line}); convert its line endings in the YAML pane first.`,
+    [{ kind: 'reveal', label: `Show line ${line}`, line }],
+  );
+}
+
+/** The file's generated marker is not known: no Outline of the epoch has come, or none could be made. */
+function markerUnknown(s: SessionState, path: string): Refusal | undefined {
+  if (s.generated !== undefined) return undefined;
+  return s.project.status === 'error'
+    ? locked(
+        'stale',
+        path,
+        `The files could not be loaded, so simulci cannot tell whether ${fileLabel(path)} is generated.`,
+      )
+    : locked('stale', path, `${fileLabel(path)} is still loading; try again in a moment.`);
+}
+
+const locked = (reason: Refusal['reason'], file: string, message: string, fixes: Fix[] = []): Refusal => ({
+  ok: false,
+  reason,
+  message,
+  file,
+  fixes,
+});
+
+/**
+ * A refusal of an op planned on the text the gesture's earlier ops would write, its lines moved back to the text on
+ * screen, which those ops never changed: the sentence's, its own and its "Show line" fixes'. A fix's ops keep theirs,
+ * as they run after the earlier ops again.
+ */
+function placed(refusal: Refusal, plan: Plan, s: SessionState): Refusal {
+  const edits = plan.edits.get(refusal.file);
+  const text = textOf(s, refusal.file);
+  const after = plan.after.get(refusal.file)?.doc;
+  if (!edits?.length || text === undefined || !after) return refusal;
+  const { inverse } = applyEdits(text, edits);
+  const back = (line: number): number =>
+    text.slice(0, mapOffset(inverse, after.offsetOf(line, 1), -1)).split('\n').length;
+  const moved: Refusal = {
+    ...refusal,
+    message: refusal.message.replace(
+      /\b(lines?) (\d+(?:(?:, | and )\d+)*)/g,
+      (_, word: string, list: string) => `${word} ${list.replace(/\d+/g, (n) => String(back(Number(n))))}`,
+    ),
+    fixes: refusal.fixes.map((f) => (f.kind === 'reveal' ? { ...f, line: back(f.line) } : f)),
+  };
+  if (refusal.line !== undefined) moved.line = back(refusal.line);
+  return moved;
 }

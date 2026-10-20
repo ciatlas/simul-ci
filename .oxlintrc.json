@@ -70,6 +70,28 @@
           }
         ]
       }
+    },
+    {
+      "files": ["apps/web/src/edit/load.ts", "apps/web/src/edit/types.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@simulci/engine",
+                "message": "only src/worker/** runs the engine; the page imports types, or values from @simulci/engine/plan and @simulci/engine/render",
+                "allowTypeImports": true
+              },
+              {
+                "name": "@simulci/document",
+                "message": "load.ts and types.ts are the page's side of the edit runtime: they hold none of the document model",
+                "allowTypeImports": true
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "options": {

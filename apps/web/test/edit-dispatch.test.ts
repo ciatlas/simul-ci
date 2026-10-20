@@ -309,6 +309,184 @@ describe('dispatch', () => {
   });
 });
 
+describe('the review of the edit runtime', () => {
+  it('offers no fix that replaces a refused op when ops after it would still name what it replaced', () => {
+    const store = opened();
+    const add = { op: 'addJob', file: CI, id: 'build', job: { 'runs-on': 'x' } } as const;
+    const alone = dispatch(store, add);
+    if (alone.ok) throw new Error('a taken id was added');
+    expect(alone.refused.refusal.fixes).toEqual([expect.objectContaining({ kind: 'ops', retry: false })]);
+    const gesture = dispatch(store, [
+      add,
+      { op: 'setJobField', file: CI, job: 'build', field: 'if', value: 'false' },
+    ]);
+    if (gesture.ok) throw new Error('a taken id was added');
+    expect(gesture.refused.refusal).toMatchObject({ reason: 'duplicate-id', fixes: [] });
+    expect(text(store)).toBe(TEXT);
+  });
+
+  it('answers the last refusal when a gesture’s ops undo one another', () => {
+    const store = opened();
+    dispatch(store, { op: 'removeJob', file: CI, job: 'nope' });
+    const result = dispatch(store, [
+      { op: 'setJobField', file: CI, job: 'build', field: 'timeout-minutes', value: 5 },
+      { op: 'setJobField', file: CI, job: 'build', field: 'timeout-minutes', value: null },
+    ]);
+    expect(result).toMatchObject({ ok: true, changed: false });
+    expect(store.getState().edit.refused).toBeUndefined();
+  });
+
+  it('names and reveals lines of the text on screen when a later op of a gesture is refused', () => {
+    const store = opened();
+    const result = dispatch(store, [
+      { op: 'setWorkflowField', file: CI, field: 'name', value: 'CI' },
+      { op: 'setJobField', file: CI, job: 'deploy', field: 'runs-on', value: 'macos-latest' },
+    ]);
+    if (result.ok) throw new Error('refused expected');
+    expect(result.refused.refusal.message).toContain('`&runner` on line 4');
+    applyFix(
+      store,
+      result.refused,
+      result.refused.refusal.fixes.find((f) => f.kind === 'reveal')!,
+    );
+    expect(TEXT.split('\n')[store.getState().reveal!.line - 1]).toContain('&runner');
+    // The fix's ops still run after the op before it, as one entry.
+    const again = dispatch(store, [
+      { op: 'setWorkflowField', file: CI, field: 'name', value: 'CI' },
+      { op: 'setJobField', file: CI, job: 'deploy', field: 'runs-on', value: 'macos-latest' },
+    ]);
+    if (again.ok) throw new Error('refused expected');
+    applyFix(
+      store,
+      again.refused,
+      again.refused.refusal.fixes.find((f) => f.kind === 'ops')!,
+    );
+    expect(text(store)).toMatch(
+      /^name: CI\non: push\n[\s\S]*  deploy:\n    needs: build\n    runs-on: macos-latest\n/,
+    );
+    expect(store.getState().edit.past).toHaveLength(1);
+  });
+
+  it('undoes the change that broke a file only when it is the newest entry and the file did not move since', () => {
+    const OTHER = '.github/workflows/other.yml';
+    const store = opened({ [CI]: TEXT, [OTHER]: 'on: push\njobs:\n  x:\n    runs-on: y\n' });
+    store.getState().typed(OTHER, [{ from: 21, to: 21, insert: '[' }]);
+    dispatch(store, { op: 'setJobField', file: CI, job: 'deploy', field: 'if', value: 'false' });
+    const edited = text(store);
+    const broken = dispatch(store, { op: 'removeJob', file: OTHER, job: 'x' });
+    if (broken.ok) throw new Error('a broken file was edited');
+    const undo = broken.refused.refusal.fixes.find((f) => f.kind === 'undo')!;
+    expect(applyFix(store, broken.refused, undo)).toMatchObject({
+      ok: false,
+      refused: { refusal: { message: 'The last change was not to other.yml; fix it in the YAML pane.' } },
+    });
+    expect(text(store)).toBe(edited);
+    // Its own last change is undone once, however often the fix is taken.
+    store.getState().undo();
+    const again = dispatch(store, { op: 'removeJob', file: OTHER, job: 'x' });
+    if (again.ok) throw new Error('a broken file was edited');
+    const fix = again.refused.refusal.fixes.find((f) => f.kind === 'undo')!;
+    expect(applyFix(store, again.refused, fix)).toBeUndefined();
+    expect(text(store, OTHER)).toBe('on: push\njobs:\n  x:\n    runs-on: y\n');
+    expect(applyFix(store, again.refused, fix)).toMatchObject({
+      ok: false,
+      refused: { refusal: { reason: 'stale' } },
+    });
+    expect(text(store, OTHER)).toBe('on: push\njobs:\n  x:\n    runs-on: y\n');
+  });
+
+  it('refuses a file with a carriage return that ends no line, which the pane holds read-only too', () => {
+    const store = opened({ [CI]: `# made on a Mac\r${TEXT}` });
+    expect(dispatch(store, { op: 'removeJob', file: CI, job: 'deploy' })).toMatchObject({
+      ok: false,
+      refused: { refusal: { reason: 'mixed-eol', fixes: [{ kind: 'reveal', line: 1 }] } },
+    });
+  });
+
+  it('says the files could not be loaded, not that they are loading, once the epoch’s load failed', () => {
+    const store = createSessionStore();
+    store.getState().setFiles({ [CI]: TEXT }, FOLDER);
+    store.getState().projectFailed({ kind: 'source', message: 'boom' });
+    const result = dispatch(store, { op: 'removeJob', file: CI, job: 'deploy' });
+    expect(result).toMatchObject({ ok: false, refused: { refusal: { reason: 'stale' } } });
+    if (!result.ok) expect(result.refused.refusal.message).toMatch(/could not be loaded/);
+  });
+});
+
+describe('the selection across edits, after the review', () => {
+  const epochOf = (store: SessionStore) => store.getState().files.epoch;
+  const plan = (store: SessionStore) =>
+    store.getState().planReceived(planFor(store.getState().files.version, epochOf(store)));
+
+  it('records the selection an earlier op left waiting, so undo goes back to where the author was', () => {
+    const store = opened();
+    store.getState().select(CI, 'build');
+    dispatch(store, { op: 'addJob', file: CI, id: 'lint', after: 'build', job: {} });
+    dispatch(store, { op: 'setJobField', file: CI, job: 'lint', field: 'if', value: 'false' });
+    plan(store);
+    expect(store.getState().sel).toBe('lint');
+    store.getState().undo();
+    plan(store);
+    expect(store.getState().sel).toBe('lint');
+  });
+
+  it('selects the place an op leaves as the new plan spells it, a leg of its job kept', () => {
+    const store = opened();
+    store.getState().select(CI, 'build.#2');
+    dispatch(store, {
+      op: 'renameStepId',
+      file: CI,
+      job: 'build',
+      index: 1,
+      fp: targetOf(store, CI, 'build.#2')!.step!.fp,
+      to: 'unit',
+    });
+    expect(store.getState().edit.pendingSel?.sel).toBe('build.unit');
+    plan(store);
+    store.getState().select(CI, 'build[os=a]');
+    dispatch(store, { op: 'setJobField', file: CI, job: 'build', field: 'timeout-minutes', value: 9 });
+    expect(store.getState().edit.pendingSel).toBeUndefined();
+    expect(store.getState().sel).toBe('build[os=a]');
+  });
+
+  it('leaves the selection where it is for the workflow’s own keys', () => {
+    const store = opened();
+    store.getState().select(CI, 'deploy');
+    dispatch(store, { op: 'addEvent', file: CI, event: 'pull_request' });
+    dispatch(store, { op: 'setWorkflowField', file: CI, field: 'name', value: 'CI' });
+    expect(store.getState().edit.pendingSel).toBeUndefined();
+    expect(store.getState().sel).toBe('deploy');
+  });
+
+  it('drops a waiting selection when the author clicks the node already selected', () => {
+    const store = opened();
+    store.getState().select(CI, 'build');
+    dispatch(store, { op: 'addJob', file: CI, id: 'lint', job: {} });
+    store.getState().select(CI, 'build');
+    plan(store);
+    expect(store.getState().sel).toBe('build');
+  });
+
+  it('matches a job by its exact id: a selection whose job the text lost names nothing', () => {
+    const store = opened({
+      [CI]: TEXT.replace('  deploy:', '  Build2:').replace('needs: build', 'needs: Build2'),
+    });
+    expect(targetOf(store, CI, 'Build2')).toMatchObject({ path: ['jobs', 'Build2'] });
+    expect(targetOf(store, CI, 'build2')).toBeUndefined();
+  });
+
+  it('refuses a step picked on the canvas by its position while the plan is older than the text', () => {
+    const store = opened();
+    expect(targetOf(store, CI, 'build.#2', { planned: true })).toMatchObject({ step: { index: 1 } });
+    store.getState().typed(CI, [{ from: 0, to: 0, insert: '#\n' }]);
+    expect(targetOf(store, CI, 'build.#2', { planned: true })).toBeUndefined();
+    // An id stays its step; Properties reads the text as it is.
+    expect(targetOf(store, CI, 'build.#2')).toMatchObject({ step: { index: 1 } });
+    plan(store);
+    expect(targetOf(store, CI, 'build.#2', { planned: true })).toMatchObject({ step: { index: 1 } });
+  });
+});
+
 describe('the documents', () => {
   it('parse a text once per revision, and an op’s document stands for the text it wrote', () => {
     const store = opened();

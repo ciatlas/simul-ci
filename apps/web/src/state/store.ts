@@ -581,12 +581,14 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         })),
       setDetail: (detail) => set((s) => ({ detail, stale: inputsStale(s) })),
       setFocus: (focus) => set({ focus }),
-      // Returning `s` skips the update: a held selection keeps the tab the author picked.
-      // The author's own choice wins over the one an edit left waiting for its plan.
+      // Returning `s` skips the update: a held selection keeps the tab the author picked. The author's own choice,
+      // the selection already shown included, wins over the one an edit left waiting for its plan.
       select: (focus, sel) =>
         set((s) =>
           s.focus === focus && s.sel === sel
-            ? s
+            ? s.edit.pendingSel
+              ? { edit: { ...s.edit, pendingSel: undefined } }
+              : s
             : {
                 focus,
                 sel,
@@ -826,13 +828,20 @@ function writtenThrough(
   return { ...source, buffers };
 }
 
-const contextOf = (s: SessionState): history.Context => ({
-  at: Date.now(),
-  selection: {
-    ...(s.focus === undefined ? {} : { focus: s.focus }),
-    ...(s.sel === undefined ? {} : { sel: s.sel }),
-  },
-});
+/**
+ * When and where an entry is made. While an earlier edit's selection waits for its plan, that selection is where the
+ * author is: the one shown is a unit path of an older text, which an undo would bring back onto another node.
+ */
+const contextOf = (s: SessionState): history.Context => {
+  const at = s.edit.pendingSel ?? s;
+  return {
+    at: Date.now(),
+    selection: {
+      ...(at.focus === undefined ? {} : { focus: at.focus }),
+      ...(at.sel === undefined ? {} : { sel: at.sel }),
+    },
+  };
+};
 
 /**
  * The files of a new source: a new epoch, every file at the new version, its text as read and as opened, except
