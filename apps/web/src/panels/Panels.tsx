@@ -1,5 +1,5 @@
 import { Tabs } from '@base-ui/react/tabs';
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useSession } from '../app/providers';
 import type { PanelTab } from '../state/prefs';
 import { newestOutline } from '../state/store';
@@ -12,8 +12,12 @@ import { Unknowns } from './Unknowns';
 /**
  * The right panel: Reasons, Unknowns (with the Assumptions above them), Node and Problems, one open at a time. The
  * open tab is a preference; `r` and `1`–`4` switch it from anywhere outside a field (app/shortcuts.ts). A tab's
- * count is what it asks the author to look at: the unknowns that decide a verdict, the problems.
+ * count is what it asks the author to look at: the unknowns that decide a verdict, the problems. In edit mode the Node
+ * tab is Properties: the selection's fields, from the edit runtime, above what the plan says of it.
  */
+
+/** Properties, from the edit runtime's chunk (`edit-*`), fetched when edit mode first shows it. */
+const Properties = lazy(() => import('../edit/edit').then((m) => ({ default: m.Properties })));
 
 const TAB = 'rounded-t px-2.5 py-1.5 text-muted text-xs hover:text-text data-[selected]:text-text';
 
@@ -23,6 +27,7 @@ export function Panels() {
   const plan = useSession((s) => s.plan?.plan);
   const outline = useSession(newestOutline);
   const files = useSession((s) => s.files);
+  const editing = useSession((s) => s.edit.on);
   const gating = plan ? plan.unknowns.filter((u) => u.affects.length > 0).length : 0;
   const problems = useMemo(() => problemRows(outline, plan, files).length, [outline, plan, files]);
 
@@ -41,7 +46,7 @@ export function Panels() {
           <Count n={gating} />
         </Tabs.Tab>
         <Tabs.Tab value="node" className={TAB}>
-          Node
+          {editing ? 'Properties' : 'Node'}
         </Tabs.Tab>
         <Tabs.Tab value="problems" className={TAB}>
           Problems
@@ -55,7 +60,22 @@ export function Panels() {
         <Unknowns />
       </Tabs.Panel>
       <Tabs.Panel value="node" data-panel="node" className={PANEL}>
-        <NodeDetails />
+        {editing ? (
+          <div className="flex flex-col gap-6">
+            <Suspense fallback={<p className="text-muted text-sm">loading the editor…</p>}>
+              <Properties />
+            </Suspense>
+            <section
+              aria-label="What the plan says"
+              className="flex flex-col gap-2 border-border border-t pt-4"
+            >
+              <h2 className="font-medium text-muted text-xs uppercase tracking-wide">What the plan says</h2>
+              <NodeDetails />
+            </section>
+          </div>
+        ) : (
+          <NodeDetails />
+        )}
       </Tabs.Panel>
       <Tabs.Panel value="problems" data-panel="problems" className={PANEL}>
         <Problems />

@@ -160,6 +160,27 @@ export interface OutlineJob {
   matrix: boolean;
   steps: OutlineStep[];
   line: number;
+  /** The names of the job's `outputs:`, which the jobs that need it read; absent when it declares none. */
+  outputs?: string[];
+}
+
+/** The interface a reusable workflow declares under `on.workflow_call`, for the jobs that call it. */
+export interface OutlineCall {
+  inputs: OutlineInput[];
+  outputs: string[];
+  secrets: string[];
+}
+
+/** A local action (`action.yml` under its directory): what a step that uses it may pass and read. */
+export interface OutlineAction {
+  /** The directory `uses: ./<dir>` points at, repository-relative. */
+  dir: string;
+  file: string;
+  name?: string;
+  /** `runs.using`: `composite`, `node20`, `docker`. */
+  using?: string;
+  inputs: OutlineInput[];
+  outputs: string[];
 }
 
 export interface OutlineWorkflow {
@@ -170,6 +191,8 @@ export interface OutlineWorkflow {
   /** In declaration order, `workflow_call` excluded. */
   events: OutlineEvent[];
   dispatch?: OutlineInput[];
+  /** Its `workflow_call` interface, when other workflows may call it. */
+  call?: OutlineCall;
   jobs: OutlineJob[];
   onLine: number;
 }
@@ -192,6 +215,8 @@ export interface Outline {
   workflows: OutlineWorkflow[];
   /** The activity types of the events present, from the engine's table. */
   events: Record<string, { types: string[]; default: string[] }>;
+  /** The local actions the workflows use, by directory; absent when there are none. */
+  actions?: OutlineAction[];
 }
 
 /** Lookups over the plan computed by the worker with the engine's own functions, so the main thread needs no engine. */

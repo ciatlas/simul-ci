@@ -11,7 +11,8 @@ import { caseAvailability } from '../testcase/case';
  * The page's keys outside the canvas (synthesis § 11): `t` switches between the graph and the text, `f` fits, `.`
  * centres the selection, `0` shows 100 %; `r` jumps to the Reasons tab and `1`–`4` open a tab of the right panel;
  * `[`, `]` and `\` close and open the scenario column, the right panel and the YAML pane; `c` opens Copy as test
- * case while there is a plan and a focused workflow; `e` turns edit mode on and off. None fires while the author
+ * case while there is a plan and a focused workflow; `e` turns edit mode on and off, and in edit mode `i` puts the
+ * focus in the selected job's or step's Run if (synthesis § 4.2). None fires while the author
  * types (an input, a textarea, a select, an editable region such as the YAML pane), inside an open dialog, or once
  * something on the way handled the key (the canvas, a tree item: they prevent its default). None fires while the
  * author has turned them off (`prefs.keys`, the top bar's Shortcuts button; WCAG 2.1.4); the canvas's own keys need
@@ -30,6 +31,7 @@ export type PageCommand =
   | 'reasons'
   | 'case'
   | 'edit'
+  | 'runIf'
   | `panel:${PanelTab}`
   | `pane:${Pane}`;
 
@@ -54,6 +56,7 @@ const COMMANDS = new Map<string, PageCommand>([
   ['r', 'reasons'],
   ['c', 'case'],
   ['e', 'edit'],
+  ['i', 'runIf'],
   ['1', 'panel:reasons'],
   ['2', 'panel:unknowns'],
   ['3', 'panel:node'],
@@ -145,10 +148,7 @@ function run(command: PageCommand, s: SessionState & SessionActions, win: Window
     togglePaneKeepingFocus(s, command.slice('pane:'.length) as Pane, win.document);
     return true;
   }
-  if (command === 'edit') {
-    s.setEdit(!s.edit.on);
-    return true;
-  }
+  if (command === 'edit' || command === 'runIf') return runEdit(command, s);
   if (command === 'case') {
     if (!caseAvailability(s).ok) return false;
     s.openCase();
@@ -160,6 +160,20 @@ function run(command: PageCommand, s: SessionState & SessionActions, win: Window
     return true;
   }
   return runView(command, s, win.innerWidth);
+}
+
+/**
+ * `e` turns edit mode on and off; in edit mode `i` puts the focus in Run if of the selected job or step of the focused
+ * workflow (the workflow has no `if:`, and a called workflow's job is not its file's).
+ */
+function runEdit(command: 'edit' | 'runIf', s: SessionState & SessionActions): boolean {
+  if (command === 'edit') {
+    s.setEdit(!s.edit.on);
+    return true;
+  }
+  if (!s.edit.on || !s.sel || s.sel.includes('/')) return false;
+  s.focusProperty('if');
+  return true;
 }
 
 /**

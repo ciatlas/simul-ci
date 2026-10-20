@@ -50,7 +50,9 @@ export function dispatch(
  * newest entry and the file is as it was refused. The others act on the page and commit nothing: undefined.
  */
 export function applyFix(store: SessionStore, refused: Refused, fix: Fix): Dispatched | undefined {
-  const { ops, at, meta, refusal } = refused;
+  const { ops, at, refusal } = refused;
+  // A fix is a gesture of its own, one entry: it joins no field's visit, which its click ended.
+  const { group: _, ...meta } = refused.meta;
   const head = ops.slice(0, at);
   const tail = ops.slice(at + 1);
   const failed = ops[at]!;
@@ -211,12 +213,13 @@ function commit(
     return { ...done, changed: false };
   }
   const after = meta.keepSelection ? undefined : leftSelection(s, plan);
-  const outcome = actions.transact({
+  const input = {
     label: done.label,
     origin: meta.origin ?? 'op',
     files,
     ...(after ? { selectionAfter: after } : {}),
-  });
+  };
+  const outcome = meta.group ? actions.grouped(meta.group, input) : actions.transact(input);
   if (!outcome.ok) return unchanged(store, outcome, done, ops, meta);
   const now = store.getState();
   for (const [path, { doc, lock }] of plan.after) documents(store).seed(now, path, doc, lock);
@@ -305,7 +308,7 @@ const stale = (path: string): Refusal => ({
  * the pane does and the document does not (`mixed-eol`; the pane's footer converts it); and a file whose generated
  * marker is not known yet, because no Outline of the epoch has come or could be made.
  */
-function storeLock(s: SessionState, path: string): Refusal | undefined {
+export function storeLock(s: SessionState, path: string): Refusal | undefined {
   const text = textOf(s, path);
   const meta = s.files.meta[path];
   if (text !== undefined && meta && !meta.utf8)

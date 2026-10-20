@@ -189,6 +189,8 @@ export interface SessionState {
   graph?: GraphState;
   /** The field a pin or a reason asked the form to focus, until the form takes it. */
   fieldFocus?: FieldFocus;
+  /** The Properties field the `i` key asked to focus (`if`), until Properties takes it. */
+  propertyFocus?: { field: string; seq: number };
   /** The line the YAML pane was last asked to show. */
   reveal?: Reveal;
   /** Whether the Copy as test case dialog is open: the top bar's button and the `c` key open it. */
@@ -289,6 +291,10 @@ export interface SessionActions {
   focusField: (focus: Omit<FieldFocus, 'seq'>) => void;
   /** The form took the request `seq`. */
   fieldFocused: (seq: number) => void;
+  /** Opens the right panel on Properties (the Node tab in edit mode) and asks a field of it to take the focus. */
+  focusProperty: (field: string) => void;
+  /** Properties took the request `seq`. */
+  propertyFocused: (seq: number) => void;
   setAssume: (assume: AssumeEntry[]) => void;
   /** Writes the assume list a pin built (the Unknowns tab's Assume and Pin… controls), as a pin. */
   pinAssume: (assume: AssumeEntry[]) => void;
@@ -325,6 +331,11 @@ export interface SessionActions {
    * and the scenario: the plan is stale for the edit until the session brings the one of the new texts.
    */
   transact: (input: history.TxInput) => EditOutcome;
+  /**
+   * A commit of a Properties field: a transaction that joins the open group of the same `key` (the field's focus
+   * session), so the session is one undo entry; it closes on blur (`closeGroup`) or at any other edit.
+   */
+  grouped: (key: string, input: history.TxInput) => EditOutcome;
   /** Text typed in the YAML pane, in the offsets of the file's text now; grouped into undo entries (§ 6). */
   typed: (path: string, edits: readonly TextEdit[], alone?: history.Alone) => EditOutcome;
   /** Closes the open typing group: the pane lost the focus or showed another file. */
@@ -570,6 +581,15 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         })),
       focusField: (focus) => set({ fieldFocus: { ...focus, seq: ++requestSeq } }),
       fieldFocused: (seq) => set((s) => (s.fieldFocus?.seq === seq ? { fieldFocus: undefined } : {})),
+      focusProperty: (field) =>
+        set((s) => ({
+          propertyFocus: { field, seq: ++requestSeq },
+          ui: {
+            ...s.ui,
+            prefs: { ...s.ui.prefs, panel: 'node', collapsed: { ...s.ui.prefs.collapsed, right: false } },
+          },
+        })),
+      propertyFocused: (seq) => set((s) => (s.propertyFocus?.seq === seq ? { propertyFocus: undefined } : s)),
       setAssume: (assume) =>
         set((s) => ({ assume, stale: inputsStale(s), error: authorsErrorCleared(s.error, 'assume') })),
       pinAssume: (assume) =>
@@ -635,6 +655,12 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       transact: (input) =>
         commit(
           (s) => history.transact(s.edit, s.files.byPath, input, contextOf(s)),
+          undefined,
+          input.selectionAfter,
+        ),
+      grouped: (key, input) =>
+        commit(
+          (s) => history.grouped(s.edit, s.files.byPath, key, input, contextOf(s)),
           undefined,
           input.selectionAfter,
         ),

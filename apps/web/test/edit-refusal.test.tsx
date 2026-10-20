@@ -58,7 +58,7 @@ describe('a refusal', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     await userEvent
       .setup()
-      .click(screen.getByRole('button', { name: "Give deploy's `runs-on` its own value" }));
+      .click(screen.getByRole('button', { name: "Give deploy's runs-on its own value" }));
     expect(store.getState().files.byPath[CI]).toContain('  deploy:\n    runs-on: x\n');
     expect(store.getState().edit.past).toHaveLength(1);
     expect(screen.queryByText(/a reference to/)).toBeNull();

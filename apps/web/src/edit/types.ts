@@ -18,6 +18,11 @@ export interface OpMeta {
   label?: string;
   /** Leave the selection where it is, whatever the op would select. */
   keepSelection?: boolean;
+  /**
+   * The group of a Properties field's focus session (`field:<file>:<path>`): its commits join one undo entry, which
+   * closes when the field loses the focus or at any other edit.
+   */
+  group?: string;
 }
 
 /** One op of a dispatch, and whether it changes every use of a shared anchor (the "Change all" fix). */

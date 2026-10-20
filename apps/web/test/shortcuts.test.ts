@@ -166,6 +166,24 @@ describe('the page key listener', () => {
   const press = (key: string): boolean =>
     win.dispatchEvent(new KeyboardEvent('keydown', { key, cancelable: true }));
 
+  it('puts the focus in the selected job’s or step’s Run if with i, in edit mode only', () => {
+    store.getState().select(CI, 'build');
+    expect(press('i')).toBe(true);
+    expect(store.getState().propertyFocus).toBeUndefined();
+    store.getState().setEdit(true);
+    store.getState().togglePane('right');
+    expect(press('i')).toBe(false);
+    expect(store.getState().propertyFocus).toMatchObject({ field: 'if' });
+    expect(store.getState().ui.prefs).toMatchObject({ panel: 'node', collapsed: { right: false } });
+    // The workflow has no `if:`; a called workflow's job is not this file's.
+    store.getState().propertyFocused(store.getState().propertyFocus!.seq);
+    store.getState().select(CI, undefined);
+    expect(press('i')).toBe(true);
+    store.getState().select(CI, 'build/inner');
+    expect(press('i')).toBe(true);
+    expect(store.getState().propertyFocus).toBeUndefined();
+  });
+
   it('switches between the graph and the text with t, and has nothing to switch below 1024 px', () => {
     expect(press('t')).toBe(false);
     expect(store.getState().ui.view).toBe('text');

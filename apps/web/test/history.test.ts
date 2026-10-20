@@ -4,6 +4,7 @@ import {
   type Context,
   close,
   emptyHistory,
+  grouped,
   type History,
   MAX_ENTRIES,
   MAX_UNITS,
@@ -62,6 +63,8 @@ function editor(initial: Record<string, string>) {
       step(typed(h, texts, path, [{ from, to, insert }], at(ms), alone)),
     tx: (files: Parameters<typeof transact>[2]['files'], ms = 0) =>
       step(transact(h, texts, { label: 'Op', origin: 'op', files }, at(ms))),
+    field: (key: string, files: Parameters<typeof transact>[2]['files'], ms = 0) =>
+      step(grouped(h, texts, key, { label: `Field ${key}`, origin: 'field', files }, at(ms))),
     close: () => {
       h = close(h);
     },
@@ -294,6 +297,51 @@ describe('the edit history', () => {
     expect(e.h.past.map((t) => t.id)).toEqual([2, 3]);
   });
 
+  it('groups the commits of a field’s visit under its key into one entry, with the label of the first', () => {
+    const e = editor({ [CI]: 'name: a\nrun: x\n' });
+    ok(
+      e.field('name', [
+        { path: CI, edits: [{ from: 6, to: 7, insert: 'ab' }], expect: stampOf('name: a\nrun: x\n') },
+      ]),
+    );
+    ok(e.field('name', [{ path: CI, edits: [{ from: 8, to: 8, insert: 'c' }] }], 5000));
+    expect(e.h.past).toHaveLength(0);
+    expect(undoLabel(e.h)).toBe('Field name');
+    expect(e.texts[CI]).toBe('name: abc\nrun: x\n');
+    // Another field's commit closes the first visit; so does any transaction.
+    ok(e.field('run', [{ path: CI, edits: [{ from: 15, to: 16, insert: 'y' }] }]));
+    expect(e.h.past.map((t) => t.label)).toEqual(['Field name']);
+    ok(e.tx([{ path: CI, edits: [{ from: 0, to: 0, insert: '#\n' }] }]));
+    expect(e.h.past.map((t) => [t.label, t.origin])).toEqual([
+      ['Field name', 'field'],
+      ['Field run', 'field'],
+      ['Op', 'op'],
+    ]);
+    e.all('undo');
+    expect(e.texts[CI]).toBe('name: a\nrun: x\n');
+    e.all('redo');
+    expect(e.texts[CI]).toBe('#\nname: abc\nrun: y\n');
+  });
+
+  it('refuses a field commit planned against older text, leaves the history alone for one that changes nothing, and never groups a created file', () => {
+    const e = editor({ [CI]: 'a\n' });
+    expect(
+      e.field('k', [{ path: CI, edits: [{ from: 0, to: 1, insert: 'b' }], expect: stampOf('x\n') }]),
+    ).toEqual({
+      refused: 'stale',
+      path: CI,
+    });
+    ok(e.field('k', [{ path: CI, edits: [{ from: 0, to: 1, insert: 'b' }] }]));
+    const before = e.h;
+    ok(e.field('k', [{ path: CI, edits: [{ from: 0, to: 1, insert: 'b' }] }]));
+    expect(e.h).toBe(before);
+    ok(e.field('k', [{ path: RELEASE, edits: [{ from: 0, to: 0, insert: 'on: push\n' }], create: true }]));
+    expect(e.h.group).toBeUndefined();
+    expect(e.h.past.map((t) => t.label)).toEqual(['Field k', 'Field k']);
+    e.all('undo');
+    expect(e.texts).toEqual({ [CI]: 'a\n' });
+  });
+
   it('keeps at most the last 500 entries', () => {
     const e = editor({ [CI]: '' });
     for (let i = 0; i < MAX_ENTRIES + 5; i++)
@@ -313,6 +361,7 @@ const insert = fc.string({ unit: fc.constantFrom('x', ' ', '\n', '\r\n', 'é', '
 type Action =
   | { kind: 'type'; file: 0 | 1; pos: number; del: number; insert: string; dt: number; paste: boolean }
   | { kind: 'tx'; edits: [number, number, string][] }
+  | { kind: 'field'; key: 'a' | 'b'; file: 0 | 1; edit: [number, number, string] }
   | { kind: 'close' | 'undo' | 'redo' };
 
 const action: fc.Arbitrary<Action> = fc.oneof(
@@ -333,6 +382,15 @@ const action: fc.Arbitrary<Action> = fc.oneof(
     arbitrary: fc.record({
       kind: fc.constant('tx' as const),
       edits: fc.array(fc.tuple(fc.nat(), fc.nat({ max: 4 }), insert), { minLength: 2, maxLength: 2 }),
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant('field' as const),
+      key: fc.constantFrom('a' as const, 'b' as const),
+      file: fc.constantFrom(0 as const, 1 as const),
+      edit: fc.tuple(fc.nat(), fc.nat({ max: 4 }), insert),
     }),
   },
   {
@@ -364,6 +422,10 @@ function play(e: ReturnType<typeof editor>, act: Action, now: number): void {
       return { path, edits: [editAt(e.texts[path]!, pos, del, ins)] };
     });
     ok(e.tx(files));
+  } else if (act.kind === 'field') {
+    const path = PATHS[act.file];
+    const [pos, del, ins] = act.edit;
+    ok(e.field(act.key, [{ path, edits: [editAt(e.texts[path]!, pos, del, ins)] }]));
   } else if (act.kind === 'close') e.close();
   else {
     const result = act.kind === 'undo' ? e.undo() : e.redo();

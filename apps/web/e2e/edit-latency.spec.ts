@@ -6,7 +6,8 @@ import { expect, type Page, test } from '@playwright/test';
  * The latency gate (synthesis § 7.5, § 9.5) over flowpact's nine workflows (MIT, `fixtures/flowpact`, 1.6k lines):
  * a key typed into the pane reaches the plan in the store (`edit:plan`) and the canvas's next frame (`edit:painted`)
  * within twice the targets at the 95th percentile, a burst of 40 keys runs no task over 50 ms on the main thread, and
- * no plan that comes while the author types moves the cursor.
+ * no plan that comes while the author types moves the cursor. An op, a Run if committed in Properties, reaches them
+ * within twice its own target.
  * The marks are the page's own (`src/lib/marks.ts`). The figures go to the run's step summary.
  */
 
@@ -50,15 +51,8 @@ async function waitFor(page: Page, stage: string, tx: { at: number; files: numbe
   return mark.at - tx.at;
 }
 
-const p95 = (values: number[]): number => {
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]!;
-};
-
-test('a key reaches the plan on screen within twice the target, and a burst of keys blocks the page for no long task', async ({
-  page,
-}) => {
-  await watchLongTasks(page);
+/** Drops flowpact's workflows on the page and turns edit mode on. */
+async function openFlowpact(page: Page): Promise<void> {
   await page.goto('/');
   const transfer = await page.evaluateHandle((given) => {
     const dt = new DataTransfer();
@@ -68,6 +62,21 @@ test('a key reaches the plan on screen within twice the target, and a burst of k
   await page.dispatchEvent('header', 'drop', { dataTransfer: transfer });
   await expect(page.locator('.react-flow__node-job').first()).toBeVisible();
   await page.getByRole('switch', { name: /^Edit/ }).click();
+}
+
+/** § 7.5's target for an op to the plan on screen, p95, at up to 2k lines; the gate blocks at twice it. */
+const OP_TARGET_MS = 100;
+
+const p95 = (values: number[]): number => {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]!;
+};
+
+test('a key reaches the plan on screen within twice the target, and a burst of keys blocks the page for no long task', async ({
+  page,
+}) => {
+  await watchLongTasks(page);
+  await openFlowpact(page);
   if ((await page.locator('[data-pane="yaml"]').count()) === 0) await page.keyboard.press('\\');
   await page.getByRole('tab', { name: /^release\.yml/ }).click();
   const editor = page.locator('[data-pane="yaml"] .cm-content');
@@ -119,4 +128,43 @@ test('a key reaches the plan on screen within twice the target, and a burst of k
   expect(p95(toPlan)).toBeLessThanOrEqual(2 * TARGET_MS);
   expect(p95(toPaint)).toBeLessThanOrEqual(2 * TARGET_MS);
   expect(long).toEqual([]);
+});
+
+test('an op reaches the plan on screen within twice its target', async ({ page }) => {
+  await openFlowpact(page);
+  await page.locator('.react-flow__node-job').first().click();
+  await page.keyboard.press('i');
+  const runIf = page.locator('[data-panel="node"] [data-field="if"] input');
+  await expect(runIf).toBeFocused();
+
+  // Each Enter commits the condition: one op, loaded and simulated at once (no debounce for ops).
+  const toPlan: number[] = [];
+  const toPaint: number[] = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    await runIf.fill(`github.run_number > ${i}`);
+    const before = (await markOf(page, 'edit:tx'))?.files ?? 0;
+    await runIf.press('Enter');
+    let tx = await markOf(page, 'edit:tx');
+    for (let n = 0; n < 100 && !(tx && tx.files > before); n++) {
+      await page.waitForTimeout(5);
+      tx = await markOf(page, 'edit:tx');
+    }
+    toPlan.push(await waitFor(page, 'edit:plan', tx!));
+    toPaint.push(await waitFor(page, 'edit:painted', tx!));
+  }
+
+  const summary = [
+    '### Op latency (flowpact, a Run if committed in Properties)',
+    '',
+    `| stage | p95 ms | target ms | blocks above ms |`,
+    `|---|---:|---:|---:|`,
+    `| op → plan in the store | ${p95(toPlan).toFixed(0)} | ${OP_TARGET_MS} | ${2 * OP_TARGET_MS} |`,
+    `| op → plan on screen | ${p95(toPaint).toFixed(0)} | ${OP_TARGET_MS} | ${2 * OP_TARGET_MS} |`,
+    '',
+  ].join('\n');
+  console.log(summary);
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
+
+  expect(p95(toPlan)).toBeLessThanOrEqual(2 * OP_TARGET_MS);
+  expect(p95(toPaint)).toBeLessThanOrEqual(2 * OP_TARGET_MS);
 });
