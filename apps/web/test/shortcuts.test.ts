@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
 import {
+  changesKey,
   historyKey,
   installShortcuts,
   isNarrow,
@@ -447,5 +448,26 @@ describe('the history keys in edit mode', () => {
     expect(historyKey(key('z', { ctrlKey: true }, content), s())).toBe(true);
     // A layout that types no Latin letter there: the physical key says Z.
     expect(historyKey({ ...key('я', { ctrlKey: true }), code: 'KeyZ' }, s())).toBe(true);
+  });
+
+  it('open the Changes dialog with Mod+Shift+D in edit mode, the YAML pane included, not from inside a dialog', () => {
+    const store = createSessionStore();
+    const s = () => store.getState();
+    expect(changesKey(key('D', { ctrlKey: true, shiftKey: true }), s())).toBe(false);
+    s().setEdit(true);
+    expect(changesKey(key('d', { ctrlKey: true }), s())).toBe(false);
+    expect(changesKey(key('D', { metaKey: true, shiftKey: true, altKey: true }), s())).toBe(false);
+    expect(changesKey(key('D', { shiftKey: true }), s())).toBe(false);
+    const dialog = document.createElement('dialog');
+    const field = document.createElement('input');
+    dialog.append(field);
+    expect(changesKey(key('D', { ctrlKey: true, shiftKey: true }, field), s())).toBe(false);
+    expect(s().changesOpen).toBe(false);
+    const content = document.createElement('div');
+    content.contentEditable = 'true';
+    expect(changesKey(key('D', { metaKey: true, shiftKey: true }, content), s())).toBe(true);
+    expect(s().changesOpen).toBe(true);
+    s().setChangesOpen(false);
+    expect(changesKey({ ...key('В', { ctrlKey: true, shiftKey: true }), code: 'KeyD' }, s())).toBe(true);
   });
 });

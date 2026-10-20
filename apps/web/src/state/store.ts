@@ -218,6 +218,8 @@ export interface SessionState {
   reveal?: Reveal;
   /** Whether the Copy as test case dialog is open: the top bar's button and the `c` key open it. */
   caseOpen: boolean;
+  /** Whether the Changes dialog is open: the top bar's Changes and Mod+Shift+D in edit mode open it. */
+  changesOpen: boolean;
   /** The unknown whose "affects n" the pointer or the focus is on: the canvas dims every card it does not affect. */
   hoveredUnknown?: UnknownId;
   /** The unknown whose row the Unknowns tab was asked to focus, until the tab takes it. */
@@ -335,6 +337,7 @@ export interface SessionActions {
   setYamlFile: (file: string | undefined) => void;
   openCase: () => void;
   closeCase: () => void;
+  setChangesOpen: (open: boolean) => void;
   /** The pointer or the focus is on an unknown's "affects n", or left it (`undefined`). */
   hoverUnknown: (id: UnknownId | undefined) => void;
   /** Opens the right panel on the Unknowns tab and asks it to focus the unknown's row. */
@@ -410,6 +413,7 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
     stale: false,
     staleShown: false,
     caseOpen: false,
+    changesOpen: false,
     ui: { view: 'graph', hideUntriggered: false, prefs, expanded: [], representative: {}, opened: [] },
     notices: [],
     edit: { ...history.emptyHistory(), on: false, unlocked: [] },
@@ -626,6 +630,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       setYamlFile: (yamlFile) => set((s) => ({ ui: withYamlFile(s.ui, yamlFile) })),
       openCase: () => set({ caseOpen: true }),
       closeCase: () => set({ caseOpen: false }),
+      setChangesOpen: (changesOpen) => set({ changesOpen }),
       hoverUnknown: (hoveredUnknown) =>
         set((s) => (s.hoveredUnknown === hoveredUnknown ? s : { hoveredUnknown })),
       showUnknown: (id) =>
