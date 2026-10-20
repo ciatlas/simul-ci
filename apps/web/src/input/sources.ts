@@ -1,5 +1,6 @@
 import { downloadText } from '../lib/download';
 import { hashFiles } from '../lib/hash';
+import { downloadPatch } from '../state/changes';
 import type { SourceStore, StoredSource } from '../state/persist';
 import { type BaseDiff, dirtyPaths, type SessionState, type SessionStore, type Source } from '../state/store';
 import { type Dropped, filesFromDrop } from './drop';
@@ -16,7 +17,7 @@ import { sampleByName } from './samples';
  * finds them again. Failures are the `source` error of the store; a cancelled picker is nothing; files a walk left
  * out for their size are a notice. Files with unsaved edits are never replaced unasked (synthesis § 5.7): opening a
  * folder or a sample, choosing or dropping files, a paste over an edited buffer, Reload and Forget first ask the
- * author, who can download the edited files, let them go, or keep them.
+ * author, who can download the edited files (each, or as one patch), let them go, or keep them.
  */
 export interface Sources {
   canPickFolder: boolean;
@@ -35,8 +36,11 @@ export interface Sources {
   restore(): Promise<void>;
 }
 
-/** What the author answered the replace prompt: download the edited files first, let them go, or keep them. */
-export type ReplaceChoice = 'download' | 'discard' | 'cancel';
+/**
+ * What the author answered the replace prompt: download the edited files first, each or as one patch; let them go;
+ * or keep them.
+ */
+export type ReplaceChoice = 'download' | 'patch' | 'discard' | 'cancel';
 
 /** A paste the files took, once the replace prompt (if it asked) is answered: `done` is false when it was cancelled. */
 export type Pasted = { ok: true; path: string; done: Promise<boolean> } | Extract<PasteCheck, { ok: false }>;
@@ -49,11 +53,12 @@ export interface SourcesOptions {
    * absent, nothing asks.
    */
   ask?: (what: string, paths: readonly string[]) => Promise<ReplaceChoice>;
-  /** Hands files to the browser to save; one call per file. */
+  /** Hands files to the browser to save; one call per file, or one for the patch. */
   download?: (name: string, text: string) => void;
 }
 
-const downloadYaml = (name: string, text: string): void => downloadText(name, text, 'application/yaml');
+const downloadFile = (name: string, text: string): void =>
+  downloadText(name, text, name.endsWith('.patch') ? 'text/x-diff' : 'application/yaml');
 
 const LOOKED_FOR = 'looked for .github/workflows/*.yml, .github/actions/**/action.yml and action.yml';
 
@@ -71,7 +76,7 @@ function unchanged(read: Walked, files: SessionState['files']): boolean {
   );
 }
 
-export function createSources({ store, persist, ask, download = downloadYaml }: SourcesOptions): Sources {
+export function createSources({ store, persist, ask, download = downloadFile }: SourcesOptions): Sources {
   const actions = store.getState();
 
   /**
@@ -85,6 +90,7 @@ export function createSources({ store, persist, ask, download = downloadYaml }: 
     if (lost.length === 0 || !ask) return true;
     return ask(what, lost).then((choice) => {
       if (choice === 'download') downloadAll(lost);
+      if (choice === 'patch') downloadPatch(store.getState().files, lost, 'base', download);
       return choice !== 'cancel';
     });
   };

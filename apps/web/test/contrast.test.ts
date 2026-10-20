@@ -51,6 +51,12 @@ const PANEL_TEXT = [
   ['might-text', 'bg'],
   ['might-text', 'chrome'],
   ['might-text', 'might-soft'],
+  // A diff (the Changes dialog, the restore rows): its lines on the background, removed and added lines on their
+  // tints, a hunk's header muted. Its +/− counts are `run` and `danger` on the surface, a chip on the restore rows.
+  ['text', 'bg'],
+  ['muted', 'bg'],
+  ['text', 'run-soft'],
+  ['text', 'danger-soft'],
 ] as const;
 
 /** The outlines that identify a control or its state, held to 3:1 against what is next to them. */

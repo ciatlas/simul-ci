@@ -20,7 +20,8 @@ export function historyCommand(event: Keys): HistoryCommand | undefined {
   return undefined;
 }
 
-const letterOf = (event: Keys): string | undefined =>
+/** The letter of a key, lowercase: the key's own, else the physical key's where the layout types no Latin letter. */
+export const letterOf = (event: Keys): string | undefined =>
   /^[a-z]$/i.test(event.key)
     ? event.key.toLowerCase()
     : /^Key([A-Z])$/.exec(event.code ?? '')?.[1]?.toLowerCase();
