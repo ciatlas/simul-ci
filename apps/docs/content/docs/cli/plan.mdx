@@ -73,5 +73,7 @@ npx simulci plan --event push --branch main --as-test steps > .github/simulci/te
 ## Exit codes
 
 `0` with the plan, also when a mock cannot apply (its error is printed after the plan). `2`, with the reason on
-stderr, when the checkout has no workflows, two of `--ref`, `--branch` and `--tag` are given, an `--assume` entry or
-file is not in an entry's form, the `--assume-file` cannot be read, or `--workflow` names no workflow.
+stderr, when the checkout has no workflows, two of `--ref`, `--branch` and `--tag` are given, `--format`, `--detail`
+or `--as-test` is given a value not in its list, an `--assume` entry or file is not in an entry's form, the
+`--assume-file` cannot be read, or `--workflow` names no workflow. Any other error also exits `2` with its message;
+`SIMULCI_DEBUG=1` prints its stack as well.

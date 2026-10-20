@@ -11,9 +11,13 @@ import {
 } from '@simulci/engine';
 import { type ArgsDef, defineCommand } from 'citty';
 import { AssumeError, readWorkflowFiles } from '@simulci/node';
-import { assumeOf, readArgs, values } from './args';
+import { assumeOf, exitCodeOf, oneOf, readArgs, spoken, values } from './args';
 
-/** The `simulci plan` arguments as citty parses them. */
+const FORMATS = ['text', 'json', 'mermaid'] as const;
+const DETAILS = ['steps', 'legs'] as const;
+const AS_TEST = ['jobs', 'steps'] as const;
+
+/** The `simulci plan` arguments: as citty parses them, by their camelCase names, with each choice checked. */
 export interface PlanArgs {
   dir: string;
   event: string;
@@ -30,12 +34,12 @@ export interface PlanArgs {
   actor?: string;
   fork?: boolean;
   message?: string;
-  format: string;
-  detail: string;
+  format: (typeof FORMATS)[number];
+  detail: (typeof DETAILS)[number];
   assume?: string | string[];
   assumeFile?: string;
   /** Print the plan as a test case instead: `jobs` (also a bare `--as-test`) or `steps`. */
-  asTest?: string | boolean;
+  asTest?: (typeof AS_TEST)[number];
   /** The workflow the test case is about (default: the first triggered one). */
   workflow?: string;
 }
@@ -87,7 +91,7 @@ function typed(v: string): string | boolean | number {
   return v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v;
 }
 
-export function render(plan: RunPlan, format: string): string {
+export function render(plan: RunPlan, format: PlanArgs['format']): string {
   if (format === 'json') return `${JSON.stringify(plan, null, 2)}\n`;
   if (format === 'mermaid') return renderMermaid(plan);
   return renderText(plan);
@@ -113,14 +117,14 @@ const PLAN_ARGS = {
   actor: { type: 'string', description: 'The actor login' },
   fork: { type: 'boolean', description: 'The pull request comes from a fork', default: false },
   message: { type: 'string', description: 'The head commit message' },
-  format: { type: 'string', description: 'text, json or mermaid', default: 'text' },
-  detail: { type: 'string', description: 'legs or steps', default: 'steps' },
+  format: { type: 'string', description: spoken(FORMATS), default: 'text' },
+  detail: { type: 'string', description: spoken(DETAILS), default: 'steps' },
   assume: {
     type: 'string',
     description: 'A mock: build.unit=failure, build.unit.outputs.sha=abc (repeatable)',
   },
-  assumeFile: { type: 'string', description: 'A YAML list of mocks' },
-  asTest: {
+  'assume-file': { type: 'string', description: 'A YAML list of mocks' },
+  'as-test': {
     type: 'string',
     description: 'Print a test case instead of the plan: jobs (also a bare --as-test) or steps',
   },
@@ -131,20 +135,31 @@ export const planCommand = defineCommand({
   meta: { name: 'plan', description: 'Which jobs and steps run for a scenario, and why' },
   args: PLAN_ARGS,
   run({ rawArgs }) {
-    const out = planOutput(planArgs(rawArgs));
-    if (out.code) process.stderr.write(out.text);
-    else process.stdout.write(out.text);
-    process.exitCode = out.code;
+    const io = { stderr: (t: string) => process.stderr.write(t), env: process.env };
+    process.exitCode = exitCodeOf(() => {
+      const out = planOutput(planArgs(rawArgs));
+      (out.code ? process.stderr : process.stdout).write(out.text);
+      return out.code;
+    }, io);
   },
 });
 
-/** The arguments of a `simulci plan` command line: every value of a repeated flag, and `jobs` for a bare `--as-test`. */
+/**
+ * The arguments of a `simulci plan` command line: every value of a repeated flag, and `jobs` for a bare `--as-test`.
+ * A `FlagError` when `--format`, `--detail` or `--as-test` is given a value it does not take.
+ */
 export function planArgs(rawArgs: readonly string[]): PlanArgs {
-  const args = readArgs(rawArgs, PLAN_ARGS, {
+  const a = readArgs(rawArgs, PLAN_ARGS, {
     repeated: ['changed', 'input', 'var', 'secret', 'assume'],
-    bare: { asTest: 'jobs' },
+    bare: { 'as-test': 'jobs' },
   });
-  return args as unknown as PlanArgs;
+  return {
+    ...(a as unknown as PlanArgs),
+    format: oneOf('format', a.format, FORMATS),
+    detail: oneOf('detail', a.detail, DETAILS),
+    // `--no-as-test` reads false: no test case.
+    asTest: a.asTest === undefined || a.asTest === false ? undefined : oneOf('as-test', a.asTest, AS_TEST),
+  };
 }
 
 /** What `simulci plan` prints, and the exit code: 2, with the message, when it cannot. */
@@ -159,10 +174,10 @@ export function planOutput(a: PlanArgs): { text: string; code: number } {
     const plan = simulate({
       files,
       scenario,
-      detail: a.detail === 'legs' ? 'legs' : 'steps',
+      detail: a.detail,
       mocks: { cli: assume },
     });
-    if (a.asTest === undefined || a.asTest === false) return { text: render(plan, a.format), code: 0 };
+    if (a.asTest === undefined) return { text: render(plan, a.format), code: 0 };
     return asTest(plan, a, scenario, assume);
   } catch (e) {
     if (!(e instanceof MocksError || e instanceof ScenarioError)) throw e;
@@ -193,6 +208,5 @@ function asTest(
   const path = workflow.startsWith('.github/workflows/') ? workflow : `.github/workflows/${workflow}`;
   if (!plan.workflows.some((w) => w.depth === 0 && w.path === path))
     return { text: `--workflow ${workflow}: no ${path} in the checkout\n`, code: 2 };
-  const detail = a.asTest === 'steps' ? 'steps' : 'jobs';
-  return { text: fileFromPlan({ plan, workflow, scenario, assume, detail }), code: 0 };
+  return { text: fileFromPlan({ plan, workflow, scenario, assume, detail: a.asTest ?? 'jobs' }), code: 0 };
 }

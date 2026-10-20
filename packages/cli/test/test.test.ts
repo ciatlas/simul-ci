@@ -2,12 +2,22 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { renderUsage } from 'citty';
 import { describe, expect, it } from 'vitest';
+import { FlagError } from '../src/args';
 import { planOutput } from '../src/plan';
 import { snapshotPath } from '@simulci/node';
-import { runTestCommand, type TestIo, testArgs } from '../src/test';
+import { runTestCommand, type TestIo, testArgs, testCommand } from '../src/test';
 
 const root = join(import.meta.dirname, '../../..');
+
+/** `simulci test --dir <dir>`, run from source outside CI. */
+const simulci = (dir: string, flags: string[], env: Record<string, string> = {}) =>
+  spawnSync(
+    join(root, 'node_modules/.bin/tsx'),
+    ['--conditions=source', join(root, 'packages/cli/src/index.ts'), 'test', '--dir', dir, ...flags],
+    { encoding: 'utf8', env: { ...process.env, CI: '', GITHUB_ACTIONS: '', SIMULCI_DEBUG: '', ...env } },
+  );
 
 const ci = `
 on:
@@ -147,6 +157,25 @@ describe('testArgs', () => {
     expect(testArgs(['-u']).files).toBeUndefined();
   });
 
+  it('refuses a --snapshot-detail it does not take, and reads the camelCase forms of its flags', async () => {
+    expect(testArgs([]).snapshotDetail).toBe('steps');
+    expect(testArgs(['--snapshot-detail', 'legs', '--assume-file', 'm.yml'])).toMatchObject({
+      snapshotDetail: 'legs',
+      assumeFile: 'm.yml',
+    });
+    expect(testArgs(['--snapshotDetail=legs', '--assumeFile', 'm.yml'])).toMatchObject({
+      snapshotDetail: 'legs',
+      assumeFile: 'm.yml',
+    });
+    expect(() => testArgs(['--snapshot-detail', 'jobs'])).toThrow(
+      new FlagError("--snapshot-detail takes steps or legs, not 'jobs'"),
+    );
+    const help = await renderUsage(testCommand);
+    expect(help).toContain('--snapshot-detail=');
+    expect(help).toContain('--assume-file=');
+    expect(help).not.toMatch(/--[a-z]+[A-Z]/);
+  });
+
   it('applies every --assume from the command line', () => {
     const dir = checkout({
       '.github/workflows/ci.yml': `
@@ -162,15 +191,33 @@ jobs:
       '.github/simulci/tests/ci.test.yml':
         'workflow: ci.yml\ncases:\n  - { name: c, when: { event: push }, then: { units: { build.c: { runs: yes } } } }\n',
     });
-    const run = (...flags: string[]) =>
-      spawnSync(
-        join(root, 'node_modules/.bin/tsx'),
-        ['--conditions=source', join(root, 'packages/cli/src/index.ts'), 'test', '--dir', dir, ...flags],
-        { encoding: 'utf8', env: { ...process.env, CI: '', GITHUB_ACTIONS: '' } },
-      );
-    const both = run('--assume', 'build.a.outputs.go=yes', '--assume', 'build.b.outputs.go=yes');
+    const both = simulci(dir, ['--assume', 'build.a.outputs.go=yes', '--assume', 'build.b.outputs.go=yes']);
     expect(both.status, both.stdout + both.stderr).toBe(0);
-    expect(run('--assume', 'build.a.outputs.go=yes').status).toBe(1);
+    expect(simulci(dir, ['--assume', 'build.a.outputs.go=yes']).status).toBe(1);
+  });
+
+  it('exits 2 with one line for a value it does not take, or an error it does not expect', () => {
+    const dir = checkout({
+      '.github/workflows/ci.yml': ci,
+      '.github/simulci/tests/ci.test.yml':
+        'workflow: ci.yml\ncases:\n  - { name: x, when: { event: push, branch: main }, then: { run: [build] } }\n',
+    });
+    const bad = simulci(dir, ['--snapshot-detail', 'jobs']);
+    expect([bad.status, bad.stdout, bad.stderr]).toEqual([
+      2,
+      '',
+      "--snapshot-detail takes steps or legs, not 'jobs'\n",
+    ]);
+    // The JUnit report's directory would be under a file.
+    const junit = join(dir, '.github/workflows/ci.yml/out/junit.xml');
+    const crash = simulci(dir, ['--junit', junit]);
+    expect([crash.status, crash.stderr]).toEqual([
+      2,
+      `ENOTDIR: not a directory, mkdir '${join(dir, '.github/workflows/ci.yml/out')}'\n`,
+    ]);
+    expect(crash.stdout).toContain('1 passed · 0 failed');
+    const debug = simulci(dir, ['--junit', junit], { SIMULCI_DEBUG: '1' });
+    expect(debug.stderr).toMatch(/^Error: ENOTDIR: [^\n]*\n {4}at /);
   });
 });
 

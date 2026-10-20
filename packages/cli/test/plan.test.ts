@@ -1,9 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { renderMermaid, renderText, simulate } from '@simulci/engine';
+import { renderUsage } from 'citty';
 import { describe, expect, it } from 'vitest';
 import { readWorkflowFiles } from '@simulci/node';
-import { planArgs, planOutput, render, scenarioFromArgs } from '../src/plan';
+import { FlagError } from '../src/args';
+import { planArgs, planCommand, planOutput, render, scenarioFromArgs } from '../src/plan';
 
 const root = join(import.meta.dirname, '../../..');
 const lab = join(root, 'fixtures/routes-lab/repo');
@@ -101,6 +103,40 @@ describe('planArgs', () => {
       workflow: 'ci.yml',
     });
     expect(planArgs([]).asTest).toBeUndefined();
+    expect(planArgs(['--no-as-test']).asTest).toBeUndefined();
+  });
+
+  it('refuses a --format, --detail or --as-test it does not take', () => {
+    expect(planArgs(['--format', 'mermaid', '--detail', 'legs'])).toMatchObject({
+      format: 'mermaid',
+      detail: 'legs',
+    });
+    expect(() => planArgs(['--format', 'jsno'])).toThrow(
+      new FlagError("--format takes text, json or mermaid, not 'jsno'"),
+    );
+    expect(() => planArgs(['--detail', 'jobs'])).toThrow(
+      new FlagError("--detail takes steps or legs, not 'jobs'"),
+    );
+    expect(() => planArgs(['--as-test', 'bogus'])).toThrow(
+      new FlagError("--as-test takes jobs or steps, not 'bogus'"),
+    );
+    expect(() => planArgs(['--as-test='])).toThrow(new FlagError("--as-test takes jobs or steps, not ''"));
+  });
+
+  it('shows its flags in kebab case, and reads their camelCase forms too', async () => {
+    const help = await renderUsage(planCommand);
+    expect(help).toContain('--assume-file=');
+    expect(help).toContain('--as-test=');
+    expect(help).not.toMatch(/--[a-z]+[A-Z]/);
+    expect(planArgs(['--assume-file', 'a.yml', '--as-test', 'steps'])).toMatchObject({
+      assumeFile: 'a.yml',
+      asTest: 'steps',
+    });
+    expect(planArgs(['--assumeFile', 'a.yml', '--asTest', '--fork'])).toMatchObject({
+      assumeFile: 'a.yml',
+      asTest: 'jobs',
+      fork: true,
+    });
   });
 });
 
@@ -191,15 +227,13 @@ describe('simulci plan', () => {
   });
 
   it('prints what is wrong with the input on stderr, and exits 2', () => {
-    const result = spawnSync(
-      tsx,
-      ['--conditions=source', cli, 'plan', '--dir', lab, '--branch', 'a', '--tag', 'b'],
-      { encoding: 'utf8' },
-    );
-    expect([result.status, result.stdout, result.stderr]).toEqual([
-      2,
-      '',
-      'give one of ref, branch or tag\n',
-    ]);
+    const plan = (...flags: string[]) => {
+      const r = spawnSync(tsx, ['--conditions=source', cli, 'plan', '--dir', lab, ...flags], {
+        encoding: 'utf8',
+      });
+      return [r.status, r.stdout, r.stderr];
+    };
+    expect(plan('--branch', 'a', '--tag', 'b')).toEqual([2, '', 'give one of ref, branch or tag\n']);
+    expect(plan('--format', 'jsno')).toEqual([2, '', "--format takes text, json or mermaid, not 'jsno'\n"]);
   });
 });

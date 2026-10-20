@@ -75,7 +75,7 @@ function optionTokens(raw: readonly string[], def: ArgsDef): OptionToken[] {
   });
 }
 
-/** The options citty declares for a command's args: each name, its kebab-case form and its aliases, typed. */
+/** The options citty declares for a command's args: each name, its kebab- and camelCase forms and its aliases, typed. */
 function optionsOf(def: ArgsDef): { options: ParseArgsOptionsConfig; keys: Map<string, string> } {
   const options: ParseArgsOptionsConfig = {};
   const keys = new Map<string, string>();
@@ -83,7 +83,7 @@ function optionsOf(def: ArgsDef): { options: ParseArgsOptionsConfig; keys: Map<s
     if (arg.type === 'positional') continue;
     const type = arg.type === 'boolean' ? 'boolean' : 'string';
     const aliases = 'alias' in arg ? [arg.alias ?? []].flat() : [];
-    for (const name of new Set([key, kebab(key), ...aliases])) {
+    for (const name of new Set([key, kebab(key), camel(key), ...aliases])) {
       options[name] = { type };
       keys.set(name, key);
     }
@@ -94,6 +94,46 @@ function optionsOf(def: ArgsDef): { options: ParseArgsOptionsConfig; keys: Map<s
 }
 
 const kebab = (name: string): string => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+const camel = (name: string): string => name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+
+/** A flag given a value it does not take: the command prints the message and exits 2. */
+export class FlagError extends Error {
+  override name = 'FlagError';
+}
+
+/** `value` when it is one of `choices`; else a `FlagError` naming what `--<flag>` takes. */
+export function oneOf<const T extends string>(flag: string, value: unknown, choices: readonly T[]): T {
+  if (choices.some((c) => c === value)) return value as T;
+  throw new FlagError(`--${flag} takes ${spoken(choices)}, not '${String(value)}'`);
+}
+
+/** A list as a sentence says it: `a, b or c`. */
+export const spoken = (items: readonly string[]): string =>
+  items.length > 1 ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}` : items.join('');
+
+/** Where a command reports an error, and the environment that says how. */
+export interface ErrorIo {
+  stderr: (text: string) => void;
+  env: Record<string, string | undefined>;
+}
+
+/**
+ * The exit code of a command's body; 2 when it throws, with the error's message on stderr (its stack under
+ * `SIMULCI_DEBUG=1`). citty would print the stack and exit 1, which `simulci test` uses for a failed case.
+ */
+export function exitCodeOf(body: () => number, io: ErrorIo): number {
+  try {
+    return body();
+  } catch (e) {
+    io.stderr(`${errorText(e, io.env.SIMULCI_DEBUG === '1')}\n`);
+    return 2;
+  }
+}
+
+function errorText(e: unknown, stack: boolean): string {
+  if (!(e instanceof Error)) return String(e);
+  return stack && e.stack !== undefined ? e.stack : e.message;
+}
 
 /** A flag's values as a list: none, one, or every one it was given. */
 export const values = (v: string | string[] | undefined): string[] =>
