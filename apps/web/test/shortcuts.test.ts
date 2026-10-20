@@ -513,6 +513,19 @@ describe('the history keys in edit mode', () => {
     dialog.append(inside);
     expect(saveKey(key('s', { ctrlKey: true }, inside), s(), save)).toBe(true);
     expect(saves).toBe(3);
+    // An open modal keeps it wherever the focus is; Details, a popover that stays in the page closed, does not.
+    const details = document.createElement('div');
+    details.setAttribute('role', 'dialog');
+    details.setAttribute('popover', 'auto');
+    document.body.append(details, dialog);
+    expect(saveKey(key('s', { ctrlKey: true }, document.body), s(), save)).toBe(true);
+    expect(saves).toBe(4);
+    dialog.setAttribute('open', '');
+    expect(saveKey(key('s', { ctrlKey: true }, document.body), s(), save)).toBe(true);
+    expect(saves).toBe(4);
+    details.remove();
+    dialog.remove();
+    saves = 3;
     // A copy, a paste or a sample has nowhere to save: Changes downloads, once something is unsaved.
     s().setFiles({ [CI]: 'on: push\n' }, { kind: 'folder', name: 'repo', readAt: 0 });
     expect(saveKey(key('s', { ctrlKey: true }), s(), save)).toBe(true);

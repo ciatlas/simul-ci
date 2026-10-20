@@ -23,6 +23,8 @@ export interface FakeOptions {
   rewrite?: Record<string, string | Bytes>;
   /** Runs before each call, so a test can change the folder in the middle of a save. */
   before?: (call: string, folder: FakeFolder) => void;
+  /** Awaited before each file call it answers with a promise: the call waits, as a slow disk would. */
+  wait?: (call: string) => Promise<void> | undefined;
 }
 
 export interface FakeFolder {
@@ -83,8 +85,9 @@ export function fakeFolder(tree: Record<string, string | Bytes>, options: FakeOp
   };
   for (const [path, content] of Object.entries(tree)) folder.set(path, content);
 
-  const step = (op: string, path: string): void => {
+  const step = async (op: string, path: string): Promise<void> => {
     options.before?.(`${op} ${path}`, folder);
+    await options.wait?.(`${op} ${path}`);
     const f = failures.find((x) => x.op === op && x.path === path && x.left > 0);
     if (!f) return;
     f.left--;
@@ -95,25 +98,25 @@ export function fakeFolder(tree: Record<string, string | Bytes>, options: FakeOp
     kind: 'file' as const,
     name: path.slice(path.lastIndexOf('/') + 1),
     getFile: async () => {
-      step('getFile', path);
+      await step('getFile', path);
       const bytes = folder.files.get(path);
       if (!bytes) throw dom('NotFoundError');
       return new Blob([bytes]);
     },
     createWritable: async ({ keepExistingData }: { keepExistingData: boolean }) => {
-      step('createWritable', path);
+      await step('createWritable', path);
       if (!folder.files.has(path)) throw dom('NotFoundError');
       let swap: Bytes[] = keepExistingData ? [folder.files.get(path)!] : [];
       let open = true;
       return {
         write: async (data: string) => {
           if (!open) throw dom('InvalidStateError');
-          step('write', path);
+          await step('write', path);
           swap.push(bytesOf(data));
         },
         close: async () => {
           if (!open) throw dom('InvalidStateError');
-          step('close', path);
+          await step('close', path);
           open = false;
           if (!folder.dirs.has(parentOf(path))) throw dom('NotFoundError');
           const rewrite = options.rewrite?.[path];
@@ -153,7 +156,7 @@ export function fakeFolder(tree: Record<string, string | Bytes>, options: FakeOp
       },
       getFileHandle: async (name: string, opts?: { create?: boolean }) => {
         const path = join(dir, name);
-        step('getFileHandle', path);
+        await step('getFileHandle', path);
         if (folder.dirs.has(path)) throw dom('TypeMismatchError');
         if (!folder.files.has(path)) {
           if (!opts?.create) throw dom('NotFoundError');

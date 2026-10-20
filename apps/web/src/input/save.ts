@@ -116,12 +116,20 @@ interface Write {
 export async function saveTo(
   root: DirectoryLike,
   targets: readonly SaveTarget[],
-  choices: Choices = {},
-  removed: readonly string[] = [],
+  { choices = {}, removed = [], alive = () => true }: SaveOptions = {},
 ): Promise<SaveRun> {
   const left = await removedOutcomes(root, removed);
-  const run = await checkAndWrite(root, targets, choices);
+  const run = await checkAndWrite(root, targets, choices, alive);
   return run.kind === 'done' ? { kind: 'done', files: [...run.files, ...left] } : run;
+}
+
+export interface SaveOptions {
+  /** The author's choices for the conflicts of an earlier round. */
+  choices?: Choices;
+  /** The files removed here, only looked for. */
+  removed?: readonly string[];
+  /** Asked before each write: once false (the files were replaced), the rest are not attempted. */
+  alive?: () => boolean;
 }
 
 /** Whether the folder still has each file removed here; one that cannot be read is taken as there. */
@@ -141,6 +149,7 @@ async function checkAndWrite(
   root: DirectoryLike,
   targets: readonly SaveTarget[],
   choices: Choices,
+  alive: () => boolean,
 ): Promise<SaveRun> {
   const writes: Write[] = [];
   const skipped: string[] = [];
@@ -163,8 +172,10 @@ async function checkAndWrite(
     else skipped.push(target.path);
   }
   if (conflicts.length > 0) return { kind: 'conflicts', conflicts };
-  return done(await writeAll(root, writes), [], skipped);
+  return done(await writeAll(root, writes, alive), [], skipped);
 }
+
+const unattempted = (path: string): FileOutcome => ({ path, status: 'not-attempted' });
 
 /** The outcomes, then the files not attempted, then the ones skipped. */
 function done(outcomes: FileOutcome[], notAttempted: string[], skipped: string[] = []): SaveRun {
@@ -243,10 +254,11 @@ function order(writes: Write[]): Write[] {
 }
 
 /** Writes in turn until one fails; the files after it are not attempted. */
-async function writeAll(root: DirectoryLike, writes: Write[]): Promise<FileOutcome[]> {
+async function writeAll(root: DirectoryLike, writes: Write[], alive: () => boolean): Promise<FileOutcome[]> {
   const ordered = order(writes);
   const outcomes: FileOutcome[] = [];
   for (const [i, w] of ordered.entries()) {
+    if (!alive()) return [...outcomes, ...ordered.slice(i).map((x) => unattempted(x.target.path))];
     try {
       await writeOne(root, w);
     } catch (e) {

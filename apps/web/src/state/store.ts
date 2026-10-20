@@ -156,9 +156,10 @@ export interface SessionState {
     /** Per file, its text when the epoch began. */
     opened: Record<string, string>;
     /**
-     * Per file whose text was once read from bytes that are not UTF-8 within the epoch, the stamps (`stampOf`) of those
-     * texts: whenever the history brings one of them back, the file is not UTF-8 again, and whenever it leaves them, it
-     * is. Undoing a reload or a "Keep the disk version" that changed a file's encoding gives back the encoding too.
+     * Per file whose text was once read from bytes that are not UTF-8 within the epoch, those texts: whenever the
+     * history brings one of them back, the file is not UTF-8 again, and whenever it leaves them, it is. Undoing a reload
+     * or a "Keep the disk version" that changed a file's encoding gives back the encoding too. Whole texts, not hashes:
+     * a text typed that only hashed alike would be taken for one read from other bytes.
      */
     lenient?: Record<string, string[]>;
     /**
@@ -627,12 +628,12 @@ function lenientOf(
 ): Record<string, string[]> {
   const found: Record<string, string[]> = {};
   for (const path of take) {
-    const stamps: string[] = [];
+    const texts: string[] = [];
     const now = files.byPath[path];
-    if (now !== undefined && files.meta[path]?.utf8 === false) stamps.push(history.stampOf(now));
+    if (now !== undefined && files.meta[path]?.utf8 === false) texts.push(now);
     const d = disk[path];
-    if (d && !d.meta.utf8) stamps.push(history.stampOf(d.text));
-    if (stamps.length > 0) found[path] = stamps;
+    if (d && !d.meta.utf8) texts.push(d.text);
+    if (texts.length > 0) found[path] = texts;
   }
   return found;
 }
@@ -643,7 +644,7 @@ const withLenient = (
 ): Pick<SessionState['files'], 'lenient'> => {
   if (Object.keys(more).length === 0) return known ? { lenient: known } : {};
   const lenient = { ...known };
-  for (const [path, stamps] of Object.entries(more)) lenient[path] = [...(lenient[path] ?? []), ...stamps];
+  for (const [path, texts] of Object.entries(more)) lenient[path] = [...(lenient[path] ?? []), ...texts];
   return { lenient };
 };
 
@@ -1169,7 +1170,7 @@ export function withTexts(
 /** A file's meta for its new text as to its encoding: not UTF-8 exactly while the text is one read from such bytes. */
 function encodingOf(meta: FileMeta, lenient: readonly string[] | undefined, text: string): FileMeta {
   if (!lenient) return meta;
-  const utf8 = !lenient.includes(history.stampOf(text));
+  const utf8 = !lenient.includes(text);
   return utf8 === meta.utf8 ? meta : { ...meta, utf8 };
 }
 

@@ -90,6 +90,8 @@ interface Running {
 
 export function createSaver({ store, now = Date.now }: { store: SessionStore; now?: () => number }): Saver {
   let running: Running | undefined;
+  /** The last save started: a save of new files waits until it has stopped, so two saves never write at once. */
+  let last: Promise<unknown> = Promise.resolve();
   let open: ((choices: Choices | undefined) => void) | undefined;
   let seq = 0;
   let noted = false;
@@ -165,7 +167,8 @@ export function createSaver({ store, now = Date.now }: { store: SessionStore; no
     const took: FileOutcome[] = [];
     for (;;) {
       const { targets, removed, encoding } = targetsOf(store.getState().files);
-      const run = await saveTo(root, targets, choices, removed);
+      const alive = (): boolean => store.getState().files.epoch === epoch;
+      const run = await saveTo(root, targets, { choices, removed, alive });
       if (store.getState().files.epoch !== epoch) return false;
       if (run.kind === 'done')
         return written(epoch, folder, targets, [...took, ...run.files, ...as(encoding, 'encoding')]);
@@ -221,10 +224,15 @@ export function createSaver({ store, now = Date.now }: { store: SessionStore; no
     // First, while the gesture's activation lasts; a save that writes nothing asks for nothing.
     const asked = targets.length > 0 ? requestWrite(root) : Promise.resolve(true);
     s.setSaving({ status: 'running', folder });
-    const done: Promise<boolean> = flow(asked, root, folder, epoch).finally(() => {
-      if (running?.done === done) running = undefined;
-    });
+    // A save of the files before stops at its next write (`alive`); this one writes once it has.
+    const before = last;
+    const done: Promise<boolean> = before
+      .then(() => flow(asked, root, folder, epoch))
+      .finally(() => {
+        if (running?.done === done) running = undefined;
+      });
     running = { epoch, done };
+    last = done.catch(() => undefined);
     return done;
   };
 

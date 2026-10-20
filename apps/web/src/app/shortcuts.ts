@@ -167,12 +167,16 @@ export function saveKey(event: HistoryKey, s: SessionState & SessionActions, sav
   return true;
 }
 
-/** Whether a key comes from inside a dialog, or while one is open anywhere on the page. */
+/**
+ * Whether a key comes from inside a dialog, or while a `<dialog>` is open anywhere on the page: the page's modals are
+ * all `<dialog>`s. A popover that calls itself a dialog (Details) stays in the page while closed, so only being inside
+ * one counts.
+ */
 function dialogAround(target: EventTarget | null): boolean {
   const el = target as (Partial<HTMLElement> & { ownerDocument?: Document | null }) | null;
   if (typeof el?.closest === 'function' && el.closest('dialog, [role="dialog"]') !== null) return true;
   const doc = el?.ownerDocument ?? (typeof document === 'undefined' ? undefined : document);
-  return doc?.querySelector('dialog[open], [role="dialog"]') != null;
+  return doc?.querySelector('dialog[open]') != null;
 }
 
 /** Runs a command; false when it has nothing to act on, so the key goes on as if unheard. */

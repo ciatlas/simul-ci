@@ -142,6 +142,49 @@ describe('a save that outlives its folder', () => {
   });
 });
 
+describe('a save of the same folder opened again', () => {
+  it('waits for the save of the files before, which stops at its next write', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let held = false;
+    const fake = fakeFolder(
+      { [CI]: 'a\n', [DEPLOY]: 'b\n' },
+      {
+        wait: (call) => {
+          if (call !== `close ${CI}` || held) return undefined;
+          held = true;
+          reached();
+          return gate;
+        },
+      },
+    );
+    const store = createSessionStore();
+    const saver = createSaver({ store, now: () => 0 });
+    await open(store, fake);
+    edit(store, CI, '# one\n');
+    edit(store, DEPLOY, '# one\n');
+    const first = saver.save();
+    await writing;
+    // The same folder opened again, its edits let go, while the first save's write of ci.yml is under way.
+    await open(store, fake);
+    edit(store, DEPLOY, '# two\n');
+    const second = saver.save();
+    expect(second).not.toBe(first);
+    release();
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(fake.text(DEPLOY)).toBe('# two\nb\n');
+    // The first save finished the write it was in, and attempted nothing after it.
+    expect(fake.written).toEqual([CI, DEPLOY]);
+  });
+});
+
 describe('the encoding across an undo', () => {
   it('never writes the replaced bytes of a file that was not UTF-8, once an undo brings its text back', async () => {
     const { fake, sources, saver, s } = await opened({ [CI]: LATIN1 });
@@ -156,6 +199,19 @@ describe('the encoding across an undo', () => {
     expect(fake.calls).toEqual([]);
     expect(s().saving).toMatchObject({ sentence: 'not UTF-8, never written: ci.yml', open: false });
     expect(s().redo()).toBe(true);
+    expect(s().files.meta[CI]?.utf8).toBe(true);
+  });
+
+  it('takes a typed text for UTF-8 even when it hashes like a text read from other bytes', async () => {
+    const { fake, store, sources, s } = await opened({ [CI]: 'on: push\n' });
+    // Its text is 'on: \uFFFD # 0095978\n', whose length and FNV-1a are those of 'on: e # 1014284\n'.
+    fake.set(CI, new Uint8Array([...enc('on: '), 0xe9, ...enc(' # 0095978\n')]));
+    await sources.reload();
+    expect(s().undo()).toBe(true);
+    const files = [
+      { path: CI, edits: [{ from: 0, to: s().files.byPath[CI]!.length, insert: 'on: e # 1014284\n' }] },
+    ];
+    expect(store.getState().transact({ label: 'Op', origin: 'op', files }).ok).toBe(true);
     expect(s().files.meta[CI]?.utf8).toBe(true);
   });
 

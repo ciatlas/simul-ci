@@ -44,7 +44,7 @@ export function reloadPlan(files: Files, read: Pick<Walked, 'files' | 'meta' | '
     plan.disk[path] = disk ?? null;
     const mine = files.byPath[path];
     plan.from[path] = mine ?? null;
-    if (mine === base || mine === disk?.text) plan.take.push(path);
+    if (mine === base || alike(mine, files.meta[path], disk)) plan.take.push(path);
     else plan.conflicts.push(conflictOf(path, mine, base, disk));
   }
   return plan;
@@ -64,6 +64,13 @@ function conflictOf(
   if (disk) conflict.disk = disk;
   return conflict;
 }
+
+/** Whether the author's text, written, is the folder's file: edited into the folder's very bytes. */
+const alike = (mine: string | undefined, meta: FileMeta | undefined, disk: DiskFile | undefined): boolean =>
+  mine !== undefined &&
+  disk !== undefined &&
+  disk.meta.utf8 &&
+  asWritten(mine, meta) === asWritten(disk.text, disk.meta);
 
 /**
  * Whether the folder still holds the file as it was read or last saved: its text as written, BOM in front, and its
