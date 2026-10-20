@@ -1,0 +1,35 @@
+# A header comment: the file's, not the first key's.
+name: comments # inline after a scalar
+
+on: # inline after a key
+  push:
+    branches: [main] # protected
+  pull_request:
+
+jobs:
+  # Leading comment of build, at its column.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Leading comment of the first step.
+      - name: First
+        run: echo first
+        # Trailing comment of the first step, deeper than its dash.
+
+      - uses: actions/checkout@v4 # pinned
+      # Leading comment of the third step.
+      - run: |
+          echo third
+          # not a comment: inside the block scalar
+    # Trailing comment of build, at its keys' column.
+
+    # After a blank line: nobody's.
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo test
+  # Dangling at the end of jobs, at the jobs' column: nobody's.
+# Dangling at column 0.

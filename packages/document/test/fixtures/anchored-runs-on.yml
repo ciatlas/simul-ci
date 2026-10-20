@@ -1,0 +1,10 @@
+on: push
+jobs:
+  build:
+    runs-on: &runner ubuntu-latest
+    steps:
+      - run: make
+  deploy:
+    runs-on: *runner
+    steps:
+      - run: ./deploy.sh

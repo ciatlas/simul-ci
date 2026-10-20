@@ -1,9 +1,53 @@
 {
+  "anchored-runs-on.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
   "anchors.yml": {
     "indent": 2,
     "indentSeq": true,
     "quote": "'",
     "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "ci.test.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": true,
     "flow": {
       "needs": null,
       "filters": null,
@@ -43,6 +87,28 @@
     },
     "commentGap": 1
   },
+  "events.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
   "families.yml": {
     "indent": 2,
     "indentSeq": true,
@@ -55,6 +121,28 @@
       "matrix": true,
       "runs-on": true,
       "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "flow.test.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
     },
     "ifStyle": "bare",
     "eol": "\n",
@@ -219,6 +307,28 @@
     },
     "commentGap": 1
   },
+  "quoted.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
   "shapes.yml": {
     "indent": 2,
     "indentSeq": true,
@@ -237,6 +347,50 @@
     "finalNewline": true,
     "blank": {
       "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "shared.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": null,
+      "filters": null,
+      "types": null,
+      "matrix": null,
+      "runs-on": null,
+      "other": null
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": false,
+      "steps": false
+    },
+    "commentGap": 1
+  },
+  "starter.yml": {
+    "indent": 2,
+    "indentSeq": true,
+    "quote": "'",
+    "flowPadding": false,
+    "flow": {
+      "needs": true,
+      "filters": true,
+      "types": true,
+      "matrix": true,
+      "runs-on": true,
+      "other": true
+    },
+    "ifStyle": "bare",
+    "eol": "\n",
+    "finalNewline": true,
+    "blank": {
+      "jobs": true,
       "steps": false
     },
     "commentGap": 1
