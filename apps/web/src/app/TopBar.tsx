@@ -1,7 +1,6 @@
 import { CopyAsTest } from '../testcase/CopyAsTest';
 import { useSession } from './providers';
 import { SourceMenu } from './SourceMenu';
-import { useStale } from './stale';
 import { NEXT_THEME } from './theme';
 import { ViewToggle } from './ViewToggle';
 
@@ -18,7 +17,7 @@ export function TopBar() {
   const scenarioId = useSession((s) => s.plan?.plan.scenario.id);
   const engine = useSession((s) => s.engine);
   const ms = useSession((s) => (s.plan ? s.plan.ms.simulate + s.plan.ms.derive : undefined));
-  const stale = useStale();
+  const stale = useSession((s) => s.staleShown);
   const theme = useSession((s) => s.ui.prefs.theme);
   const keys = useSession((s) => s.ui.prefs.keys);
   const setPrefs = useSession((s) => s.setPrefs);

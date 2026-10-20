@@ -1,10 +1,12 @@
+import { fileLabel } from '../lib/file-label';
 import type { Held } from '../state/store';
 import type { Outline, OutlineFile } from '../worker/protocol';
 
 /**
  * The hold (synthesis § 7.2): an edit that breaks the YAML of a file that parsed keeps the plan of the last good
  * texts on screen, rather than the near-empty plan a half-typed key gives. Only YAML errors hold: a converter's error
- * (an unknown event) still plans every job, and the author should see it.
+ * is a result the author should see. Under `on:` it leaves the workflow untriggered, so its jobs drop off the plan
+ * while an event is half typed; in edit mode the focused workflow's jobs are planned anyway (C2).
  */
 
 const brokenYaml = (file: OutlineFile | undefined): boolean =>
@@ -23,5 +25,5 @@ export function heldSentence(held: Held): string {
   const [first, ...rest] = held.broken;
   if (!first) return 'the plan waits for valid YAML';
   const more = rest.length ? ` and ${rest.length} more ${rest.length === 1 ? 'file' : 'files'}` : '';
-  return `the plan waits for valid YAML: ${first.path.slice(first.path.lastIndexOf('/') + 1)} line ${first.line}${more}`;
+  return `the plan waits for valid YAML: ${fileLabel(first.path)} line ${first.line}${more}`;
 }

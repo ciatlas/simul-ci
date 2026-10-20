@@ -1,4 +1,5 @@
 import { applyEdits, regionEdit, type TextEdit, touched } from '@simulci/document/edits';
+import { fileLabel } from '../lib/file-label';
 import { fnv1a } from '../lib/hash';
 
 /**
@@ -43,12 +44,17 @@ export interface Transaction {
   selection: { before: SelectionRef; after?: SelectionRef };
 }
 
-/** Typing not yet closed into a transaction: the texts from before its first key, and where its last key ended. */
+/**
+ * Typing not yet closed into a transaction: the texts from before its first key and after its last, and where its
+ * last key ended. It closes into the edit between those two texts, never into whatever a file holds by then, so a
+ * change that reached a file outside the history is never folded into an entry: the hash guard stops its undo.
+ */
 export interface OpenGroup {
   key: string;
   label: string;
   origin: Origin;
   before: Record<string, string>;
+  now: Record<string, string>;
   selection: SelectionRef;
   /** When its last edit came. */
   last: number;
@@ -133,7 +139,7 @@ export interface TxInput {
  * Edits that change nothing leave no entry. An open group closes first, and the redo stack goes.
  */
 export function transact(h: History, texts: Texts, input: TxInput, ctx: Context): Step | Refusal {
-  const closed = close(h, texts);
+  const closed = close(h);
   const files: FileChange[] = [];
   const changes: TextChanges = {};
   const seen = new Set<string>();
@@ -241,51 +247,55 @@ export function typed(
   if (applied.text === current) return { history: h, changes: {} };
   const key = `pane:${path}`;
   const end = touched(edits).at(-1)!.to;
-  const open = alone === undefined && continues(h.group, key, edits, ctx.at) ? h : close(h, texts);
+  const joins = alone === undefined && continues(h.group, key, current, edits, ctx.at);
+  const open = joins ? h : close(h);
   const group: OpenGroup =
-    open === h && h.group
-      ? { ...h.group, last: ctx.at, end }
+    joins && h.group
+      ? { ...h.group, now: { [path]: applied.text }, last: ctx.at, end }
       : {
           key,
-          label: `${alone ? ALONE_LABEL[alone] : 'Typing in'} ${baseName(path)}`,
+          label: `${alone ? ALONE_LABEL[alone] : 'Typing in'} ${fileLabel(path)}`,
           origin: 'pane',
           before: { [path]: current },
+          now: { [path]: applied.text },
           selection: ctx.selection,
           last: ctx.at,
           end,
         };
   const next: History = { ...open, future: [], group, lastOrigin: 'pane' };
-  const changes = { [path]: applied.text };
-  const after = alone !== undefined || breaksLine(edits) ? close(next, { ...texts, ...changes }) : next;
-  return { history: after, changes };
+  const after = alone !== undefined || breaksLine(edits) ? close(next) : next;
+  return { history: after, changes: { [path]: applied.text } };
 }
 
+/**
+ * Whether a key continues the open group: the same file, still holding the text the group's last key left, within
+ * `PAUSE_MS` of it, one edit touching the offset where the last one ended.
+ */
 function continues(
   group: OpenGroup | undefined,
   key: string,
+  current: string,
   edits: readonly TextEdit[],
   at: number,
 ): boolean {
-  if (group?.key !== key || group.end === undefined || at - group.last > PAUSE_MS || edits.length !== 1)
-    return false;
+  if (group?.key !== key || group.end === undefined || edits.length !== 1) return false;
+  if (at - group.last >= PAUSE_MS || Object.values(group.now)[0] !== current) return false;
   const [edit] = edits;
   return edit!.from <= group.end && group.end <= edit!.to;
 }
 
 const breaksLine = (edits: readonly TextEdit[]): boolean => edits.some((e) => /[\r\n]/.test(e.insert));
 
-const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
-
 /**
- * The open group as one transaction: per file, one region edit from the text before its first key to the text now.
- * A group that changed nothing leaves no entry.
+ * The open group as one transaction: per file, one region edit from the text before its first key to the text after
+ * its last. A group that changed nothing leaves no entry.
  */
-export function close(h: History, texts: Texts): History {
+export function close(h: History): History {
   const g = h.group;
   if (!g) return h;
   const files: FileChange[] = [];
   for (const [path, before] of Object.entries(g.before)) {
-    const after = texts[path];
+    const after = g.now[path];
     if (after === undefined || after === before) continue;
     const edit = regionEdit(before, after);
     const inverse = {
@@ -330,7 +340,7 @@ const unitsOf = (tx: Transaction): number =>
  * must still hold the text it left, or nothing is applied.
  */
 export function undo(h: History, texts: Texts): Step | Refusal | undefined {
-  const closed = close(h, texts);
+  const closed = close(h);
   const tx = closed.past.at(-1);
   if (!tx) return undefined;
   const desynced = tx.files.find((f) => !holds(texts, f.path, f.after));
@@ -371,12 +381,12 @@ function holds(texts: Texts, path: string, stamp: string): boolean {
 }
 
 /** Whether the open group changed anything: a group typed back to its texts leaves no entry when it closes. */
-const groupChanged = (g: OpenGroup, texts: Texts): boolean =>
-  Object.entries(g.before).some(([path, before]) => texts[path] !== before);
+const groupChanged = (g: OpenGroup): boolean =>
+  Object.entries(g.before).some(([path, before]) => g.now[path] !== before);
 
 /** What Undo would undo, by its label; undefined when nothing. */
-export function undoLabel(h: History, texts: Texts): string | undefined {
-  if (h.group && groupChanged(h.group, texts)) return h.group.label;
+export function undoLabel(h: History): string | undefined {
+  if (h.group && groupChanged(h.group)) return h.group.label;
   return h.past.at(-1)?.label;
 }
 

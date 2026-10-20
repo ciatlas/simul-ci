@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { installStaleClock } from '../src/app/stale';
 import type { AssumeEntry, ScenarioInput } from '@simulci/engine';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -296,6 +297,7 @@ describe('the status line', () => {
     vi.useFakeTimers();
     const store = createSessionStore();
     store.getState().setScenario(source);
+    installStaleClock({ store });
     render(
       <AppProvider app={{ store } as unknown as App}>
         <StatusBar />

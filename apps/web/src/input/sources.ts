@@ -107,13 +107,21 @@ export function createSources({ store, persist }: { store: SessionStore; persist
     return kept;
   };
 
+  /** The pasted buffers as a source, still named for the sample they are an edited copy of, if they are. */
+  const pasted = (buffers: { path: string; text: string }[]): Source => {
+    const { source } = store.getState();
+    return source.kind === 'paste' && source.name !== undefined
+      ? { kind: 'paste', buffers, name: source.name }
+      : { kind: 'paste', buffers };
+  };
+
   const setBuffers = (buffers: { path: string; text: string }[], meta = metaOf(buffers)): void => {
     if (buffers.length === 0) {
       actions.forgetSource();
       void persist.clear();
       return;
     }
-    accept({ files: filesOf(buffers), meta }, { kind: 'paste', buffers }, 'the pasted files');
+    accept({ files: filesOf(buffers), meta }, pasted(buffers), 'the pasted files');
   };
 
   /** Dropped files with no folder among them join the pasted buffers, replacing a buffer at the same path. */
@@ -125,7 +133,7 @@ export function createSources({ store, persist }: { store: SessionStore; persist
     const buffers = buffersOf().filter((b) => !(b.path in files));
     const read = { ...metaOf(buffers), ...meta };
     for (const [path, text] of Object.entries(files)) buffers.push({ path, text });
-    if (accept({ files: filesOf(buffers), meta: read }, { kind: 'paste', buffers }, 'the pasted files'))
+    if (accept({ files: filesOf(buffers), meta: read }, pasted(buffers), 'the pasted files'))
       tellLeftOut('the drop', skipped);
   };
 

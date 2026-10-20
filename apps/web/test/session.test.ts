@@ -277,11 +277,18 @@ describe('the session', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().engine.status).toBe('failed');
     expect(store.getState().error).toMatchObject({ kind: 'boot', message: 'the engine did not start' });
-    store.getState().projectReady(3, outline, 1);
+    store.getState().projectReady(3, outline, store.getState().files.version);
     f.restartListeners[0]!(1, 9);
     expect(store.getState().engine.restarts).toBe(1);
     expect(store.getState().project.version).toBe(9);
-    expect(store.getState().notices.map((n) => n.text)).toEqual(['the engine restarted']);
+    // A project of texts the store has moved on from went with the old worker: the fresh one's id is not adopted.
+    store.getState().projectReady(4, outline, store.getState().files.version - 1);
+    f.restartListeners[0]!(2, 1);
+    expect(store.getState().project.version).toBeUndefined();
+    expect(store.getState().notices.map((n) => n.text)).toEqual([
+      'the engine restarted',
+      'the engine restarted again (2)',
+    ]);
   });
 
   it('is busy while a load is unanswered and not once the only one left is answered for files gone since', async () => {

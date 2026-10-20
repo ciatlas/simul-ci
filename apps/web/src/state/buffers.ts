@@ -5,8 +5,9 @@ import type { SessionStore } from './store';
 /**
  * Edited paste buffers survive a reload (synthesis § 5.5). `persist.save` runs when a source is accepted; every edit
  * after that rewrites `source.buffers` in the store (`writtenThrough`), and this writes them 500 ms after the last
- * one, at once when the page is hidden or left. A new source drops a write still waiting: its own was saved when it
- * was accepted, and the old buffers must not land over it.
+ * one, and at least every 2 s while the author keeps typing, so a crash loses little; at once when the page is
+ * hidden or left. A new source drops a write still waiting: its own was saved when it was accepted, and the old
+ * buffers must not land over it.
  */
 export interface BufferWriter {
   /** A write is waiting or under way: leaving the page now could lose the last edits. */
@@ -21,6 +22,8 @@ export interface BufferWriterOptions {
   persist: Pick<SourceStore, 'save'>;
   timers?: Timers;
   delayMs?: number;
+  /** The longest a write waits while edits keep coming. */
+  maxWaitMs?: number;
   /** Where `visibilitychange` and `pagehide` come from; none in tests that do not need them. */
   win?: Pick<Window, 'addEventListener' | 'removeEventListener'> & {
     document: Pick<Document, 'visibilityState'>;
@@ -32,9 +35,12 @@ export function createBufferWriter({
   persist,
   timers,
   delayMs = 500,
+  maxWaitMs = 2000,
   win,
 }: BufferWriterOptions): BufferWriter {
   let writing = 0;
+  /** When the write waiting now was first asked for. */
+  let since = 0;
   let last: Promise<void> = Promise.resolve();
 
   const write = (): void => {
@@ -49,7 +55,11 @@ export function createBufferWriter({
 
   const unsubscribe = store.subscribe((s, prev) => {
     if (s.files.epoch !== prev.files.epoch) waiting.cancel();
-    else if (s.source !== prev.source && s.source.kind === 'paste') waiting.call();
+    else if (s.source !== prev.source && s.source.kind === 'paste') {
+      if (!waiting.pending()) since = Date.now();
+      waiting.call();
+      if (Date.now() - since >= maxWaitMs) waiting.flush();
+    }
   });
 
   const flush = (): Promise<void> => {

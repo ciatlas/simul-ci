@@ -9,6 +9,7 @@ import { createSessionStore, initialSessionState, type SessionStore } from '../s
 import { createEngineClient, type EngineClient, spawnEngineWorker } from '../worker/client';
 import { createLayoutClient, type LayoutClient, spawnLayoutWorker } from '../worker/layout-client';
 import { installShortcuts } from './shortcuts';
+import { installStaleClock } from './stale';
 import { applyTheme } from './theme';
 
 /** Everything the screen needs, made once per page. */
@@ -44,6 +45,7 @@ export function bootApp(): App {
     }
   });
   installShortcuts(store);
+  installStaleClock({ store });
   void sources.restore();
   return { store, client, session, layout, graph, sources, buffers };
 }

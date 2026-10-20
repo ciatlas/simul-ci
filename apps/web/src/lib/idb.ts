@@ -20,15 +20,21 @@ export function openKeyValue(dbName: string, storeName: string): KeyValueStore {
     });
     return opened;
   };
+  /** A read is done when its request succeeds; a write only once its transaction has committed. */
   const run = async <T>(
     mode: IDBTransactionMode,
     op: (store: IDBObjectStore) => IDBRequest<T>,
   ): Promise<T> => {
-    const store = (await db()).transaction(storeName, mode).objectStore(storeName);
+    const tx = (await db()).transaction(storeName, mode);
     return new Promise<T>((resolve, reject) => {
-      const request = op(store);
-      request.addEventListener('success', () => resolve(request.result));
-      request.addEventListener('error', () => reject(request.error ?? new Error('IndexedDB request failed')));
+      const request = op(tx.objectStore(storeName));
+      const fail = (): void => reject(request.error ?? tx.error ?? new Error('IndexedDB request failed'));
+      request.addEventListener('error', fail);
+      if (mode === 'readonly') request.addEventListener('success', () => resolve(request.result));
+      else {
+        tx.addEventListener('complete', () => resolve(request.result));
+        tx.addEventListener('abort', fail);
+      }
     });
   };
   return {

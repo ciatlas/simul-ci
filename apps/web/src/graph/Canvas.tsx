@@ -25,7 +25,6 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useApp, useSession } from '../app/providers';
-import { useStale } from '../app/stale';
 import type { SessionState, SessionStore } from '../state/store';
 import { cardActions, selectedNode } from './card';
 import { type ViewportCommands, viewport } from './commands';
@@ -137,7 +136,7 @@ function Flow() {
 function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<GraphState | undefined> }) {
   const { store } = useApp();
   const selected = useSession(selectedNode);
-  const stale = useStale();
+  const stale = useSession((s) => s.staleShown);
   const colorMode = useColorMode();
   const [hovered, setHovered] = useState<NodeId>();
   const hover = useHover(setHovered);

@@ -63,7 +63,7 @@ function editor(initial: Record<string, string>) {
     tx: (files: Parameters<typeof transact>[2]['files'], ms = 0) =>
       step(transact(h, texts, { label: 'Op', origin: 'op', files }, at(ms))),
     close: () => {
-      h = close(h, texts);
+      h = close(h);
     },
     undo: () => step(undo(h, texts)),
     redo: () => step(redo(h, texts)),
@@ -175,7 +175,7 @@ describe('the edit history', () => {
       label: 'Typing in ci.yml',
       before: { [CI]: 'on: push\n' },
     });
-    expect(undoLabel(e.h, e.texts)).toBe('Typing in ci.yml');
+    expect(undoLabel(e.h)).toBe('Typing in ci.yml');
     e.close();
     expect(e.h.group).toBeUndefined();
     expect(e.h.past).toHaveLength(1);
@@ -219,12 +219,36 @@ describe('the edit history', () => {
     expect(e.texts).toEqual({ [CI]: 'abc\n', [RELEASE]: 'xyz\n' });
   });
 
+  it('closes a group into what it typed: a change made outside the history while it is open stops its undo', () => {
+    const e = editor({ [CI]: 'abc' });
+    ok(e.type(CI, 3, 3, 'd', 0));
+    e.tamper(CI, 'XYZabcd');
+    e.close();
+    expect(e.h.past[0]!.files[0]!.edits).toEqual([{ from: 3, to: 3, insert: 'd' }]);
+    expect(e.undo()).toEqual({ refused: 'desync', path: CI });
+    expect(e.texts[CI]).toBe('XYZabcd');
+    // A key after such a change does not continue the group either.
+    const f = editor({ [CI]: 'abc' });
+    ok(f.type(CI, 3, 3, 'd', 0));
+    f.tamper(CI, 'abcd!');
+    ok(f.type(CI, 5, 5, 'e', 10));
+    expect(f.h.past.map((t) => t.files[0]!.edits)).toEqual([[{ from: 3, to: 3, insert: 'd' }]]);
+  });
+
+  it('closes a group on a pause of exactly 300 ms, and names an action by its directory', () => {
+    const SETUP = '.github/actions/setup/action.yml';
+    const e = editor({ [SETUP]: 'name: x\n' });
+    ok(e.type(SETUP, 0, 0, 'a', 0));
+    ok(e.type(SETUP, 1, 1, 'b', PAUSE_MS));
+    expect(e.h.past.map((t) => t.label)).toEqual(['Typing in setup/action.yml']);
+  });
+
   it('drops a group typed back to its text, and undo then undoes the entry before it', () => {
     const e = editor({ [CI]: 'abc' });
     ok(e.tx([{ path: CI, edits: [{ from: 0, to: 0, insert: '>' }] }]));
     ok(e.type(CI, 4, 4, 'd', 1000));
     ok(e.type(CI, 4, 5, '', 1100));
-    expect(undoLabel(e.h, e.texts)).toBe('Op');
+    expect(undoLabel(e.h)).toBe('Op');
     ok(e.undo());
     expect(e.texts[CI]).toBe('abc');
     expect(e.h.past).toEqual([]);

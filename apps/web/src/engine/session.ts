@@ -4,7 +4,7 @@ import { defaultScenario } from '../scenario/defaults';
 import type { SessionState, SessionStore } from '../state/store';
 import { type CaseFormat, type CaseOutcome, requestCase } from '../testcase/case';
 import type { EngineClient, SimulateResult } from '../worker/client';
-import type { LoadedResponse } from '../worker/protocol';
+import type { LoadedResponse, Outline } from '../worker/protocol';
 import { newlyBroken } from './hold';
 
 /**
@@ -29,10 +29,9 @@ export interface SessionOptions {
   debounceMs?: number;
   /**
    * Milliseconds of quiet after a key typed in the YAML pane before the texts load. A project whose last edit took
-   * longer to load and simulate waits that long instead, so the worker is never more than one load behind.
+   * the worker longer to load and simulate waits that long instead, so the worker is never more than one load behind.
    */
   typingMs?: number;
-  clock?: () => number;
 }
 
 /** Why a load goes out: a new source, an edit of its texts, or the same texts again after a stale reply. */
@@ -67,7 +66,6 @@ export function createSession({
   timers,
   debounceMs = 100,
   typingMs = 150,
-  clock = Date.now,
 }: SessionOptions): Session {
   const actions = store.getState();
   let request = 0;
@@ -75,8 +73,10 @@ export function createSession({
   let unanswered = 0;
   /** The epoch last loaded: its files loaded again (a stale reply, an edit) keep the author's place. */
   let loaded: number | undefined;
-  /** Milliseconds the last edit took from its load to its plan. */
+  /** Milliseconds the worker spent loading and simulating the last edit: its own clock, no queue, no restart. */
   let lastCycle = 0;
+  /** The Outline of the project last committed: what the hold compares a load with, whatever failed since. */
+  let shown: Outline | undefined;
 
   const busy = (delta: 1 | -1): void => {
     unanswered += delta;
@@ -94,7 +94,12 @@ export function createSession({
     }),
   );
   client.onRestart((restarts, project) => {
-    actions.engineRestarted(restarts, project);
+    // The fresh worker holds the newest texts it was sent. That is the project shown only when the shown one is of the
+    // store's texts and not held; otherwise the shown project went with the old worker, and nothing simulates until a
+    // load of the newest texts commits (one is always on its way, or held).
+    const s = store.getState();
+    const current = s.project.files === s.files.version && !s.project.held;
+    actions.engineRestarted(restarts, current ? project : null);
     actions.notify(restarts > 1 ? `the engine restarted again (${restarts})` : 'the engine restarted');
   });
 
@@ -107,13 +112,12 @@ export function createSession({
     const { version, epoch, byPath } = store.getState().files;
     if (cause !== 'edit') actions.projectLoading();
     busy(1);
-    const started = clock();
     try {
       const r = await client.load({ files: projectFiles(byPath) });
       if (store.getState().files.version !== version) return;
       if (r.type === 'loaded') {
         await commit(r, version, epoch);
-        if (cause === 'edit') lastCycle = clock() - started;
+        if (cause === 'edit') lastCycle = r.ms + planMs(version);
       } else if (r.type === 'error') {
         actions.projectFailed({
           kind: r.kind === 'engine' ? 'engine' : 'source',
@@ -133,13 +137,15 @@ export function createSession({
    */
   const commit = async (r: LoadedResponse, version: number, epoch: number): Promise<void> => {
     const fresh = loaded !== epoch;
-    const s = store.getState();
-    const broken = fresh || !s.plan ? [] : newlyBroken(s.project.outline, r.outline);
+    const broken = fresh || !store.getState().plan ? [] : newlyBroken(shown, r.outline);
     if (broken.length) {
+      // A simulate still out was for the project the worker no longer holds: its answer must not land.
+      request++;
       actions.projectHeld({ files: version, outline: r.outline, broken });
       return;
     }
     actions.projectReady(r.project, r.outline, version);
+    shown = r.outline;
     loaded = epoch;
     // New files under the page's own scenario get the defaults for them, and a selection made in other files goes.
     if (fresh && store.getState().scenarioFrom === 'default') {
@@ -176,7 +182,7 @@ export function createSession({
     const now = store.getState();
     if (r.type === 'superseded') return;
     if (r.type === 'plan') {
-      if (r.project === now.project.version)
+      if (r.project === now.project.version && !now.project.held)
         actions.planReceived({
           plan: r.plan,
           derived: r.derived,
@@ -203,9 +209,14 @@ export function createSession({
   };
 
   const simulate = debounce(() => void run(), debounceMs, timers);
-  const edits = scheduler(() => {
-    if (hasProjectFiles(store.getState())) void load('edit');
-  }, timers);
+  // An edit that removed every project file loads too: the worker must not keep simulating the files that went.
+  const edits = scheduler(() => void load('edit'), timers);
+
+  /** What the worker spent simulating the plan of `version`, once it is on screen. */
+  const planMs = (version: number): number => {
+    const { plan } = store.getState();
+    return plan?.for.files === version ? plan.ms.simulate + plan.ms.derive : 0;
+  };
 
   const unsubscribe = store.subscribe((s, prev) => {
     if (s.files.epoch !== prev.files.epoch) {

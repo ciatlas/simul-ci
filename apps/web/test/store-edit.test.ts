@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GraphState } from '../src/graph/types';
+import { createSources } from '../src/input/sources';
+import { memoryStore } from '../src/lib/idb';
 import { stampOf } from '../src/state/history';
+import { sourceStore } from '../src/state/persist';
 import { createSessionStore, type PlanState, withTexts } from '../src/state/store';
 
 const CI = '.github/workflows/ci.yml';
@@ -105,7 +108,7 @@ describe('edits through the store', () => {
     expect(store.getState().files.byPath[CI]).toBe('#on: push\n!');
     expect(store.getState().edit).toMatchObject({ past: [], future: [] });
     expect(store.getState().notices.map((n) => n.text)).toEqual([
-      `undo stopped: ${CI} changed outside the history`,
+      'undo stopped: ci.yml changed outside the history',
     ]);
   });
 
@@ -134,6 +137,36 @@ describe('edits through the store', () => {
     expect(store.getState().files.meta[CI]).toEqual({ bom: true, eol: 'lf', utf8: true });
   });
 
+  it('changes nothing, and says so, for an edit that leaves every text as it is', () => {
+    const { store } = showing();
+    const before = store.getState();
+    expect(before.typed(CI, [{ from: 0, to: 2, insert: 'on' }])).toEqual({ ok: false });
+    expect(before.transact({ label: 'x', origin: 'op', files: [{ path: CI, edits: [] }] })).toEqual({
+      ok: false,
+    });
+    expect(store.getState()).toBe(before);
+  });
+
+  it('keeps what reading found of a file an edit removed, for the undo that brings it back', () => {
+    const store = createSessionStore();
+    store
+      .getState()
+      .setFiles({ [CI]: 'on: push\r\n' }, FOLDER, { [CI]: { bom: true, eol: 'crlf', utf8: true } });
+    store
+      .getState()
+      .transact({ label: 'Removed', origin: 'op', files: [{ path: CI, edits: [], remove: true }] });
+    expect(store.getState().files.byPath).toEqual({});
+    store.getState().undo();
+    expect(store.getState().files.meta[CI]).toEqual({ bom: true, eol: 'crlf', utf8: true });
+  });
+
+  it('keeps a file’s line ending while its text has no line break', () => {
+    const store = createSessionStore();
+    store.getState().setFiles({ [CI]: 'a\r\nb\r\n' }, FOLDER);
+    store.getState().typed(CI, [{ from: 0, to: 6, insert: '' }]);
+    expect(store.getState().files.meta[CI]!.eol).toBe('crlf');
+  });
+
   it('creates and removes files, with their meta and revs', () => {
     const { store } = showing();
     const TEST = '.github/simulci/tests/ci.test.yml';
@@ -152,7 +185,6 @@ describe('edits through the store', () => {
     expect(store.getState().stale).toBe(false);
     a.undo();
     expect(store.getState().files.byPath).not.toHaveProperty(TEST);
-    expect(store.getState().files.meta).not.toHaveProperty(TEST);
     expect(store.getState().files.revs).not.toHaveProperty(TEST);
   });
 
@@ -184,6 +216,15 @@ describe('edits through the store', () => {
       kind: 'paste',
       name: 'edited copy of the starter sample',
     });
+    // Pasting another file keeps the copy's name; removing it does too.
+    const sources = createSources({ store: sample, persist: sourceStore(memoryStore()) });
+    sources.paste('.github/workflows/extra.yml', 'on: pull_request\n');
+    expect(sample.getState().source).toMatchObject({
+      kind: 'paste',
+      name: 'edited copy of the starter sample',
+    });
+    sources.removeBuffer('.github/workflows/extra.yml');
+    expect(sample.getState().source).toMatchObject({ name: 'edited copy of the starter sample' });
   });
 
   it('holds a broken load off the screen until a project of the newest texts is ready', () => {

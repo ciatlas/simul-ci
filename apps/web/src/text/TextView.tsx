@@ -1,5 +1,4 @@
 import { useSession } from '../app/providers';
-import { useStale } from '../app/stale';
 
 const MARK_CLASS: Record<string, string> = { '●': 'text-run', '○': 'text-skip', '◐': 'text-might' };
 
@@ -10,7 +9,7 @@ const MARK_CLASS: Record<string, string> = { '●': 'text-run', '○': 'text-ski
  */
 export function TextView() {
   const text = useSession((s) => s.plan?.text);
-  const stale = useStale();
+  const stale = useSession((s) => s.staleShown);
   const project = useSession((s) => s.project.status);
 
   if (text === undefined)

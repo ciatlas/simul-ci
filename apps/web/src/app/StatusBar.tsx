@@ -4,7 +4,6 @@ import { heldSentence } from '../engine/hold';
 import { summarize } from '../plan/summary';
 import type { Pin } from '../state/store';
 import { useSession } from './providers';
-import { useStale } from './stale';
 
 /**
  * The sentence the line says, and the key of the element that says it. A polite live region reads a node that comes,
@@ -31,7 +30,7 @@ export function StatusBar() {
   const pin = useSession((s) => s.pin);
   const project = useSession((s) => s.project.status);
   const waits = useSession((s) => (s.project.held ? heldSentence(s.project.held) : undefined));
-  const stale = useStale();
+  const stale = useSession((s) => s.staleShown);
   const [line, setLine] = useState<Line>({ text: '', key: SUMMARY });
 
   // Keyed on the plan, not the pin: a pin is answered together with its plan, and one made since says nothing until

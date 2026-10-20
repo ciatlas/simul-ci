@@ -3,6 +3,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { TextEdit } from '@simulci/document/edits';
 import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
+import { fileLabel } from '../lib/file-label';
 import { classifyEol, type FileMeta, textMeta } from '../input/read';
 import { pinSentence, type VerdictChange, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
@@ -18,7 +19,7 @@ import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
 export type Source =
   | { kind: 'none' }
   | { kind: 'sample'; name: string }
-  /** Pasted files, or a sample once edited: its buffers follow every edit (`state/edit.ts`); `name` says which sample. */
+  /** Pasted files, or a sample once edited: its buffers follow every edit (`writtenThrough`); `name` says which sample. */
   | { kind: 'paste'; buffers: { path: string; text: string }[]; name?: string }
   | { kind: 'folder'; name: string; handle?: FileSystemDirectoryHandle; readAt: number };
 
@@ -112,7 +113,10 @@ export interface SessionState {
     epoch: number;
     /** The project files' texts, a BOM stripped. */
     byPath: Record<string, string>;
-    /** What reading each file in `byPath` found: its BOM, its line endings, whether it is valid UTF-8. */
+    /**
+     * What reading each file in `byPath` found: its BOM, its line endings, whether it is valid UTF-8. A file an edit
+     * removed keeps its entry, so undoing the removal brings back what reading found.
+     */
     meta: Record<string, FileMeta>;
     /**
      * Per file, the files version that last changed its text. The version only grows, so a path and its rev name one
@@ -156,6 +160,11 @@ export interface SessionState {
    * or the texts (`withTexts`). The later change names the cause.
    */
   stale: false | 'inputs' | 'edit';
+  /**
+   * What the screen says of a stale plan (`app/stale.ts`): `inputs`, the last good plan; `edit`, the plan of the newest
+   * texts on its way. An edit says so only once its plan has been slow to come, so typing never flickers.
+   */
+  staleShown: false | 'inputs' | 'edit';
   error?: SessionError;
   /** The depth-0 workflow the defaults, the copy and the fit are about. */
   focus?: string;
@@ -270,7 +279,11 @@ export interface SessionActions {
   projectFailed: (error: SessionError) => void;
   engineReady: (info: { version: string; models: ModelInfo[] }) => void;
   engineFailed: (error: SessionError) => void;
-  engineRestarted: (restarts: number, project: number | undefined) => void;
+  /**
+   * The engine was restarted. `project` is the id the fresh worker gave the texts it loaded, adopted for the project
+   * shown; `null` when those are not the shown project's texts, which the old worker took with it.
+   */
+  engineRestarted: (restarts: number, project: number | null | undefined) => void;
   engineBusy: (busy: boolean) => void;
   planReceived: (plan: PlanState) => void;
   rejected: (error: SessionError) => void;
@@ -305,6 +318,7 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
     detail: 'steps',
     engine: { status: 'booting', models: [], restarts: 0, busy: false },
     stale: false,
+    staleShown: false,
     caseOpen: false,
     ui: { view: 'graph', hideUntriggered: false, prefs, expanded: [], representative: {}, opened: [] },
     notices: [],
@@ -449,7 +463,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       transact: (input) => commit((s) => history.transact(s.edit, s.files.byPath, input, contextOf(s))),
       typed: (path, splices, alone) =>
         commit((s) => history.typed(s.edit, s.files.byPath, path, splices, contextOf(s), alone)),
-      closeGroup: () => set((s) => (s.edit.group ? { edit: history.close(s.edit, s.files.byPath) } : s)),
+      closeGroup: () => set((s) => (s.edit.group ? { edit: history.close(s.edit) } : s)),
       undo: () => commit((s) => history.undo(s.edit, s.files.byPath), 'undo').ok,
       redo: () => commit((s) => history.redo(s.edit, s.files.byPath), 'redo').ok,
       projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
@@ -469,7 +483,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       engineRestarted: (restarts, project) =>
         set((s) => ({
           engine: { ...s.engine, restarts },
-          project: project === undefined ? s.project : { ...s.project, version: project },
+          project: project === undefined ? s.project : { ...s.project, version: project ?? undefined },
         })),
       engineBusy: (busy) => set((s) => ({ engine: { ...s.engine, busy } })),
       planReceived: (plan) =>
@@ -508,15 +522,18 @@ function committed(
   if ('refused' in outcome) {
     if (outcome.refused !== 'desync' || !stopped)
       return { patch: s, outcome: { ok: false, refusal: outcome } };
-    const text = `${stopped.verb} stopped: ${outcome.path} changed outside the history`;
+    const text = `${stopped.verb} stopped: ${fileLabel(outcome.path)} changed outside the history`;
     return {
       patch: { edit: history.emptyHistory(s.edit.next), notices: [...s.notices, { id: stopped.id, text }] },
       outcome: { ok: false, refusal: outcome },
     };
   }
   const texts = withTexts(s, outcome.changes);
+  // Nothing moved: no update, so no listener runs.
+  if (!texts.files && outcome.history === s.edit) return { patch: s, outcome: { ok: false } };
   const patch: Partial<SessionState> = { ...texts, edit: outcome.history };
-  if (texts.files) patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
+  if (!texts.files) return { patch, outcome: { ok: false } };
+  patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
   return { patch, outcome: { ok: true } };
 }
 
@@ -567,8 +584,9 @@ function sourceFiles(
 /**
  * The texts changed within the epoch: the files version moves, and so does the rev of each file whose text changed;
  * the epoch, the base and the opened texts stay. A path new to the files gets the meta of a string, and `null`
- * removes a file. A file's `eol` follows its text, so a converted file is no longer mixed; its BOM and its encoding
- * stay what reading found. Nothing else of the store moves, the plan, the picture, the selection and the scenario
+ * removes a file (its meta stays, for the undo that brings it back). A file's `eol` follows its text, so a converted
+ * file is no longer mixed, except that a text left with no line break keeps the ending it had, so its next lines get
+ * it too; its BOM and its encoding stay what reading found. Nothing else of the store moves, the plan, the picture, the selection and the scenario
  * included: the plan is stale for the edit until the session brings the one of the new texts. Texts the files already
  * hold change nothing. This is what an edit of the store's texts reduces to; the history's steps commit through it.
  */
@@ -591,7 +609,6 @@ export function withTexts(
   for (const [path, text] of changed) {
     if (text === null) {
       delete files.byPath[path];
-      delete files.meta[path];
       delete files.revs[path];
       continue;
     }
@@ -605,9 +622,10 @@ export function withTexts(
   return { files, stale: s.plan === undefined ? false : planned ? 'edit' : s.stale };
 }
 
+/** A file's meta for its new text: its line endings as the text has them, the ones it had while it has no break. */
 const withEol = (meta: FileMeta, text: string): FileMeta => {
   const eol = classifyEol(text);
-  return eol === meta.eol ? meta : { ...meta, eol };
+  return eol === meta.eol || eol === 'none' ? meta : { ...meta, eol };
 };
 
 /** An input changed: the plan shown, if any, is stale for it. */

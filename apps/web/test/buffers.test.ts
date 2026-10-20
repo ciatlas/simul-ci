@@ -58,6 +58,16 @@ describe('the buffer writer', () => {
     expect(writer.pending()).toBe(false);
   });
 
+  it('writes at least every 2 s while the edits keep coming', async () => {
+    const { store, saved } = setup();
+    for (let i = 0; i < 6; i++) {
+      store.getState().typed(CI, [{ from: 0, to: 0, insert: '#' }]);
+      await vi.advanceTimersByTimeAsync(400);
+    }
+    expect(saved).toHaveLength(1);
+    expect(saved[0]![1][CI]).toBe('######on: push\n');
+  });
+
   it('writes at once when the page is hidden or left', async () => {
     const { store, saved, page } = setup();
     store.getState().typed(CI, [{ from: 0, to: 0, insert: '#' }]);
