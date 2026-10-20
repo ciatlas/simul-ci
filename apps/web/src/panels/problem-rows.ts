@@ -1,17 +1,21 @@
 import type { Diagnostic, Loc, NodeId, RunPlan } from '@simulci/engine';
 import { declaredAt, type PlanNode, planNodes } from '../plan/nodes';
+import type { SessionState } from '../state/store';
 import type { Outline, OutlineFile, OutlineWorkflow } from '../worker/protocol';
 
 /**
  * The Problems tab as rows (synthesis § 10): a file that could not be read (`outline.files[].errors`, one row per
- * error with its line and column), a workflow file that is no workflow (no `on:` and no `jobs:`), and the plan's
- * diagnostics that are not an assumption's (those show on the entry in the Unknowns tab). Errors first, then
- * warnings, then info; within a severity by file and line.
+ * error with its line and column), a file that is not valid UTF-8, a workflow file that is no workflow (no `on:` and
+ * no `jobs:`), and the plan's diagnostics that are not an assumption's (those show on the entry in the Unknowns tab).
+ * Errors first, then warnings, then info; within a severity by file and line.
  */
 
 export interface ProblemRow {
   severity: Diagnostic['severity'];
-  /** `parse` for a file that could not be read, `workflow` for one that is no workflow, else the diagnostic's code. */
+  /**
+   * `parse` for a file that could not be read, `encoding` for one that is not UTF-8, `workflow` for one that is no
+   * workflow, else the diagnostic's code.
+   */
   code: string;
   message: string;
   file?: string;
@@ -26,11 +30,16 @@ export interface ProblemRow {
  * out: the outline has the same error with its line and column. A diagnostic without a `loc` takes the line its node
  * is declared on.
  */
-export function problemRows(outline: Outline | undefined, plan: RunPlan | undefined): ProblemRow[] {
+export function problemRows(
+  outline: Outline | undefined,
+  plan: RunPlan | undefined,
+  texts: Pick<SessionState['files'], 'byPath' | 'meta'> = { byPath: {}, meta: {} },
+): ProblemRow[] {
   const files = outline?.files ?? [];
   const unread = new Set(files.filter((f) => f.errors.length > 0).map((f) => f.path));
   const rows = [
     ...files.flatMap(fileRows),
+    ...notUtf8Rows(texts),
     ...(outline?.workflows ?? []).filter(isNoWorkflow).map(noWorkflowRow),
     ...(plan ? diagnosticRows(plan, unread) : []),
   ];
@@ -46,6 +55,28 @@ function fileRows(file: OutlineFile): ProblemRow[] {
     line: e.line,
     column: e.column,
   }));
+}
+
+/**
+ * A file with bytes that are not UTF-8, at the line of the first one: the page shows and simulates it with U+FFFD in
+ * their place, so what it says of that file may not be what GitHub reads.
+ */
+function notUtf8Rows({ byPath, meta }: Pick<SessionState['files'], 'byPath' | 'meta'>): ProblemRow[] {
+  return Object.entries(meta)
+    .filter(([, m]) => !m.utf8)
+    .map(([path]) => ({
+      severity: 'warning',
+      code: 'encoding',
+      message: `${basename(path)} is not valid UTF-8: invalid bytes are shown and simulated as \uFFFD`,
+      file: path,
+      line: lineOf(byPath[path] ?? '', '\uFFFD'),
+    }));
+}
+
+/** The line, from 1, that holds the first `needle`; 1 when there is none. */
+function lineOf(text: string, needle: string): number {
+  const at = text.indexOf(needle);
+  return at === -1 ? 1 : text.slice(0, at).split('\n').length;
 }
 
 /** No event under `on:` (`workflow_call` is counted by `callable`) and no job: a YAML file that only sits there. */

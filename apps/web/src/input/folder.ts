@@ -57,9 +57,9 @@ export async function requestFolder(handle: FileSystemDirectoryHandle): Promise<
 
 /** The project files under a handle, by repository-relative path, and the ones too big to read. */
 export async function readFolder(root: FileSystemDirectoryHandle): Promise<Walked> {
-  const walked: Walked = { files: {}, skipped: [] };
+  const walked: Walked = { files: {}, meta: {}, skipped: [] };
   await walk(root, '', 0, walked);
-  return { files: filterFiles(walked.files), skipped: walked.skipped };
+  return { files: filterFiles(walked.files), meta: walked.meta, skipped: walked.skipped };
 }
 
 async function walk(

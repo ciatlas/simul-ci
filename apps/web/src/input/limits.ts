@@ -1,3 +1,5 @@
+import { type FileMeta, readExact } from './read';
+
 /**
  * What a source may hold before the page refuses it: the engine is fast, the browser's memory is the limit. A walk
  * does not read a file over the per-file limit: it keeps the rest and names what it left out.
@@ -34,19 +36,28 @@ export interface Skipped {
   bytes: number;
 }
 
-/** What a walk gathered: the project files it read, by path, and the ones it left out. */
+/**
+ * What a walk gathered: the project files it read, by path, what reading each one found (its BOM, line endings and
+ * whether it is UTF-8), and the ones it left out.
+ */
 export interface Walked {
   files: Record<string, string>;
+  meta: Record<string, FileMeta>;
   skipped: Skipped[];
 }
 
-/** Reads a project file into the walk, or leaves it out when it is over the per-file limit; true when it read it. */
+/**
+ * Reads a project file into the walk byte-exact, its meta beside its text, or leaves it out when it is over the
+ * per-file limit; true when it read it.
+ */
 export async function readWithin(file: Blob, path: string, walked: Walked): Promise<boolean> {
   if (file.size > LIMITS.fileBytes) {
     walked.skipped.push({ path, bytes: file.size });
     return false;
   }
-  walked.files[path] = await file.text();
+  const { text, meta } = await readExact(file);
+  walked.files[path] = text;
+  walked.meta[path] = meta;
   return true;
 }
 

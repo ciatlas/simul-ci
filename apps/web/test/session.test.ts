@@ -247,7 +247,7 @@ describe('the session', () => {
     // A folder from the last visit that needs a click before it can be read again: no files until then.
     store.setState({
       source: { kind: 'folder', name: 'repo', readAt: 0 },
-      files: { version: store.getState().files.version + 1, byPath: {} },
+      files: { version: store.getState().files.version + 1, byPath: {}, meta: {} },
     });
     f.loads[2]!({ id: 3, type: 'error', kind: 'load', message: 'not yaml' });
     await vi.advanceTimersByTimeAsync(0);
