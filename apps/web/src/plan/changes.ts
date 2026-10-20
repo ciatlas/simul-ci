@@ -1,13 +1,14 @@
-import type { NodeId, RunPlan, Tri } from '@simulci/engine';
+import type { NodeId, RunPlan, Tri, WorkflowPlan } from '@simulci/engine';
+import { diffPlans, type PlanDiff } from '@simulci/engine/plan';
 import { listed } from '../lib/words';
 import type { Derived } from '../worker/protocol';
 import { type IndexedNode, type NodeKind, planIndex } from './index';
 
 /**
- * What a pin changed (synthesis § 7 and § 11): the verdicts that differ between the plan before the pin and the plan
- * that answers it, for the status line's sentence ("pinned; deploy now runs") and the cards that flash. A unit whose
- * parent changed too is left out, so a workflow that is now triggered is one change and not one per job; a leg
- * stands for nothing its job does not already say.
+ * What a pin or an edit changed (synthesis § 7.4): the engine's diff of the plan before it and the plan that answers
+ * it, and the verdict changes of that diff with the labels the status line says them by ("pinned; deploy now runs").
+ * The diff already leaves out a unit whose parent changed too, so a workflow that is now triggered is one change and
+ * not one per job, and it never lists a leg, which stands for nothing its job does not already say.
  */
 
 export interface VerdictChange {
@@ -22,31 +23,59 @@ export interface VerdictChange {
   label: string;
 }
 
-interface Planned {
+export interface Planned {
   plan: RunPlan;
   derived: Derived;
 }
 
-/** A changed node of `after` and the verdict it had before. */
-interface Changed {
-  node: IndexedNode;
-  from: Tri;
+/**
+ * The diff of two plans of one scenario, made as if both were planned with the same `planUntriggered` (E1's rule):
+ * edit mode plans the focused workflow's jobs although it is not triggered (C2), so a plan from before edit mode, or
+ * of another focus, has that workflow as a shell. A workflow untriggered in both whose jobs only one plan has is a
+ * shell in both, and its jobs are neither added nor removed. `renames` come from the transaction (C11), never guessed.
+ */
+export function diffOf(
+  before: RunPlan,
+  after: RunPlan,
+  renames?: Readonly<Record<NodeId, NodeId>>,
+): PlanDiff {
+  const [was, now] = samePlanning(before, after);
+  return diffPlans(was, now, renames ? { renames } : {});
 }
 
-/** The changed units of `after`, in plan order, each under no changed ancestor. */
-export function verdictChanges(before: Planned, after: Planned): VerdictChange[] {
-  const was = planIndex(before).nodes;
-  const now = planIndex(after).nodes;
-  const changed = new Set<NodeId>();
-  const found: Changed[] = [];
-  for (const node of now.values()) {
-    const old = was.get(node.id);
-    // A leg says what its job or its steps say: it is never listed, and what changed under it still is.
-    if (!old || old.verdict === node.verdict || node.kind === 'leg') continue;
-    changed.add(node.id);
-    if (!underChanged(node, now, changed)) found.push({ node, from: old.verdict });
+function samePlanning(before: RunPlan, after: RunPlan): [RunPlan, RunPlan] {
+  const was = new Map(before.workflows.map((w) => [w.id, w]));
+  const shells = new Set<NodeId>();
+  for (const wf of after.workflows) {
+    const old = was.get(wf.id);
+    if (old && untriggered(wf) && untriggered(old) && planned(wf) !== planned(old)) shells.add(wf.id);
   }
-  const labels = labelsOf(found, after.plan);
+  if (!shells.size) return [before, after];
+  const bare = (plan: RunPlan): RunPlan => ({
+    ...plan,
+    workflows: plan.workflows.map((w) => (shells.has(w.id) ? { ...w, jobs: [] } : w)),
+  });
+  return [bare(before), bare(after)];
+}
+
+const untriggered = (wf: WorkflowPlan): boolean => wf.triggered.verdict === 'no';
+const planned = (wf: WorkflowPlan): boolean => wf.jobs.length > 0;
+
+/** The changed units of `after`, in plan order, each under no changed ancestor: the diff's verdict changes, labelled. */
+export function verdictChanges(
+  before: Planned,
+  after: Planned,
+  diff: PlanDiff = diffOf(before.plan, after.plan),
+): VerdictChange[] {
+  const nodes = planIndex(after).nodes;
+  const found = diff.changed.flatMap((c) => {
+    const node = nodes.get(c.id);
+    return node ? [{ node, from: c.from }] : [];
+  });
+  const labels = labelsOf(
+    found.map((f) => f.node),
+    after.plan,
+  );
   return found.map(({ node, from }, i) => ({
     id: node.id,
     kind: node.kind,
@@ -56,23 +85,17 @@ export function verdictChanges(before: Planned, after: Planned): VerdictChange[]
   }));
 }
 
-/** Whether a changed ancestor already says it. */
-function underChanged(node: IndexedNode, nodes: Map<NodeId, IndexedNode>, changed: Set<NodeId>): boolean {
-  for (let at = node.parent; at !== undefined; at = nodes.get(at)?.parent) if (changed.has(at)) return true;
-  return false;
-}
-
 /**
- * The changes' labels, in their order. A unit's path says nothing of its workflow, so the same path changing in two
- * workflows would read twice alike: a label that repeats among the changes names the unit's depth-0 workflow
- * (`deploy in CI`), and a workflow's own label that repeats gives way to its path. A label that does not repeat
- * stays as short as it is (`deploy`), even when another workflow has a unit of that path.
+ * The nodes' labels, in their order. A unit's path says nothing of its workflow, so the same path in two workflows
+ * would read twice alike: a label that repeats among the nodes names the unit's depth-0 workflow (`deploy in CI`),
+ * and a workflow's own label that repeats gives way to its path. A label that does not repeat stays as short as it
+ * is (`deploy`), even when another workflow has a unit of that path.
  */
-function labelsOf(found: readonly Changed[], plan: RunPlan): string[] {
-  const plain = found.map(({ node }) => labelOf(node, plan));
+export function labelsOf(nodes: readonly IndexedNode[], plan: RunPlan): string[] {
+  const plain = nodes.map((node) => labelOf(node, plan));
   const counts = countOf(plain);
   const names = workflowNames(plan);
-  return found.map(({ node }, i) => {
+  return nodes.map((node, i) => {
     const label = plain[i]!;
     if (counts.get(label) === 1) return label;
     if (node.kind === 'workflow') return workflowOf(plan, node.id)?.path ?? label;
@@ -107,15 +130,15 @@ function countOf(words: readonly string[]): Map<string, number> {
   return counts;
 }
 
-const WORKFLOW: Record<Tri, string> = {
+export const WORKFLOW: Record<Tri, string> = {
   yes: 'is now triggered',
   no: 'is no longer triggered',
   maybe: 'might now be triggered',
 };
-const UNIT: Record<Tri, string> = { yes: 'now runs', no: 'is now skipped', maybe: 'now might run' };
+export const UNIT: Record<Tri, string> = { yes: 'now runs', no: 'is now skipped', maybe: 'now might run' };
 
 /** How many changes the sentence names before it counts the rest. */
-const NAMED = 3;
+export const NAMED = 3;
 
 /**
  * What the status line says of a pin: `pinned; deploy now runs`, `pinned; build.#3 now runs, deploy now runs and

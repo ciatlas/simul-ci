@@ -27,7 +27,8 @@ const BUDGETS = [
   // elkjs: 428.5 kB measured.
   { name: 'the layout worker', test: (f) => f.startsWith('layout.worker-'), kB: 493 },
   // React, the router, React Flow and its d3 modules, Base UI, the scenario form, the panels and the edit history,
-  // with the crash snapshot, the replace prompt and edit mode: 230.3 kB measured.
+  // with the crash snapshot, the replace prompt, edit mode and what an edit changed (the plan diff and Details, a
+  // platform popover): 233.8 kB measured.
   { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 251 },
   // CodeMirror's view, state, language and commands with the YAML grammar, and the pane's edit mode, fetched when the
   // pane first opens: 107.1 kB measured (95.4 before edit mode).

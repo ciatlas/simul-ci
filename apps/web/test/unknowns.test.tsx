@@ -129,7 +129,7 @@ describe('the Unknowns tab', () => {
     await user.click(within(editor).getByRole('button', { name: 'Apply' }));
     expect(store.getState().assume).toEqual([detect]);
     // A pin, which the status line answers once the plan for exactly these inputs comes.
-    expect(store.getState().pin?.assume).toBe(store.getState().assume);
+    expect(store.getState().change?.waitFor.assume).toBe(store.getState().assume);
 
     act(() => store.getState().planReceived(planState(source, store.getState().assume)));
     const assumptions = screen.getByRole('region', { name: 'Assumptions' });
@@ -155,7 +155,7 @@ describe('the Unknowns tab', () => {
     await user.click(within(assumptions).getByRole('button', { name: /^Remove / }));
     expect(store.getState().assume).toEqual([]);
     // The Assumptions list edits the case layer; it pins nothing.
-    expect(store.getState().pin).toBeUndefined();
+    expect(store.getState().change).toBeUndefined();
   });
 
   it('edits the entry a step output already has when Pin… opens on it again, so no second entry conflicts', async () => {

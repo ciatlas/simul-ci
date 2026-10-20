@@ -66,6 +66,10 @@ const happy = () =>
 
 const classes = (el: Element): string[] => el.className.split(/\s+/);
 
+/** The status line's live region: the sentence alone, without Details beside it. */
+const liveLine = (): HTMLElement =>
+  screen.getByRole('contentinfo').querySelector<HTMLElement>('[aria-live]')!;
+
 function resize(width: number): void {
   act(() => {
     happy().setViewport({ width, height: 768 });
@@ -263,7 +267,7 @@ describe('the status line', () => {
         <StatusBar />
       </AppProvider>,
     );
-    const line = screen.getByRole('contentinfo');
+    const line = liveLine();
     expect(line.getAttribute('aria-live')).toBe('polite');
     const first = answer(store);
     wait(500);
@@ -288,8 +292,35 @@ describe('the status line', () => {
     // Another plan for the same inputs says its own summary: the pin spoke for the plan that answered it.
     const next = answer(store);
     wait(500);
-    expect(store.getState().pin?.after).toBeDefined();
+    expect(store.getState().change?.after).toBeDefined();
     expect(line.textContent).toBe(summarize(next.plan).sentence);
+  });
+
+  it('lists what the change did in Details beside the sentence, each row selecting what it names', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const store = createSessionStore();
+    store.getState().setScenario(source);
+    render(
+      <AppProvider app={{ store } as unknown as App}>
+        <StatusBar />
+      </AppProvider>,
+    );
+    answer(store);
+    wait(500);
+    // A summary has no Details.
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull();
+    act(() => store.getState().pinAssume([detect]));
+    answer(store);
+    wait(500);
+    expect(liveLine().textContent).toBe('pinned; build.#3 now runs');
+    // Outside the live region, which reads the sentence alone.
+    const details = screen.getByRole('button', { name: 'Details' });
+    expect(liveLine().contains(details)).toBe(false);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(details);
+    const rows = await screen.findByRole('list', { name: 'What changed' });
+    await user.click(within(rows).getByRole('button', { name: 'build.#3 now runs' }));
+    expect([store.getState().focus, store.getState().sel]).toEqual(['.github/workflows/ci.yml', 'build.#3']);
   });
 
   /** The status line over a store that holds the starter's first plan, said. */
@@ -305,7 +336,7 @@ describe('the status line', () => {
     );
     answer(store);
     wait(500);
-    return { store, line: screen.getByRole('contentinfo') };
+    return { store, line: liveLine() };
   }
 
   it('says a pin’s sentence in an element of its own, so the live region reads it again when the last pin said the same', () => {

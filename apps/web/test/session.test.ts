@@ -109,7 +109,7 @@ const plan = (project: number): SimulateResult =>
     id: 1,
     type: 'plan',
     project,
-    plan: { workflows: [] },
+    plan: { workflows: [], unknowns: [], detail: 'steps' },
     derived: {},
     text: 'plan',
     ms: { simulate: 1, derive: 0 },
@@ -330,7 +330,7 @@ describe('the session', () => {
     await vi.advanceTimersByTimeAsync(0);
     f.simulates[0]!.resolve({
       ...(plan(1) as object),
-      plan: { workflows: [{ path: CI, depth: 0 }] },
+      plan: { workflows: [{ path: CI, depth: 0 }], unknowns: [], detail: 'steps' },
     } as never);
     await vi.advanceTimersByTimeAsync(0);
     return { store, f, session };
@@ -402,7 +402,7 @@ const planReply = (id: number, project: number) => ({
   id,
   type: 'plan',
   project,
-  plan: { workflows: [] },
+  plan: { workflows: [], unknowns: [], detail: 'steps' },
   derived: {},
   text: 'plan',
   ms: { simulate: 1, derive: 0 },

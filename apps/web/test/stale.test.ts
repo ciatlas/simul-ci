@@ -4,6 +4,8 @@ import type { PlanState } from '../src/state/store';
 import { createSessionStore } from '../src/state/store';
 
 const CI = '.github/workflows/ci.yml';
+/** A plan of nothing: what the clock is about is when plans come, not what they say. */
+const EMPTY = { workflows: [], unknowns: [], detail: 'steps' } as unknown as PlanState['plan'];
 
 /** A store showing a plan of `ci.yml`, with the stale clock installed. */
 function showing() {
@@ -11,7 +13,9 @@ function showing() {
   store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'sample', name: 'x' });
   store.getState().projectReady(1, { files: [], workflows: [], events: {} }, 1);
   const { version, epoch } = store.getState().files;
-  store.getState().planReceived({ for: { files: version, epoch, project: 1 } } as PlanState);
+  store
+    .getState()
+    .planReceived({ plan: EMPTY, derived: {}, for: { files: version, epoch, project: 1 } } as PlanState);
   installStaleClock({ store });
   return store;
 }
@@ -23,7 +27,9 @@ const key = (store: ReturnType<typeof createSessionStore>): void => {
 
 const answer = (store: ReturnType<typeof createSessionStore>): void => {
   const { version, epoch } = store.getState().files;
-  store.getState().planReceived({ for: { files: version, epoch, project: 2 } } as PlanState);
+  store
+    .getState()
+    .planReceived({ plan: EMPTY, derived: {}, for: { files: version, epoch, project: 2 } } as PlanState);
 };
 
 describe('the stale clock', () => {
