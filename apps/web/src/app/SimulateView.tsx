@@ -23,6 +23,7 @@ import { shownView, togglePaneKeepingFocus, useNarrow } from './shortcuts';
 import { StatusBar } from './StatusBar';
 import { Toaster } from './Toaster';
 import { TopBar } from './TopBar';
+import { UntriggeredBanner } from './UntriggeredBanner';
 
 /** CodeMirror is a chunk of its own, fetched the first time the pane opens. */
 const YamlPane = lazy(() => import('../yaml/YamlPane').then((m) => ({ default: m.YamlPane })));
@@ -109,6 +110,7 @@ function Panes() {
         <OutlineTree />
       </aside>
       <div className="flex min-h-0 flex-col md:col-start-2">
+        <UntriggeredBanner />
         <PlanView />
         {!collapsed.yaml && (
           <section

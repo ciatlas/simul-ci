@@ -140,6 +140,7 @@ function plan(project: NonNullable<WorkerState['project']>, request: SimulateReq
     scenario: request.scenario,
     assume: request.assume,
     detail: request.detail,
+    planUntriggered: request.planUntriggered,
   });
   const simulated = performance.now();
   const derived = deriveTables(result, project.outline);

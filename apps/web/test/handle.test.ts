@@ -222,6 +222,26 @@ runs: { using: node20, main: index.js }
     expect(unknown.response.derived.unknownPaths['scenario.changed']).toBe('scenario.changed');
   });
 
+  it('plans the jobs of the untriggered workflows a request names, and lists them in the text', () => {
+    const { state, project } = loaded();
+    const scenario = { event: 'push', branch: 'topic' };
+    const ciOf = (r: ReturnType<typeof handle>) => {
+      if (r.response.type !== 'plan') throw new Error(r.response.type);
+      return { ...r.response, ci: r.response.plan.workflows.find((w) => w.path.endsWith('ci.yml'))! };
+    };
+    expect(ciOf(handle(state, sim({ project, scenario }))).ci.jobs).toEqual([]);
+    const planned = ciOf(
+      handle(state, sim({ project, scenario, planUntriggered: ['.github/workflows/ci.yml'] })),
+    );
+    expect(planned.ci.triggered.verdict).toBe('no');
+    expect(planned.ci.jobs.map((j) => [j.jobId, j.runs.verdict])).toEqual([
+      ['build', 'no'],
+      ['deploy', 'no'],
+    ]);
+    expect(planned.derived.clauses[planned.ci.jobs[0]!.id]).toBe('parent no');
+    expect(planned.text).toContain('  ○ build — parent no');
+  });
+
   it("tells a stale project, the author's mistakes and a test case apart", () => {
     const { state, project } = loaded();
     expect(handle(state, sim({ project: 9 })).response).toMatchObject({ type: 'error', kind: 'stale' });

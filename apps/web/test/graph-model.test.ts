@@ -25,6 +25,7 @@ function modelOf(
   scenario: ScenarioInput,
   ui: Partial<GraphUi> = {},
   assume: AssumeEntry[] = [],
+  planUntriggered?: string[],
 ): GraphModel {
   const loaded = handle(initialState(), { id: 1, type: 'load', files, repository: 'o/r' });
   const r = handle(loaded.state, {
@@ -34,6 +35,7 @@ function modelOf(
     scenario,
     assume,
     detail: 'steps',
+    planUntriggered,
   });
   if (r.response.type !== 'plan') throw new Error(JSON.stringify(r.response));
   return graphModel(r.response.plan, r.response.derived, { ...UI, ...ui });
@@ -448,6 +450,18 @@ describe('the graph model in edit mode', () => {
     expect(modelOf(starter, push, { only: '.github/workflows/nope.yml' }).roots).toEqual(
       modelOf(starter, push).roots,
     );
+  });
+
+  it('lays the focused workflow out untriggered, dimmed, when its plan holds its jobs, and collapses it otherwise', () => {
+    const editing = modelOf(starter, push, { only: release }, [], [release]);
+    expect(editing.scopes[release]).toMatchObject({ verdict: 'no', collapsed: false, dimmed: true });
+    expect(editing.scopes[release]!.jobs).toEqual([`${release}#publish`, `${release}#audit`]);
+    expect(editing.jobs[`${release}#publish`]).toMatchObject({ verdict: 'no', clause: 'parent no' });
+    // Planned but not the one edited, or edited with no jobs planned: one line, as before.
+    for (const m of [modelOf(starter, push, {}, [], [release]), modelOf(starter, push, { only: release })]) {
+      expect(m.scopes[release]).toMatchObject({ collapsed: true, jobs: [] });
+      expect(m.scopes[release]!.dimmed).toBeUndefined();
+    }
   });
 });
 

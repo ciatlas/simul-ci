@@ -11,7 +11,8 @@ import { HoverCard } from './HoverCard';
  * A workflow instance: a depth-0 workflow, or the one a job's representative leg calls, drawn inside that job's
  * card. Laid out, it is a frame with a title bar (mark, name or path, its jobs' counts, who calls it) around its
  * job cards; collapsed, it is one line with its deciding clause: an untriggered workflow, or a callee past depth 2
- * that a click opens (and its Open button, for the keyboard: a tab stop while the workflow is selected).
+ * that a click opens (and its Open button, for the keyboard: a tab stop while the workflow is selected). The
+ * untriggered workflow being edited is laid out instead, dimmed, its jobs skipped under it.
  */
 function WorkflowNodeView({ data }: NodeProps<WorkflowFlowNode>) {
   const { store } = useApp();
@@ -25,6 +26,7 @@ function WorkflowNodeView({ data }: NodeProps<WorkflowFlowNode>) {
   const attrs = {
     ...cardAttrs(scope.verdict, state),
     'data-collapsed': scope.collapsed ? 'true' : undefined,
+    'data-dimmed': scope.dimmed ? 'true' : undefined,
   };
   if (scope.collapsed)
     return (

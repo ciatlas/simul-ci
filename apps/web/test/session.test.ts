@@ -24,7 +24,7 @@ function fakeClient() {
   /** What each load sent, by the index of its answer in `loads`. */
   const loaded: Record<string, string>[] = [];
   const simulates: {
-    body: { project: number; scenario: { event: string } };
+    body: { project: number; scenario: { event: string }; planUntriggered?: string[] };
     resolve: (r: SimulateResult) => void;
   }[] = [];
   const cases: { body: Omit<CaseRequest, 'id' | 'type'>; resolve: (r: CaseResult) => void }[] = [];
@@ -714,6 +714,35 @@ describe('the session’s edit cadence and the hold', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().project).toMatchObject({ status: 'ready', version: 1 });
     expect(f.simulates).toHaveLength(1);
+  });
+
+  /** A plan that leaves ci.yml and release.yml untriggered. */
+  const untriggered = (project: number): SimulateResult =>
+    ({
+      ...plan(project),
+      plan: {
+        workflows: [CI, RELEASE].map((path) => ({ path, depth: 0, triggered: { verdict: 'no' }, jobs: [] })),
+      },
+    }) as never;
+
+  it('plans the focused workflow untriggered in edit mode only, and simulates again when that changes the plan', async () => {
+    const { store, f, session } = await planned();
+    // Nothing on screen is untriggered: edit mode changes no plan, so none goes out for it.
+    store.getState().setEdit(true);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.simulates).toHaveLength(1);
+    session.simulateNow();
+    f.simulates[1]!.resolve(untriggered(1));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Both are untriggered on screen now: another focus, then leaving edit mode, each plan again.
+    store.getState().setFocus(RELEASE);
+    await vi.advanceTimersByTimeAsync(100);
+    f.simulates[2]!.resolve(untriggered(1));
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().setEdit(false);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.simulates.map((x) => x.body.planUntriggered)).toEqual([undefined, [CI], [RELEASE], undefined]);
   });
 
   it('never sends a route test to the engine', async () => {

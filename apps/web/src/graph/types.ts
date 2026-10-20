@@ -23,6 +23,11 @@ export interface ScopeModel {
   caller?: NodeId;
   /** One line, nothing laid out: an untriggered depth-0 workflow, or a callee past depth 2 the author has not opened. */
   collapsed: boolean;
+  /**
+   * The workflow being edited, laid out although nothing triggers it, its jobs as they would be planned: drawn
+   * dimmed under the banner that says so (app/UntriggeredBanner.tsx).
+   */
+  dimmed?: true;
   /** In declaration order. */
   jobs: NodeId[];
   edges: EdgeModel[];

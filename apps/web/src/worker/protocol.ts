@@ -34,6 +34,11 @@ export interface SimulateRequest {
   scenario: ScenarioInput;
   assume: AssumeEntry[];
   detail: 'legs' | 'steps';
+  /**
+   * Depth-0 workflows, by path, whose jobs are planned although nothing triggers them (the engine's
+   * `planUntriggered`): edit mode's focused workflow, so an edit that stops it from running leaves its jobs to edit.
+   */
+  planUntriggered?: string[];
 }
 
 export interface CaseRequest {
