@@ -55,6 +55,8 @@ describe('the buffer writer', () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]![0]).toEqual({ kind: 'paste', buffers: [{ path: CI, text: '#!on: push\n' }] });
     expect(saved[0]![1]).toEqual({ [CI]: '#!on: push\n' });
+    // With the text the edits were made to, so they are still unsaved after a reload.
+    expect(saved[0]![3]).toEqual({ [CI]: 'on: push\n' });
     expect(writer.pending()).toBe(false);
   });
 

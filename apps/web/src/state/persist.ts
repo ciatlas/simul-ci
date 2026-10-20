@@ -1,12 +1,14 @@
 import type { FileMeta } from '../input/read';
 import { type KeyValueStore, openKeyValue } from '../lib/idb';
-import type { Source } from './store';
+import type { BaseDiff, Source } from './store';
 
 /**
  * The source survives a reload in IndexedDB: paste buffers as they are (the crash snapshot), a folder as its handle
  * (which needs a click to re-grant), a sample by name. Files from a chosen folder (`webkitdirectory`) are a copy
  * with no handle, so they are stored as buffers too. Buffers keep the meta they were read with: their text no longer
  * shows a BOM or the bytes that were not UTF-8, and unlike a folder there is no disk to read them from again.
+ * Pasted buffers keep the texts their edits were made to as well, so edits stay unsaved across a reload and
+ * replacing them still asks (§ 5.7).
  */
 
 export type StoredSource =
@@ -17,6 +19,8 @@ export type StoredSource =
       meta?: Record<string, FileMeta>;
       /** An edited sample's buffers say which sample they are a copy of. */
       name?: string;
+      /** The edited buffers' texts as pasted, `null` for one created since: `files.base` where it is not the text. */
+      base?: BaseDiff;
     }
   | { kind: 'folder'; name: string; handle: FileSystemDirectoryHandle }
   | {
@@ -32,7 +36,12 @@ const CURRENT_KEY = 'current';
 
 export interface SourceStore {
   load(): Promise<StoredSource | undefined>;
-  save(source: Source, files: Record<string, string>, meta?: Record<string, FileMeta>): Promise<void>;
+  save(
+    source: Source,
+    files: Record<string, string>,
+    meta?: Record<string, FileMeta>,
+    base?: Record<string, string>,
+  ): Promise<void>;
   clear(): Promise<void>;
 }
 
@@ -46,8 +55,8 @@ export function sourceStore(kv: KeyValueStore = openKeyValue(DB_NAME, STORE_NAME
         return undefined;
       }
     },
-    save: async (source, files, meta) => {
-      const stored = toStored(source, files, meta);
+    save: async (source, files, meta, base) => {
+      const stored = toStored(source, files, meta, base);
       try {
         if (stored) await kv.set(CURRENT_KEY, stored);
         else await kv.delete(CURRENT_KEY);
@@ -69,15 +78,19 @@ export function toStored(
   source: Source,
   files: Record<string, string>,
   meta?: Record<string, FileMeta>,
+  base?: Record<string, string>,
 ): StoredSource | undefined {
   if (source.kind === 'sample') return { kind: 'sample', name: source.name };
-  if (source.kind === 'paste')
+  if (source.kind === 'paste') {
+    const diff = base && baseDiff(files, base);
     return {
       kind: 'paste',
       buffers: source.buffers,
       ...(meta && { meta }),
       ...(source.name === undefined ? {} : { name: source.name }),
+      ...(diff && { base: diff }),
     };
+  }
   if (source.kind === 'folder' && source.handle)
     return { kind: 'folder', name: source.name, handle: source.handle };
   if (source.kind === 'folder') {
@@ -85,6 +98,18 @@ export function toStored(
     return { kind: 'copy', name: source.name, buffers, ...(meta && { meta }) };
   }
   return undefined;
+}
+
+/** Where the texts are not their base, the base; nothing when every text is. */
+function baseDiff(
+  files: Readonly<Record<string, string>>,
+  base: Readonly<Record<string, string>>,
+): BaseDiff | undefined {
+  const diff: BaseDiff = {};
+  for (const [path, text] of Object.entries(files))
+    if (base[path] !== text) diff[path] = Object.hasOwn(base, path) ? base[path]! : null;
+  for (const [path, text] of Object.entries(base)) if (!Object.hasOwn(files, path)) diff[path] = text;
+  return Object.keys(diff).length > 0 ? diff : undefined;
 }
 
 const STORED_SHAPES: Record<string, (v: Record<string, unknown>) => boolean> = {
@@ -110,10 +135,20 @@ function isFileMeta(value: unknown): value is FileMeta {
   return typeof v.bom === 'boolean' && typeof v.utf8 === 'boolean' && EOLS.has(v.eol);
 }
 
-/** Buffers with the stored meta entries that are one; any other is left out, so the store reads it from the text. */
+/**
+ * Buffers with the stored meta entries that are one; any other is left out, so the store reads it from the text. A
+ * base that is not one is left out whole: the buffers then read as unedited, as they did before bases were kept.
+ */
 function withMeta(stored: StoredSource): StoredSource {
   if (stored.kind !== 'paste' && stored.kind !== 'copy') return stored;
   const meta: Record<string, FileMeta> = {};
   for (const [path, m] of Object.entries(stored.meta ?? {})) if (isFileMeta(m)) meta[path] = m;
-  return { ...stored, meta };
+  if (stored.kind === 'copy') return { ...stored, meta };
+  const { base, ...rest } = stored;
+  return isBaseDiff(base) ? { ...rest, meta, base } : { ...rest, meta };
 }
+
+const isBaseDiff = (value: unknown): value is BaseDiff =>
+  typeof value === 'object' &&
+  value !== null &&
+  Object.values(value).every((v) => typeof v === 'string' || v === null);

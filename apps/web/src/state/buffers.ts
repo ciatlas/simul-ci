@@ -25,7 +25,9 @@ export interface BufferWriterOptions extends BehindOptions {
 export function createBufferWriter({ store, persist, ...options }: BufferWriterOptions): BufferWriter {
   const writer = behind(() => {
     const s = store.getState();
-    return s.source.kind === 'paste' ? persist.save(s.source, s.files.byPath, s.files.meta) : undefined;
+    return s.source.kind === 'paste'
+      ? persist.save(s.source, s.files.byPath, s.files.meta, s.files.base)
+      : undefined;
   }, options);
   const unsubscribe = store.subscribe((s, prev) => {
     if (s.files.epoch !== prev.files.epoch) writer.cancel();

@@ -46,11 +46,18 @@ export function bootApp(): App {
   const kv = openKeyValue(DB_NAME, STORE_NAME);
   const persist = sourceStore(kv);
   const prompt = createReplacePrompt(store);
-  const sources = createSources({ store, persist, ask: (what) => prompt.ask(what) });
+  const sources = createSources({ store, persist, ask: (what, paths) => prompt.ask(what, paths) });
   const buffers = createBufferWriter({ store, persist, win: window });
   // Before the source is restored below, so the edits of the folder it brings back come back with it.
   const keeper = createSnapshotKeeper({ store, snapshots: snapshotStore(kv), win: window });
-  installLeaveGuard({ store, pending: () => buffers.pending() || keeper.pending() });
+  installLeaveGuard({
+    store,
+    pending: () => buffers.pending() || keeper.pending(),
+    flush: () => {
+      void buffers.flush();
+      void keeper.flush();
+    },
+  });
   applyTheme(prefs.theme);
   store.subscribe((s, prev) => {
     if (s.ui.prefs !== prev.ui.prefs) {

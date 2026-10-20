@@ -5,7 +5,7 @@ import { type ReplaceChoice, createSources } from '../src/input/sources';
 import { memoryStore } from '../src/lib/idb';
 import { sampleByName } from '../src/input/samples';
 import { sourceStore } from '../src/state/persist';
-import { createSessionStore } from '../src/state/store';
+import { createSessionStore, dirtyPaths } from '../src/state/store';
 
 const CI = '.github/workflows/ci.yml';
 const RELEASE = '.github/workflows/release.yml';
@@ -14,17 +14,21 @@ const RELEASE = '.github/workflows/release.yml';
 function setup(choice: ReplaceChoice = 'cancel') {
   const store = createSessionStore();
   const asked: string[] = [];
+  const dropping: (readonly string[])[] = [];
   const downloads: [string, string][] = [];
+  const kv = memoryStore();
+  const persist = sourceStore(kv);
   const sources = createSources({
     store,
-    persist: sourceStore(memoryStore()),
-    ask: (what) => {
+    persist,
+    ask: (what, paths) => {
       asked.push(what);
+      dropping.push(paths);
       return Promise.resolve(choice);
     },
     download: (name, text) => downloads.push([name, text]),
   });
-  return { store, sources, asked, downloads };
+  return { store, sources, asked, dropping, downloads, kv, persist };
 }
 
 const edit = (store: ReturnType<typeof createSessionStore>, path: string): void => {
@@ -83,20 +87,53 @@ describe('the replace prompt', () => {
   });
 
   it('asks only for edits a paste would overwrite: a paste of another file keeps the edited buffers', async () => {
-    const { store, sources, asked } = setup('cancel');
+    const { store, sources, asked, dropping } = setup('cancel');
     sources.paste(CI, 'on: push\n');
     sources.paste(RELEASE, 'on: release\n');
     edit(store, CI);
     sources.paste('.github/workflows/third.yml', 'on: pull_request\n');
     await settle();
     expect(asked).toEqual([]);
-    // The buffers carry the edit into the new paste.
+    // The buffers carry the edit into the new paste, still unsaved against the text as pasted.
     expect(store.getState().files.byPath[CI]).toBe('# edited\non: push\n');
+    expect(store.getState().files.base[CI]).toBe('on: push\n');
+    expect(dirtyPaths(store.getState().files)).toEqual([CI]);
     edit(store, RELEASE);
-    expect(sources.paste(RELEASE, 'on: [release]\n')).toMatchObject({ ok: true });
-    await settle();
+    const pasted = sources.paste(RELEASE, 'on: [release]\n');
+    expect(pasted).toMatchObject({ ok: true });
+    expect(await (pasted.ok && pasted.done)).toBe(false);
+    // The prompt names the file the paste drops, not the edited one it leaves standing.
     expect(asked).toEqual([`Pasting ${RELEASE}`]);
+    expect(dropping).toEqual([[RELEASE]]);
     expect(store.getState().files.byPath[RELEASE]).toBe('# edited\non: release\n');
+  });
+
+  it('keeps edited buffers unsaved across a reload, so replacing them still asks', async () => {
+    const before = setup('cancel');
+    before.sources.useSample('starter');
+    edit(before.store, CI);
+    // What the buffer writer writes behind the edits.
+    const s = before.store.getState();
+    await before.persist.save(s.source, s.files.byPath, s.files.meta, s.files.base);
+
+    const store = createSessionStore();
+    const asked: string[] = [];
+    const sources = createSources({
+      store,
+      persist: sourceStore(before.kv),
+      ask: (what) => {
+        asked.push(what);
+        return Promise.resolve('cancel');
+      },
+    });
+    await sources.restore();
+    expect(store.getState().source).toMatchObject({ name: 'edited copy of the starter sample' });
+    expect(dirtyPaths(store.getState().files)).toEqual([CI]);
+    expect(store.getState().files.base[CI]).toBe(sampleByName('starter')!.files[CI]);
+    sources.useSample('monorepo');
+    await settle();
+    expect(asked).toEqual(['Opening the monorepo sample']);
+    expect(store.getState().source).toMatchObject({ kind: 'paste' });
   });
 
   it('asks before Forget, and before a reload drops the edits for the disk', async () => {
@@ -115,9 +152,9 @@ describe('the replace prompt', () => {
   it('is one question at a time, answered through the store', async () => {
     const store = createSessionStore();
     const prompt = createReplacePrompt(store);
-    const first = prompt.ask('Opening the starter sample');
-    expect(store.getState().replacing).toMatchObject({ what: 'Opening the starter sample' });
-    const second = prompt.ask('Opening the monorepo sample');
+    const first = prompt.ask('Opening the starter sample', [CI]);
+    expect(store.getState().replacing).toMatchObject({ what: 'Opening the starter sample', paths: [CI] });
+    const second = prompt.ask('Opening the monorepo sample', [CI]);
     expect(await first).toBe('cancel');
     expect(store.getState().replacing).toMatchObject({ what: 'Opening the monorepo sample' });
     prompt.answer('discard');
@@ -148,8 +185,9 @@ describe('leaving the page', () => {
   it('asks while a folder has unsaved edits or a write is pending, and listens only then', () => {
     const store = createSessionStore();
     let pending = false;
+    let flushed = 0;
     const page = fakeWindow();
-    installLeaveGuard({ store, pending: () => pending, win: page.win });
+    installLeaveGuard({ store, pending: () => pending, flush: () => flushed++, win: page.win });
     store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'folder', name: 'repo', readAt: 0 });
     expect(page.listeners.size).toBe(0);
     edit(store, CI);
@@ -164,8 +202,11 @@ describe('leaving the page', () => {
       .setFiles({ [CI]: 'on: push\n' }, { kind: 'paste', buffers: [{ path: CI, text: 'on: push\n' }] });
     pending = true;
     edit(store, CI);
+    // The write that waits starts as the browser asks: one started in `pagehide` would not finish.
     expect(page.leave()).toBe(true);
+    expect(flushed).toBe(2);
     pending = false;
     expect(page.leave()).toBe(false);
+    expect(flushed).toBe(2);
   });
 });
