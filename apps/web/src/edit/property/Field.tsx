@@ -41,7 +41,7 @@ export interface FieldProps {
   after?: ReactNode;
 }
 
-export function Field(props: FieldProps) {
+export function PropertyField(props: FieldProps) {
   const value = shown(props.doc, props.spec);
   return value.fixed ? <Fixed {...props} value={value} /> : <Editable {...props} value={value} />;
 }

@@ -8,7 +8,7 @@ import { documents } from '../documents';
 import { RefusalView } from '../Refusal';
 import { type Target, targetOf } from '../selection';
 import type { Refused } from '../types';
-import { Field } from './Field';
+import { PropertyField } from './Field';
 import { KeyValueRows } from './KeyValueRows';
 import { asText, type FieldSpec, jobFields, stepFields, workflowFields } from './model';
 import { EvaluatesTo, Needs, Steps, YamlRows } from './sections';
@@ -102,7 +102,7 @@ function Fields({ specs, target, doc, locked }: PartProps & { specs: FieldSpec[]
   return (
     <div className="flex flex-col gap-3">
       {specs.map((spec) => (
-        <Field
+        <PropertyField
           key={spec.key}
           spec={spec}
           target={session}

@@ -5,7 +5,7 @@ import { control, monoControl } from '../../scenario/fields/kit';
 import type { OutlineInput } from '../../worker/protocol';
 import { dispatch } from '../dispatch';
 import { RefusalNote } from '../Refusal';
-import { Field, LineLink } from './Field';
+import { LineLink, PropertyField } from './Field';
 import { asText, bindingValue, type FieldSpec } from './model';
 import { fingerprintOf, type SessionTarget } from './session';
 
@@ -113,7 +113,7 @@ function PairRow({
     <div className="flex flex-col gap-1">
       <div className="flex items-end gap-1.5">
         <div className="min-w-0 flex-1">
-          <Field spec={spec} target={target} doc={doc} locked={locked} />
+          <PropertyField spec={spec} target={target} doc={doc} locked={locked} />
         </div>
         {row.present && !locked && (
           <button
