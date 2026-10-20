@@ -55,8 +55,11 @@ export function llmsFull(siteUrl: string, pages: readonly LlmsPage[]): string {
 function llmsPage(siteUrl: string, page: LlmsPage): string {
   const head = [`# ${page.title}`, '', `Source: ${siteUrl}${page.url}`];
   if (page.description) head.push('', `> ${page.description}`);
-  return `${head.join('\n')}\n\n${absoluteLinks(siteUrl, page.markdown).trim()}`;
+  return `${head.join('\n')}\n\n${absoluteLinks(siteUrl, withoutComments(page.markdown)).trim()}`;
 }
+
+/** MDX comments on lines of their own (release-please's version markers), and the blank line after each. */
+const withoutComments = (markdown: string): string => markdown.replace(/^\{\/\*.*?\*\/\}\n(?:\n)?/gm, '');
 
 /** Markdown links to a path of the site (`](/docs/x)`) made absolute. */
 const absoluteLinks = (siteUrl: string, markdown: string): string =>

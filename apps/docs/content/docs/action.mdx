@@ -1,0 +1,73 @@
+---
+title: GitHub Action
+description: Run the route tests on every pull request, or print the plan of a scenario.
+---
+
+{/* x-release-please-start-version */}
+
+```yaml title=".github/workflows/route-tests.yml"
+name: Route tests
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  simulci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ciatlas/simulci@v0.2.0
+```
+
+{/* x-release-please-end */}
+
+In `test` mode, the default, the action runs the route tests under `.github/simulci/tests` as
+[`simulci test --ci`](/docs/cli/test) does: no snapshot is written, a missing one fails, and the step fails when a
+case fails or anything is invalid. It annotates each failure on the test line and on the workflow line that
+decided, and writes the report to the job summary.
+
+In `plan` mode it prints the plan of `scenario` to the log, and to the job summary as text and as a Mermaid graph:
+
+{/* x-release-please-start-version */}
+
+```yaml
+- uses: ciatlas/simulci@v0.2.0
+  with:
+    mode: plan
+    scenario: '{ event: pull_request, base: main, head: feat/x, changed: [src/a.ts] }'
+```
+
+{/* x-release-please-end */}
+
+Every release has its tag (`v1.2.3`). Before 1.0, `v0.N` follows the newest `0.N` release; from 1.0, `vN` follows
+the newest `N` release.
+
+## Inputs
+
+| Input               | Default | Is                                                                                       |
+| ------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| `mode`              | `test`  | `test` or `plan`                                                                         |
+| `working-directory` | `.`     | the directory holding `.github`, relative to the workspace                              |
+| `files`             |         | test files, one per line, relative to `working-directory`; empty runs them all          |
+| `filter`            |         | run only the cases whose name contains this text                                        |
+| `assume`            |         | [mocks](/docs/reference/mocks), one per line, as `--assume` takes them                  |
+| `strict`            | `false` | ignore `allowMaybe`; a stale snapshot fails                                              |
+| `annotations`       | `true`  | annotate failures on the test files and the workflow lines that decided                  |
+| `summary`           | `true`  | write the report, or the plan, to the job summary                                        |
+| `title`             |         | the job summary's heading; empty means `simulci test` or `simulci plan`                  |
+| `junit`             |         | write a JUnit report to this path, relative to the workspace (and inside it)            |
+| `scenario`          |         | plan mode: the [scenario](/docs/reference/scenarios) as a YAML mapping                  |
+| `format`            | `text`  | plan mode: what the log shows, `text`, `json` or `mermaid`                               |
+
+## Outputs
+
+| Output      | Is                                                                                          |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| `passed`    | cases that passed                                                                           |
+| `failed`    | cases that failed                                                                           |
+| `invalid`   | cases that are invalid                                                                      |
+| `skipped`   | cases skipped                                                                               |
+| `exit-code` | what `simulci test` would exit with: `0`, `1` when a case failed, `2` when something is invalid or the action stopped early |
+| `junit`     | the absolute path of the JUnit report, when `junit` is set                                  |
+| `triggered` | plan mode: how many workflows the scenario triggers (`yes` or `maybe`)                      |

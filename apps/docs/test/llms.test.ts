@@ -47,6 +47,14 @@ describe('llms.txt', () => {
     expect(text).not.toMatch(/\]\(\//);
   });
 
+  it('drops the MDX comments a page keeps for tools', () => {
+    const markdown =
+      'Use it:\n\n{/* x-release-please-start-version */}\n\n```yaml\nuses: a@v1.0.0\n```\n\n{/* x-release-please-end */}\n';
+    expect(llmsFull(SITE.url, [page('/docs/action', 'Action', markdown)])).toBe(
+      '# Action\n\nSource: https://docs.test/docs/action\n\nUse it:\n\n```yaml\nuses: a@v1.0.0\n```\n',
+    );
+  });
+
   it('writes every page in full, its links to the site made absolute', () => {
     const text = llmsFull(SITE.url, [
       page(

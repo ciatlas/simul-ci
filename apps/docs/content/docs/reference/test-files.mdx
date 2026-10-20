@@ -1,0 +1,141 @@
+---
+title: Test files
+description: The route-test format, field by field, and its error codes.
+---
+
+A test file is YAML under `.github/simulci/tests/`, named `*.test.yml`. It is about one workflow; each case is a
+scenario and what it must produce. Every key is checked, so a typo is an error, never a test that passes.
+
+```yaml
+# yaml-language-server: $schema=https://ciatlas.github.io/simulci/schemas/test/v1.json
+workflow: ci.yml
+given: { base: main, changed: [src/app.ts] }
+cases:
+  - name: a fork pull request never deploys
+    when: { event: pull_request, head: feat/x, actor: { fork: true } }
+    then:
+      run: [test]
+      skip:
+        - deploy: if
+```
+
+JSON schema: [`schemas/test/v1.json`](https://ciatlas.github.io/simulci/schemas/test/v1.json).
+
+## The file
+
+| Key        | Is                                                                                  |
+| ---------- | ----------------------------------------------------------------------------------- |
+| `workflow` | the workflow file: `ci.yml` or `.github/workflows/ci.yml`                           |
+| `given`    | what every case starts from: [scenario](/docs/reference/scenarios) fields, `assume`, `allowMaybe`, `strictMocks` |
+| `cases`    | one or more cases                                                                   |
+| `$schema`  | optional, for editors                                                               |
+
+A case's `when` is laid over `given`: `inputs`, `vars`, `actor` and `workflow_run` merge key by key; `ref`,
+`branch` and `tag` replace each other as a group; any other field replaces. `given.assume` and `when.assume` are
+separate [mock layers](/docs/reference/mocks#layers). `strictMocks` is accepted and has no effect yet.
+
+## A case
+
+| Key          | Is                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------ |
+| `name`       | unique in the file                                                                   |
+| `when`       | [scenario](/docs/reference/scenarios) fields, and `assume`: the case's mocks          |
+| `then`       | what the plan must say                                                               |
+| `allowMaybe` | accept `maybe` where `yes` or `no` is expected (overrides `given.allowMaybe`)        |
+| `snapshot`   | `true`, `steps` or `legs`: also compare the whole plan with a [snapshot](/docs/cli/test#snapshots) |
+| `skip`       | `true`, or the reason as text: the case does not run                                 |
+| `only`       | run only the cases marked `only` in this file (an error under `--ci`)               |
+
+A case asserts something: `then`, or a `snapshot`.
+
+## then
+
+| Key          | Asserts                                                                              |
+| ------------ | ------------------------------------------------------------------------------------ |
+| `triggered`  | `true` or `false`: whether the workflow runs                                         |
+| `because`    | the reason the workflow is not triggered; alone, it implies `triggered: false`       |
+| `run`        | units that run                                                                       |
+| `skip`       | units that skip                                                                      |
+| `maybe`      | units that might run                                                                 |
+| `conclusion` | the run's conclusion: `success`, `failure`, `cancelled`, a list of them, or `{ unknown: true }` |
+| `checks`     | the workflow's check runs, exactly: a list of names, or a map of name to result       |
+| `unknowns`   | the unknowns left in the plan, exactly, as unit paths                                |
+| `units`      | assertions per unit                                                                  |
+
+`run`, `skip` and `maybe` list units, each a unit path or a one-key map of unit path to the reason that decided
+it (`- deploy: if`). A unit not listed is not asserted.
+
+### because
+
+The reasons a `because:` may name: `event`, `types`, `schedule`, `default-branch`, `skip-ci`, `parent`, `if`,
+`matrix`, `limit`, a filter (`branches`, `branches-ignore`, `tags`, `tags-ignore`, `paths`, `paths-ignore`,
+`workflows`), or `filter` for any filter. See [How verdicts work](/docs/verdicts#reasons).
+
+### units
+
+`units` maps a unit path to what that unit must show:
+
+| Key           | For               | Asserts                                                          |
+| ------------- | ----------------- | ---------------------------------------------------------------- |
+| `runs`        | any unit          | `yes`, `no` or `maybe`                                           |
+| `because`     | any unit          | the reason that decided it                                       |
+| `outcome`     | a step            | its result before `continue-on-error`                            |
+| `conclusion`  | a step, job, leg  | a step's result after `continue-on-error`; every leg's result    |
+| `result`      | a job or leg      | what `needs.<id>.result` reads                                   |
+| `with`        | a step, or a job that calls a reusable workflow | the values it is given |
+| `inputs`      | a call job, or a step using a composite action | the inputs it receives  |
+| `env`         | any unit          | the environment there                                            |
+| `outputs`     | any unit          | its outputs                                                      |
+| `environment` | a job or leg      | its deployment environment                                       |
+| `check`       | a job or leg      | its check name (a job: its names, exactly)                       |
+
+Results are `success`, `failure`, `cancelled` or `skipped`, or a list of them. Values (in `with`, `inputs`, `env`,
+`outputs`, `environment`) compare in GitHub's string form: a scalar, a list of accepted values, `{ match: <regex> }`,
+or `{ unknown: true }` for a value the plan must still not know. An unknown value whose candidates are all in a list
+passes it.
+
+```yaml
+then:
+  units:
+    'test[os=windows-latest].unit': { runs: no, because: if }
+    build.version: { outputs: { tag: { match: '^v\d+' } } }
+    deploy: { result: success, environment: production }
+```
+
+## Unit paths
+
+How a test (and an assume entry) names a job, a matrix leg or a step:
+
+| Path                           | Names                                                            |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `deploy`                       | the job `deploy` (every leg of a matrix job)                     |
+| `test[os=windows-latest]`      | the legs whose matrix has `os: windows-latest`; `[k=v,k2=v2]` for more keys |
+| `deploy.build`                 | the step with `id: build`                                        |
+| `publish.#2`                   | the second step                                                  |
+| `release/build`                | the job `build` of the reusable workflow the job `release` calls |
+| `build.setup/cache`            | the step `cache` of the composite action the step `setup` uses   |
+| `ci.yml:deploy`                | `deploy` in the workflow `ci.yml`                                |
+
+Ids are letters, digits, `_` and `-`, starting with a letter or `_`.
+
+## Error codes
+
+A file or case that cannot be checked is invalid, and `simulci test` exits `2`.
+
+| Code    | Means                                                                                         |
+| ------- | --------------------------------------------------------------------------------------------- |
+| `T000`  | no test files; a named file is missing or a directory; a test file is under `.github/workflows` |
+| `T001`  | the file is not valid YAML                                                                    |
+| `T002`  | the file does not match the schema: an unknown key, a wrong type, a reason that is not one     |
+| `T102`  | a case, or a unit assertion, asserts nothing                                                  |
+| `T103`  | two cases share a name                                                                        |
+| `T104`  | `only` is left in a file under `--ci`                                                         |
+| `T201`  | `workflow:` names a workflow the checkout does not have                                       |
+| `T202`  | the case's scenario (`when` over `given`) is not valid                                        |
+| `T203`  | the engine failed on the case                                                                 |
+| `T204`  | a unit path names nothing in the plan                                                         |
+| `T205`  | a step is named where the plan has no steps                                                   |
+| `T206`  | a field is asserted on a unit that has none (`result` on a step, `outcome` on a job, …)       |
+| `T207`  | `snapshot:` where the host keeps no snapshots                                                 |
+
+Mock problems (`SC1xx`) are listed under [Mocks](/docs/reference/mocks#diagnostics).

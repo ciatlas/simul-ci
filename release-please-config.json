@@ -96,6 +96,10 @@
         },
         {
           "type": "generic",
+          "path": "apps/docs/content/docs/action.mdx"
+        },
+        {
+          "type": "generic",
           "path": "packages/engine/src/version.ts"
         }
       ]
