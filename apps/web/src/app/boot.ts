@@ -2,12 +2,17 @@ import { createSession, type Session } from '../engine/session';
 import { loadedMetrics } from '../graph/metrics';
 import { createGraphSession, type GraphSession } from '../graph/session';
 import { createSources, type Sources } from '../input/sources';
+import { openKeyValue } from '../lib/idb';
 import { type BufferWriter, createBufferWriter } from '../state/buffers';
-import { sourceStore } from '../state/persist';
+import { DB_NAME, STORE_NAME, sourceStore } from '../state/persist';
+import { snapshotStore } from '../state/snapshot';
+import { createSnapshotKeeper, type SnapshotKeeper } from '../state/snapshot-keeper';
 import { readPrefs, writePrefs } from '../state/prefs';
 import { createSessionStore, initialSessionState, type SessionStore } from '../state/store';
 import { createEngineClient, type EngineClient, spawnEngineWorker } from '../worker/client';
 import { createLayoutClient, type LayoutClient, spawnLayoutWorker } from '../worker/layout-client';
+import { installLeaveGuard } from './leave';
+import { createReplacePrompt, type ReplacePrompt } from './replace';
 import { installShortcuts } from './shortcuts';
 import { installStaleClock } from './stale';
 import { applyTheme } from './theme';
@@ -24,6 +29,10 @@ export interface App {
   sources: Sources;
   /** Writes edited paste buffers to IndexedDB behind the edits. */
   buffers: BufferWriter;
+  /** Keeps a folder's unsaved edits in IndexedDB, and brings them back when the folder opens again. */
+  keeper: SnapshotKeeper;
+  /** Asks before files with unsaved edits give way to another source. */
+  prompt: ReplacePrompt;
 }
 
 export function bootApp(): App {
@@ -34,9 +43,14 @@ export function bootApp(): App {
   const layout = createLayoutClient({ spawn: spawnLayoutWorker });
   // Cards are measured in their own faces, so the first layout waits for the fonts.
   const graph = createGraphSession({ store, layout, metrics: loadedMetrics() });
-  const persist = sourceStore();
-  const sources = createSources({ store, persist });
+  const kv = openKeyValue(DB_NAME, STORE_NAME);
+  const persist = sourceStore(kv);
+  const prompt = createReplacePrompt(store);
+  const sources = createSources({ store, persist, ask: (what) => prompt.ask(what) });
   const buffers = createBufferWriter({ store, persist, win: window });
+  // Before the source is restored below, so the edits of the folder it brings back come back with it.
+  const keeper = createSnapshotKeeper({ store, snapshots: snapshotStore(kv), win: window });
+  installLeaveGuard({ store, pending: () => buffers.pending() || keeper.pending() });
   applyTheme(prefs.theme);
   store.subscribe((s, prev) => {
     if (s.ui.prefs !== prev.ui.prefs) {
@@ -47,5 +61,5 @@ export function bootApp(): App {
   installShortcuts(store);
   installStaleClock({ store });
   void sources.restore();
-  return { store, client, session, layout, graph, sources, buffers };
+  return { store, client, session, layout, graph, sources, buffers, keeper, prompt };
 }

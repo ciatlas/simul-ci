@@ -1,6 +1,6 @@
 import type { AssumeEntry, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { TextEdit } from '@simulci/document/edits';
+import { regionEdit, type TextEdit } from '@simulci/document/edits';
 import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
 import { fileLabel } from '../lib/file-label';
@@ -194,8 +194,35 @@ export interface SessionState {
     yamlFile?: string;
   };
   notices: Notice[];
-  /** The edit history (`state/history.ts`), cleared by a new epoch only. */
-  edit: history.History;
+  /** The edit history (`state/history.ts`), cleared by a new epoch only, and the restore waiting to be settled. */
+  edit: EditState;
+  /** A new source asked to replace files with unsaved edits; the replace prompt answers it (`app/replace.ts`). */
+  replacing?: Replacing;
+}
+
+/** A file of the crash snapshot that did not come back by itself (synthesis § 5.6): the author settles it. */
+export interface RestoreConflict {
+  path: string;
+  /** The text the snapshot kept. */
+  text: string;
+  /** `changed`: the file's text is no longer the one the edits were made to; `gone`: it is not there; `exists`: a file the edits created is there now. */
+  reason: 'changed' | 'gone' | 'exists';
+}
+
+export interface RestoreOffer {
+  /** When the snapshot was taken. */
+  at: number;
+  conflicts: RestoreConflict[];
+}
+
+export interface EditState extends history.History {
+  restore?: RestoreOffer;
+}
+
+export interface Replacing {
+  seq: number;
+  /** What would replace the files, as the prompt names it: "the sample starter", "the folder repo". */
+  what: string;
 }
 
 /** What an edit asked of the store came to: applied, or nothing changed (a refusal says why, if there was one). */
@@ -272,6 +299,12 @@ export interface SessionActions {
   /** Undoes the last entry; false when there is none or the hash guard stopped it. */
   undo: () => boolean;
   redo: () => boolean;
+  /** Restore conflicts for the author to settle; the snapshot writer waits until none is left. */
+  offerRestore: (offer: RestoreOffer) => void;
+  /** Settles a restore conflict: the snapshot's text (`mine`, one undoable entry) or the file as it is (`disk`). */
+  settleRestore: (path: string, keep: 'mine' | 'disk') => void;
+  /** The replace prompt shows, or goes. */
+  setReplacing: (replacing: Replacing | undefined) => void;
   projectLoading: () => void;
   projectReady: (version: number, outline: Outline, files: number) => void;
   /** A load of edited texts broke YAML that parsed: the project shown stays (§ 7.2). */
@@ -326,6 +359,42 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
   };
 }
 
+/** The edit state of a new epoch: no history, no restore offer; entry ids go on, so none is ever reused. */
+const freshEdit = (edit: EditState): EditState => history.emptyHistory(edit.next);
+
+const withoutConflict = (edit: EditState, path: string): EditState => {
+  const conflicts = edit.restore?.conflicts.filter((c) => c.path !== path) ?? [];
+  return {
+    ...edit,
+    restore: conflicts.length > 0 && edit.restore ? { ...edit.restore, conflicts } : undefined,
+  };
+};
+
+/** The transaction that puts a conflicting file back to the snapshot's text: one region edit, or a creation. */
+function restoreOf(s: SessionState, conflict: RestoreConflict): history.TxInput {
+  const current = s.files.byPath[conflict.path];
+  const name = conflict.path.slice(conflict.path.lastIndexOf('/') + 1);
+  const file: history.TxFile =
+    current === undefined
+      ? { path: conflict.path, edits: [{ from: 0, to: 0, insert: conflict.text }], create: true }
+      : {
+          path: conflict.path,
+          edits: [regionEdit(current, conflict.text)],
+          expect: history.stampOf(current),
+        };
+  return { label: `Restored unsaved edits to ${name}`, origin: 'restore', files: [file] };
+}
+
+/**
+ * The files whose text is not what was read or last saved: edited, created since, or removed since. A selector, never
+ * stored: undoing back to the base leaves nothing unsaved.
+ */
+export function dirtyPaths(files: Pick<SessionState['files'], 'byPath' | 'base'>): string[] {
+  const dirty = Object.keys(files.byPath).filter((path) => files.byPath[path] !== files.base[path]);
+  for (const path of Object.keys(files.base)) if (!Object.hasOwn(files.byPath, path)) dirty.push(path);
+  return dirty;
+}
+
 let noticeId = 0;
 let requestSeq = 0;
 /** Pins count apart from the pin the store holds, which new files drop (`pinOver`). */
@@ -365,7 +434,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           source,
           files: sourceFiles(s.files, byPath, metaOf(byPath, meta)),
           ...UNLOADED,
-          edit: history.emptyHistory(s.edit.next),
+          edit: freshEdit(s.edit),
           error: s.error?.kind === 'source' ? undefined : s.error,
         })),
       forgetSource: () =>
@@ -373,7 +442,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           source: { kind: 'none' },
           files: sourceFiles(s.files, {}, {}),
           ...UNLOADED,
-          edit: history.emptyHistory(s.edit.next),
+          edit: freshEdit(s.edit),
           focus: undefined,
           sel: undefined,
           error: replaceError(s.error, undefined),
@@ -463,7 +532,16 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       transact: (input) => commit((s) => history.transact(s.edit, s.files.byPath, input, contextOf(s))),
       typed: (path, splices, alone) =>
         commit((s) => history.typed(s.edit, s.files.byPath, path, splices, contextOf(s), alone)),
-      closeGroup: () => set((s) => (s.edit.group ? { edit: history.close(s.edit) } : s)),
+      closeGroup: () => set((s) => (s.edit.group ? { edit: { ...s.edit, ...history.close(s.edit) } } : s)),
+      offerRestore: (restore) => set((s) => ({ edit: { ...s.edit, restore } })),
+      settleRestore: (path, keep) => {
+        const conflict = get().edit.restore?.conflicts.find((c) => c.path === path);
+        if (!conflict) return;
+        if (keep === 'mine')
+          commit((s) => history.transact(s.edit, s.files.byPath, restoreOf(s, conflict), contextOf(s)));
+        set((s) => ({ edit: withoutConflict(s.edit, path) }));
+      },
+      setReplacing: (replacing) => set({ replacing }),
       undo: () => commit((s) => history.undo(s.edit, s.files.byPath), 'undo').ok,
       redo: () => commit((s) => history.redo(s.edit, s.files.byPath), 'redo').ok,
       projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
@@ -524,14 +602,14 @@ function committed(
       return { patch: s, outcome: { ok: false, refusal: outcome } };
     const text = `${stopped.verb} stopped: ${fileLabel(outcome.path)} changed outside the history`;
     return {
-      patch: { edit: history.emptyHistory(s.edit.next), notices: [...s.notices, { id: stopped.id, text }] },
+      patch: { edit: freshEdit(s.edit), notices: [...s.notices, { id: stopped.id, text }] },
       outcome: { ok: false, refusal: outcome },
     };
   }
   const texts = withTexts(s, outcome.changes);
   // Nothing moved: no update, so no listener runs.
   if (!texts.files && outcome.history === s.edit) return { patch: s, outcome: { ok: false } };
-  const patch: Partial<SessionState> = { ...texts, edit: outcome.history };
+  const patch: Partial<SessionState> = { ...texts, edit: { ...s.edit, ...outcome.history } };
   if (!texts.files) return { patch, outcome: { ok: false } };
   patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
   return { patch, outcome: { ok: true } };

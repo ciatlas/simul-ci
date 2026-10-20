@@ -26,8 +26,8 @@ export type StoredSource =
       meta?: Record<string, FileMeta>;
     };
 
-const DB_NAME = 'simulci-web';
-const STORE_NAME = 'source';
+export const DB_NAME = 'simulci-web';
+export const STORE_NAME = 'source';
 const CURRENT_KEY = 'current';
 
 export interface SourceStore {

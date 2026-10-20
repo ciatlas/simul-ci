@@ -1,19 +1,22 @@
+import { downloadText } from '../lib/download';
 import { hashFiles } from '../lib/hash';
 import type { SourceStore, StoredSource } from '../state/persist';
-import type { SessionState, SessionStore, Source } from '../state/store';
+import { dirtyPaths, type SessionState, type SessionStore, type Source } from '../state/store';
 import { type Dropped, filesFromDrop } from './drop';
 import { filterFiles } from './filter';
 import { canPickFolder, canReadFolder, pickFolder, readFolder, requestFolder } from './folder';
 import { leftOut, overLimit, type Skipped, type Walked } from './limits';
 import { checkPaste, type PasteCheck } from './paste';
 import { filesFromList } from './picker';
-import type { FileMeta } from './read';
+import { asWritten, type FileMeta } from './read';
 import { sampleByName } from './samples';
 
 /**
  * Every way files come in ends in `setFiles` after the filter and the limits, and in the source store so a reload
  * finds them again. Failures are the `source` error of the store; a cancelled picker is nothing; files a walk left
- * out for their size are a notice.
+ * out for their size are a notice. Files with unsaved edits are never replaced unasked (synthesis § 5.7): opening a
+ * folder or a sample, choosing or dropping files, a paste over an edited buffer, Reload and Forget first ask the
+ * author, who can download the edited files, let them go, or keep them.
  */
 export interface Sources {
   canPickFolder: boolean;
@@ -32,6 +35,20 @@ export interface Sources {
   restore(): Promise<void>;
 }
 
+/** What the author answered the replace prompt: download the edited files first, let them go, or keep them. */
+export type ReplaceChoice = 'download' | 'discard' | 'cancel';
+
+export interface SourcesOptions {
+  store: SessionStore;
+  persist: SourceStore;
+  /** Asks before files with unsaved edits are replaced, naming what would replace them; absent, nothing asks. */
+  ask?: (what: string) => Promise<ReplaceChoice>;
+  /** Hands files to the browser to save; one call per file. */
+  download?: (name: string, text: string) => void;
+}
+
+const downloadYaml = (name: string, text: string): void => downloadText(name, text, 'application/yaml');
+
 const LOOKED_FOR = 'looked for .github/workflows/*.yml, .github/actions/**/action.yml and action.yml';
 
 /** What a way in brought: the files, what reading them found (none for strings), and the files it left out. */
@@ -45,8 +62,46 @@ function unchanged(read: Walked, files: SessionState['files']): boolean {
   );
 }
 
-export function createSources({ store, persist }: { store: SessionStore; persist: SourceStore }): Sources {
+export function createSources({ store, persist, ask, download = downloadYaml }: SourcesOptions): Sources {
   const actions = store.getState();
+
+  /**
+   * Whether the files may give way to `what`: at once when no edit would be lost, which keeps a picker in the click
+   * that opened it; else once the author said so, having downloaded the edited files if they chose to. `kept` are the
+   * edited paths that survive the replacement (a paste of another buffer keeps the others, whose texts carry their
+   * edits).
+   */
+  const mayReplace = (what: string, kept: ReadonlySet<string> = new Set()): true | Promise<boolean> => {
+    const lost = dirtyPaths(store.getState().files).filter((p) => !kept.has(p));
+    if (lost.length === 0 || !ask) return true;
+    return ask(what).then((choice) => {
+      if (choice === 'download') downloadAll(lost);
+      return choice !== 'cancel';
+    });
+  };
+
+  const downloadAll = (paths: readonly string[]): void => {
+    const { files } = store.getState();
+    for (const path of paths) {
+      const text = files.byPath[path];
+      if (text !== undefined)
+        download(path.slice(path.lastIndexOf('/') + 1), asWritten(text, files.meta[path]));
+    }
+  };
+
+  /** `act` once the files may give way, at once when nothing would be lost. */
+  const thenReplace = (go: true | Promise<boolean>, act: () => void): void => {
+    if (go === true) act();
+    else void go.then((yes) => yes && act());
+  };
+
+  /** The buffers' paths that a paste or a drop leaves standing, edits and all: the ones it does not overwrite. */
+  const keptBuffers = (overwritten: ReadonlySet<string>): Set<string> =>
+    new Set(
+      buffersOf()
+        .map((b) => b.path)
+        .filter((p) => !overwritten.has(p)),
+    );
 
   const fail = (message: string): void => actions.rejected({ kind: 'source', message });
 
@@ -210,6 +265,8 @@ export function createSources({ store, persist }: { store: SessionStore; persist
 
     openFolder: () =>
       guarded(async () => {
+        const go = mayReplace('Opening another folder');
+        if (go !== true && !(await go)) return;
         const picked = await pickFolder();
         if (!picked) return;
         accept(
@@ -223,6 +280,7 @@ export function createSources({ store, persist }: { store: SessionStore; persist
       guarded(async () => {
         const picked = await filesFromList(list);
         const name = picked.name ?? 'the chosen files';
+        if (!(await mayReplace(`Opening ${name}`))) return;
         accept(picked, { kind: 'folder', name, readAt: Date.now() }, name);
       }),
 
@@ -230,9 +288,11 @@ export function createSources({ store, persist }: { store: SessionStore; persist
       guarded(async () => {
         const dropped = await filesFromDrop(transfer);
         if (dropped.name === undefined) {
-          dropLoose(dropped);
+          const overwritten = new Set(Object.keys(dropped.files));
+          if (await mayReplace('Opening the dropped files', keptBuffers(overwritten))) dropLoose(dropped);
           return;
         }
+        if (!(await mayReplace(`Opening ${dropped.where}`))) return;
         const source: Source = { kind: 'folder', name: dropped.name, readAt: Date.now() };
         if (dropped.handle) source.handle = dropped.handle;
         accept(dropped, source, dropped.where);
@@ -244,7 +304,9 @@ export function createSources({ store, persist }: { store: SessionStore; persist
       const buffers = buffersOf().filter((b) => b.path !== check.path);
       const meta = metaOf(buffers);
       buffers.push({ path: check.path, text });
-      setBuffers(buffers, meta);
+      thenReplace(mayReplace(`Pasting ${check.path}`, keptBuffers(new Set([check.path]))), () =>
+        setBuffers(buffers, meta),
+      );
       return check;
     },
 
@@ -253,13 +315,16 @@ export function createSources({ store, persist }: { store: SessionStore; persist
     useSample: (name) => {
       const sample = sampleByName(name);
       if (!sample) return fail(`no sample named ${name}`);
-      accept({ files: sample.files }, { kind: 'sample', name }, `the sample ${name}`);
+      thenReplace(mayReplace(`Opening the ${name} sample`), () =>
+        accept({ files: sample.files }, { kind: 'sample', name }, `the sample ${name}`),
+      );
     },
 
     reload: () =>
       guarded(async () => {
         const s = store.getState();
         if (s.source.kind !== 'folder') return;
+        if (!(await mayReplace(`Reloading ${s.source.name} from disk`))) return;
         const read = await readAgain(s.source, 'open it again');
         if (!read) return;
         const where = `the folder ${s.source.name}`;
@@ -280,6 +345,8 @@ export function createSources({ store, persist }: { store: SessionStore; persist
       }),
 
     forget: async () => {
+      const { source } = store.getState();
+      if (!(await mayReplace(`Forgetting ${source.kind === 'folder' ? source.name : 'these files'}`))) return;
       actions.forgetSource();
       await persist.clear();
     },

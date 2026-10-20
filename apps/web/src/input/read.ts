@@ -43,3 +43,7 @@ export function classifyEol(text: string): FileMeta['eol'] {
 
 /** The meta of a string no file was read for: a paste, a sample. */
 export const textMeta = (text: string): FileMeta => ({ bom: false, eol: classifyEol(text), utf8: true });
+
+/** The text as a file holds it: its BOM put back, for a download or a save. */
+export const asWritten = (text: string, meta: Pick<FileMeta, 'bom'> | undefined): string =>
+  meta?.bom ? `\uFEFF${text}` : text;
