@@ -110,7 +110,7 @@ const change = (id: NodeId, kind: VerdictChange['kind'] = 'job'): VerdictChange 
 
 /** The store's plan answering the pin, and the picture committed for it, as the graph session commits one. */
 function answered(seq: number, changes: VerdictChange[]) {
-  const plan = { plan: answer, for: { files: 1, project: 1 } } as PlanState;
+  const plan = { plan: answer, for: { files: 1, epoch: 1, project: 1 } } as PlanState;
   const graph: GraphState = { model: model(), layout: { scopes: {}, roots: {}, cards: {} }, for: plan.for };
   const pin: Pin = {
     seq,
@@ -146,7 +146,7 @@ describe('the flash of a pin', () => {
   it("waits for the answering plan's picture, and stops at a later plan", () => {
     const { pin, plan, graph } = answered(4, [change(j('deploy'))]);
     // The picture of the plan before the pin is still on the canvas.
-    expect(flashOf(pin, plan, { ...graph, for: { files: 1, project: 1 } })).toBeUndefined();
+    expect(flashOf(pin, plan, { ...graph, for: { files: 1, epoch: 1, project: 1 } })).toBeUndefined();
     // A plan came after the one that answered the pin.
     expect(flashOf(pin, { ...plan, plan: {} as RunPlan }, graph)).toBeUndefined();
     expect(flashOf({ ...pin, after: undefined }, plan, graph)).toBeUndefined();

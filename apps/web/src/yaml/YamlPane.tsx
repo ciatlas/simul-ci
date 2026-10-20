@@ -1,3 +1,4 @@
+import type { StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { NodeId } from '@simulci/engine';
 import {
@@ -81,25 +82,40 @@ interface PaneModel {
   lines: PaneLines;
 }
 
-/** What the pane shows, from the store. */
+/**
+ * What the pane shows, from the store. The plan on screen says what is selected and which file the pane follows,
+ * also while it is of older texts than the store's (an edit not answered yet): the selection and the file stay. Only
+ * a plan and an Outline of the texts shown put anything on lines; one of older texts would put it on the wrong ones.
+ */
 function usePaneModel(): PaneModel {
   const files = useSession((s) => s.files);
   const outline = useSession((s) => s.project.outline);
-  const current = useSession((s) => s.plan);
+  const outlined = useSession((s) => s.project.files);
+  const plan = useSession((s) => s.plan);
   const focus = useSession((s) => s.focus);
   const sel = useSession((s) => s.sel);
   const picked = useSession((s) => s.ui.yamlFile);
   const representative = useSession((s) => s.ui.representative);
-  // A plan of other files would put its marks on the wrong lines.
-  const plan = current?.for.files === files.version ? current : undefined;
   const tabs = useMemo(() => fileTabs(outline, files.byPath), [outline, files.byPath]);
   const node = plan ? resolveSelection(planIndex(plan), focus, sel) : undefined;
   const path = shownFile({ tabs, picked, plan, node, focus });
-  const lines = usePaneLines(plan, outline, path, node, representative);
+  const lines = usePaneLines(
+    { plan: currentFor(plan, files), outline: outlined === files.version ? outline : undefined },
+    path,
+    node,
+    representative,
+  );
   return { files, tabs, path, node, lines };
 }
 
-/** The view, the file it shows with its lines, the selection's scroll and the requested line. */
+/** The plan when it is of the texts in the store. */
+const currentFor = (plan: PlanState | undefined, files: SessionState['files']): PlanState | undefined =>
+  plan?.for.files === files.version ? plan : undefined;
+
+/**
+ * The view, the file it shows with its lines, the selection's scroll and the requested line. The lines are set only
+ * when the store has them for the texts shown; until then the ones set last map through the edits.
+ */
 function useEditor(host: RefObject<HTMLDivElement | null>, { files, path, node, lines }: PaneModel): void {
   const { store } = useApp();
   const reveal = useSession((s) => s.reveal);
@@ -107,22 +123,30 @@ function useEditor(host: RefObject<HTMLDivElement | null>, { files, path, node, 
   const docs = useDocs(store, nearest);
   const view = useEditorView(host);
   const text = path === undefined ? undefined : files.byPath[path];
+  const rev = (path === undefined ? undefined : files.revs[path]) ?? 0;
+  const { epoch } = files;
   useLayoutEffect(() => {
     if (!view || path === undefined || text === undefined) return;
-    const scroll = docs.show(view, path, files.version, text);
+    const scroll = docs.show(view, path, { epoch, rev }, text);
     view.dispatch({
       effects: [
         // A state made earlier may hold the other theme.
         themeCompartment.reconfigure(themeFor(pageIsDark())),
-        setMarks.of(lines.marks),
-        setDeciding.of(lines.deciding),
-        setProblems.of(lines.problems),
+        ...lineEffects(lines),
         ...scroll,
       ],
     });
-  }, [view, docs, path, files.version, text, lines]);
-  useSelectionScroll(view, node, lines.deciding, nearest, files.version);
+  }, [view, docs, path, epoch, rev, text, lines]);
+  useSelectionScroll(view, node, lines.plan, nearest, epoch);
   useReveal(view, path, reveal);
+}
+
+/** The effects that set the lines the store has for the texts shown, and leave the others to map. */
+function lineEffects({ plan, problems }: PaneLines): StateEffect<unknown>[] {
+  return [
+    ...(plan ? [setMarks.of(plan.marks), setDeciding.of(plan.deciding)] : []),
+    ...(problems ? [setProblems.of(problems)] : []),
+  ];
 }
 
 function PaneFooter({ path }: { path: string | undefined }) {
@@ -147,30 +171,34 @@ function PaneFooter({ path }: { path: string | undefined }) {
 let revealed = 0;
 
 interface PaneLines {
-  marks: GutterMark[];
-  deciding: DecidingLines | undefined;
-  problems: ProblemLine[];
+  /** The verdict marks and the selection's lines, from a plan of the texts shown; absent while there is none. */
+  plan?: { marks: GutterMark[]; deciding: DecidingLines | undefined };
+  /** The lines the parsers refused, from an Outline of the texts shown; absent while there is none. */
+  problems?: ProblemLine[];
 }
 
-/** What the shown file's lines carry: verdict marks and the deciding line from the plan, problems from the outline. */
+/**
+ * What the shown file's lines carry: verdict marks and the deciding line from the plan, problems from the outline,
+ * each only when it is of the texts shown.
+ */
 function usePaneLines(
-  plan: PlanState | undefined,
-  outline: Outline | undefined,
+  { plan, outline }: { plan: PlanState | undefined; outline: Outline | undefined },
   path: string | undefined,
   node: NodeId | undefined,
   representative: SessionState['ui']['representative'],
 ): PaneLines {
   const labels = useMemo(() => (plan ? planLabels(plan.plan) : undefined), [plan]);
   return useMemo(() => {
-    const problems = path === undefined ? [] : problemLines(outline, path);
-    if (!plan || !labels || path === undefined) return { marks: [], deciding: undefined, problems };
+    if (path === undefined) return {};
+    const problems = outline ? problemLines(outline, path) : undefined;
+    if (!plan || !labels) return { problems };
     const marks = gutterMarks(plan, outline, path, representative, node).map((m) => ({
       line: m.line,
       node: m.node,
       verdict: m.verdict,
       title: `${labels.get(m.node) ?? m.node}: ${MARK_LABEL[m.verdict]}`,
     }));
-    return { marks, deciding: decidingLines(plan.plan, plan.derived, node, path), problems };
+    return { plan: { marks, deciding: decidingLines(plan.plan, plan.derived, node, path) }, problems };
   }, [plan, labels, outline, path, node, representative]);
 }
 
@@ -223,29 +251,31 @@ function useEditorView(host: RefObject<HTMLDivElement | null>): EditorView | und
 }
 
 /**
- * A new selection brings its deciding line (else its own line) to the middle, and so does the first plan of new
- * files, whose states start over; a new plan of the same files moves nothing.
+ * A new selection brings its deciding line (else its own line) to the middle once a plan of the texts shown places
+ * it, and so does the first plan of a new source, whose states start over; a new plan of the same source, an edit's
+ * included, moves nothing.
  */
 function useSelectionScroll(
   view: EditorView | undefined,
   node: NodeId | undefined,
-  deciding: DecidingLines | undefined,
+  placed: PaneLines['plan'],
   nearest: RefObject<boolean>,
-  version: number,
+  epoch: number,
 ): void {
-  const last = useRef<{ node: NodeId; version: number }>(undefined);
-  const line = deciding?.line ?? deciding?.own;
+  const last = useRef<{ node: NodeId; epoch: number }>(undefined);
+  const line = placed?.deciding?.line ?? placed?.deciding?.own;
+  const current = placed !== undefined;
   useEffect(() => {
-    if (!view || node === undefined || sameSelection(last.current, node, version)) return;
-    last.current = { node, version };
+    if (!view || node === undefined || !current || sameSelection(last.current, node, epoch)) return;
+    last.current = { node, epoch };
     const y = nearest.current ? 'nearest' : 'center';
     nearest.current = false;
     if (line !== undefined) scrollOwnTo(view, line, y);
-  }, [view, node, line, nearest, version]);
+  }, [view, node, line, nearest, epoch, current]);
 }
 
-const sameSelection = (last: { node: NodeId; version: number } | undefined, node: NodeId, version: number) =>
-  last?.node === node && last.version === version;
+const sameSelection = (last: { node: NodeId; epoch: number } | undefined, node: NodeId, epoch: number) =>
+  last?.node === node && last.epoch === epoch;
 
 /**
  * A requested line, once its file is shown: centred and flashed once, without the flash for reduced motion. The view

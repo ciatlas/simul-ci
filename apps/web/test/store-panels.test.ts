@@ -14,7 +14,7 @@ function planState(scenario: ScenarioInput, assume: AssumeEntry[] = []): PlanSta
   const r = handle(loaded.state, { id: 2, type: 'simulate', project: 1, scenario, assume, detail: 'steps' });
   if (r.response.type !== 'plan') throw new Error(JSON.stringify(r.response));
   const { plan, derived, text, ms } = r.response;
-  return { plan, derived, text, ms, for: { files: 1, project: 1, assume, scenario } };
+  return { plan, derived, text, ms, for: { files: 1, epoch: 1, project: 1, assume, scenario } };
 }
 
 /** A store showing the plan for `source` with no assume entries, as the session leaves it. */
@@ -110,7 +110,7 @@ describe('the store for the panels', () => {
     store.getState().pinAssume([detect]);
     const pinned = store.getState();
     const pin = pinned.pin!;
-    expect([pinned.assume, pinned.stale]).toEqual([[detect], true]);
+    expect([pinned.assume, pinned.stale]).toEqual([[detect], 'inputs']);
     expect(pin.before!.plan).toBe(plan.plan);
     expect(pin.before!.derived).toBe(plan.derived);
     expect(pin.assume).toBe(pinned.assume);

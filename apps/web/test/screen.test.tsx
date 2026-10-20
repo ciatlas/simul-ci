@@ -50,7 +50,7 @@ function mount() {
   a.setScenario(scenario, { from: 'url' });
   a.setFocus('.github/workflows/ci.yml');
   const { plan, derived, text, ms } = r.response;
-  a.planReceived({ plan, derived, text, ms, for: { files: 1, project: 1 } });
+  a.planReceived({ plan, derived, text, ms, for: { files: 1, epoch: 1, project: 1 } });
   const app = { store, sources: { canPickFolder: false } } as unknown as App;
   render(
     <AppProvider app={app}>
@@ -237,7 +237,7 @@ describe('the status line', () => {
     });
     if (r.response.type !== 'plan') throw new Error(r.response.type);
     const { plan, derived, text, ms } = r.response;
-    return { plan, derived, text, ms, for: { files: 1, project: 1, assume, scenario } };
+    return { plan, derived, text, ms, for: { files: 1, epoch: 1, project: 1, assume, scenario } };
   }
 
   /** The store answers the inputs it holds now with their plan. */
@@ -340,7 +340,7 @@ describe('the status line', () => {
     const sentence = line.firstElementChild!;
     expect(classes(sentence)).not.toContain('italic');
     act(() => store.getState().patchScenario({ message: 'docs' }));
-    expect(store.getState().stale).toBe(true);
+    expect(store.getState().stale).toBe('inputs');
     expect(classes(sentence)).toContain('italic');
     expect(sentence.className).not.toMatch(/opacity/);
   });

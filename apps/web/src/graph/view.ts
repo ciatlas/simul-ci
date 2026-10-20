@@ -3,17 +3,17 @@ import type { Point } from './types';
 
 /**
  * The viewport's own rules, pure: where it starts when the canvas mounts, and where a double-click takes it. The
- * first picture of the files loaded is fitted once; after that the canvas opens where the author left it, whether the
- * text view, a narrow window or StrictMode's second mount took it away, and newly loaded files are fitted again. The
- * files are told by the store's files version, which only new files move: a restarted engine numbers the same files'
- * project afresh, and that is not a new picture. A double-click zooms in twice as far (out with Shift) about the
+ * first picture of a source is fitted once; after that the canvas opens where the author left it, whether the text
+ * view, a narrow window or StrictMode's second mount took it away, and a new source is fitted again. The source is
+ * told by the store's files epoch, which only a new source moves: an edit of the texts is not a new picture, nor is
+ * the project a restarted engine numbers afresh. A double-click zooms in twice as far (out with Shift) about the
  * pointer, as d3-zoom's own does, but in the canvas's time, so it moves at once for an author who asked for less
  * motion.
  */
 
-/** The last viewport of a picture of the files of one version, kept while the canvas is unmounted. */
+/** The last viewport of a picture of the files of one epoch, kept while the canvas is unmounted. */
 export interface ViewMemory {
-  files: number;
+  epoch: number;
   viewport: Viewport;
 }
 
@@ -25,8 +25,8 @@ export interface MountView {
   viewport?: Viewport;
 }
 
-export function mountView(memory: ViewMemory | undefined, files: number): MountView {
-  return memory?.files === files ? { fit: false, viewport: memory.viewport } : { fit: true };
+export function mountView(memory: ViewMemory | undefined, epoch: number): MountView {
+  return memory?.epoch === epoch ? { fit: false, viewport: memory.viewport } : { fit: true };
 }
 
 /** The viewport a double-click at `pointer` (relative to the pane) asks for: the flow point under it stays there. */

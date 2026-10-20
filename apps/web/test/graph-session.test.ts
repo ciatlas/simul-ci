@@ -2,37 +2,36 @@ import type { RunPlan, Tri } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 import { tableMetrics } from '../src/graph/metrics';
 import { createGraphSession } from '../src/graph/session';
-import type { GraphModel, GraphUi, Metrics, ScopeLayout } from '../src/graph/types';
+import { shapeHash } from '../src/graph/shape';
+import type { GraphModel, GraphUi, Metrics, ScopeLayout, ScopeModel } from '../src/graph/types';
 import { createSessionStore, type SessionStore } from '../src/state/store';
 import type { LayoutClient, LayoutResult } from '../src/worker/layout-client';
 import type { LayoutRequest } from '../src/worker/layout-protocol';
 
-/** A plan as small as the fake model needs: one workflow's jobs and their verdicts. */
-type FakePlan = { jobs: [string, Tri][] };
+/** A plan as small as the fake model needs: one workflow's jobs, their verdicts, and a name for a job that has one. */
+type FakePlan = { jobs: [string, Tri, string?][] };
 
-/** The model of a fake plan: one scope, a card per job with one step, open when the author opened it. */
+/**
+ * The model of a fake plan: one scope, a card per job with one step, open when the author opened it, and the scope's
+ * shape as the real model hashes it.
+ */
 function fakeModel(plan: RunPlan, _derived: unknown, ui: GraphUi): GraphModel {
   const { jobs } = plan as unknown as FakePlan;
   const ids = jobs.map(([id]) => `ci.yml#${id}`);
-  const model: GraphModel = {
-    roots: ['ci.yml'],
-    scopes: {
-      'ci.yml': {
-        id: 'ci.yml',
-        path: 'ci.yml',
-        verdict: 'yes',
-        clause: '',
-        counts: { yes: 0, no: 0, maybe: 0 },
-        depth: 0,
-        collapsed: false,
-        jobs: ids,
-        edges: [],
-        shape: [...ids, ...ui.expanded].join(','),
-      },
-    },
-    jobs: {},
+  const scope: ScopeModel = {
+    id: 'ci.yml',
+    path: 'ci.yml',
+    verdict: 'yes',
+    clause: '',
+    counts: { yes: 0, no: 0, maybe: 0 },
+    depth: 0,
+    collapsed: false,
+    jobs: ids,
+    edges: [],
+    shape: '',
   };
-  for (const [jobId, verdict] of jobs) {
+  const model: GraphModel = { roots: ['ci.yml'], scopes: { 'ci.yml': scope }, jobs: {} };
+  for (const [jobId, verdict, name] of jobs) {
     const id = `ci.yml#${jobId}`;
     const step = { id: `${id}.s`, label: 's', verdict, inner: [] };
     const expanded = ui.expanded.includes(id);
@@ -40,13 +39,14 @@ function fakeModel(plan: RunPlan, _derived: unknown, ui: GraphUi): GraphModel {
       id,
       scope: 'ci.yml',
       jobId,
-      label: jobId,
+      label: name ?? jobId,
       verdict,
       needs: [],
       steps: [step],
       expanded,
     };
   }
+  scope.shape = shapeHash(scope, Object.values(model.jobs), {});
   return model;
 }
 
@@ -77,7 +77,7 @@ const receive = (store: SessionStore, jobs: FakePlan['jobs']): void =>
     derived: {} as never,
     text: '',
     ms: { simulate: 1, derive: 0 },
-    for: { files: ++files, project: 1 },
+    for: { files: ++files, epoch: 1, project: 1 },
   });
 
 /** Lets the session's promises run. */
@@ -140,6 +140,36 @@ describe('the graph session', () => {
     expect(after.model.jobs['ci.yml#build']!.verdict).toBe('no');
     expect(after.layout).toEqual(before.layout);
     expect(after.ms).toBeUndefined();
+  });
+
+  it('lays a renamed card out again only when its title crosses a width step, and draws it at the size placed', async () => {
+    const { store, layout } = setup();
+    const id = 'ci.yml#build';
+    const placed = (request: number) =>
+      layout.requests[request]!.body.scopes[0]!.nodes.find((n) => n.id === id) as { width: number };
+    receive(store, [['build', 'yes', 'a'.repeat(20)]]);
+    await tick();
+    layout.answer(0);
+    await tick();
+    const before = store.getState().graph!;
+    // The width table's 7 px a character: 28 + 140 + 24 is 192 px, a whole step, and 19 characters round up to it.
+    expect(placed(0).width).toBe(192);
+    receive(store, [['build', 'yes', 'b'.repeat(19)]]);
+    await tick();
+    expect(layout.requests).toHaveLength(1);
+    const renamed = store.getState().graph!;
+    expect(renamed.model.jobs[id]!.label).toBe('b'.repeat(19));
+    expect(renamed.layout).toEqual(before.layout);
+    // A card the positions were placed for at another width could reach into its neighbour: never so.
+    expect(renamed.layout.cards[id]!.width).toBe(placed(0).width);
+    receive(store, [['build', 'yes', 'a'.repeat(21)]]);
+    await tick();
+    expect(layout.requests).toHaveLength(2);
+    expect(placed(1).width).toBe(200);
+    expect(store.getState().graph).toBe(renamed);
+    layout.answer(1);
+    await tick();
+    expect(store.getState().graph!.layout.cards[id]!.width).toBe(200);
   });
 
   it('lets the latest change win, whatever order the answers come in', async () => {

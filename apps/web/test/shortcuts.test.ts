@@ -129,7 +129,7 @@ const build: JobModel = {
 const graph: GraphState = {
   model: { roots: [CI], scopes: { [CI]: scope(CI, [BUILD]) }, jobs: { [BUILD]: build } },
   layout: { scopes: {}, roots: {}, cards: {} },
-  for: { files: 1, project: 1 },
+  for: { files: 1, epoch: 1, project: 1 },
 };
 
 describe('the page key listener', () => {

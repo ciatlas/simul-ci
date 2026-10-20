@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSession } from '../src/engine/session';
 import { reportable } from '../src/state/report';
-import { createSessionStore, isBlocking } from '../src/state/store';
+import { createSessionStore, isBlocking, withTexts } from '../src/state/store';
 import {
   type CaseResult,
   createEngineClient,
@@ -138,7 +138,7 @@ describe('the session', () => {
     expect(store.getState().plan?.text).toBe('plan');
     expect(store.getState().stale).toBe(false);
     store.getState().patchScenario({ branch: 'release/1' });
-    expect(store.getState().stale).toBe(true);
+    expect(store.getState().stale).toBe('inputs');
     expect(store.getState().assumed).toEqual(['event']);
     store.getState().patchScenario({ branch: 'release/2' });
     await vi.advanceTimersByTimeAsync(99);
@@ -171,6 +171,58 @@ describe('the session', () => {
     expect(store.getState().focus).toBe('.github/workflows/ci.yml');
     expect(store.getState().sel).toBeUndefined();
     expect(store.getState().scenarioFrom).toBe('default');
+  });
+
+  it('keeps the page’s own scenario, the selection and the plan through texts edited within the epoch', async () => {
+    const store = createSessionStore();
+    const f = fakeClient();
+    createSession({ store, client: f.client, debounceMs: 100 });
+    store.getState().setFiles({ [CI]: 'on: push' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[0]!({ id: 1, type: 'loaded', project: 1, outline, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    f.simulates[0]!.resolve(plan(1));
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().select(CI, 'test');
+    const { scenario, plan: shown } = store.getState();
+    expect(store.getState().scenarioFrom).toBe('default');
+    store.setState((s) => withTexts(s, { [CI]: 'on: [push]' }));
+    // The new texts go to the worker at once; the project they replace stays ready, and the plan stays on screen.
+    expect(f.loads).toHaveLength(2);
+    expect(store.getState()).toMatchObject({ project: { status: 'ready', files: 1 }, stale: 'edit' });
+    expect(store.getState().plan).toBe(shown);
+    f.loads[1]!({ id: 2, type: 'loaded', project: 2, outline, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    // Not the epoch's first load: no defaults, so the scenario and the selection are the author's still.
+    expect(store.getState().scenario).toBe(scenario);
+    expect(store.getState()).toMatchObject({ focus: CI, sel: 'test', project: { files: 2 } });
+    expect(f.simulates[1]!.body).toMatchObject({ project: 2, scenario });
+    f.simulates[1]!.resolve(plan(2));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().plan?.for).toMatchObject({ files: 2, epoch: 1, project: 2 });
+    expect(store.getState().stale).toBe(false);
+  });
+
+  it('labels a plan with the files it was simulated from, not the newer texts the store holds', async () => {
+    const store = createSessionStore();
+    const f = fakeClient();
+    const session = createSession({ store, client: f.client, debounceMs: 100 });
+    store.getState().setFiles({ [CI]: 'on: push' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    f.loads[0]!({ id: 1, type: 'loaded', project: 1, outline, ms: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    f.simulates[0]!.resolve(plan(1));
+    await vi.advanceTimersByTimeAsync(0);
+    store.setState((s) => withTexts(s, { [CI]: 'on: [push]' }));
+    // While the edit loads, the inputs change: the plan they bring is of the old texts, and says so.
+    store.getState().patchScenario({ branch: 'dev' });
+    session.simulateNow();
+    expect(f.simulates[1]!.body).toMatchObject({ project: 1, scenario: { branch: 'dev' } });
+    f.simulates[1]!.resolve(plan(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().files.version).toBe(2);
+    expect(store.getState().plan?.for).toMatchObject({ files: 1, epoch: 1, project: 1 });
+    expect(store.getState().stale).toBe('edit');
   });
 
   it('keeps the URL scenario, drops answers to older requests and routes invalid, stale and engine errors', async () => {
@@ -245,10 +297,7 @@ describe('the session', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().engine.busy).toBe(true);
     // A folder from the last visit that needs a click before it can be read again: no files until then.
-    store.setState({
-      source: { kind: 'folder', name: 'repo', readAt: 0 },
-      files: { version: store.getState().files.version + 1, byPath: {}, meta: {} },
-    });
+    store.getState().awaitReopen({ kind: 'folder', name: 'repo', readAt: 0 });
     f.loads[2]!({ id: 3, type: 'error', kind: 'load', message: 'not yaml' });
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().engine.busy).toBe(false);
@@ -466,6 +515,7 @@ describe('the session over the real client', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().plan?.for).toEqual({
       files: store.getState().files.version,
+      epoch: store.getState().files.epoch,
       project: 1,
       assume: store.getState().assume,
       scenario: store.getState().scenario,

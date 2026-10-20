@@ -153,10 +153,7 @@ export function createSources({ store, persist }: { store: SessionStore; persist
     if (!untouched()) return;
     if (!granted) {
       // Not yet: the screen offers "Reopen <name>"; the scenario from the URL waits for the files.
-      store.setState({
-        source,
-        files: { version: store.getState().files.version + 1, byPath: {}, meta: {} },
-      });
+      actions.awaitReopen(source);
       return;
     }
     let read: Walked;

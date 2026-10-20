@@ -55,8 +55,8 @@ import './canvas.css';
  * The run graph: the committed picture from the store as React Flow nodes, the selection from the URL's `sel`
  * resolved against the plan and written back through `select`. Nothing is draggable or connectable; the canvas
  * keys are ours (graph/navigate.ts) and React Flow's own are switched off where they would clash (Space pans,
- * Shift and Meta select). The first picture of the files loaded is fitted once; after that the viewport moves only
- * when the author asks, and a picture mounted again opens where it was left. Every node stays mounted (the node
+ * Shift and Meta select). The first picture of a source is fitted once; after that the viewport moves only when the
+ * author asks, an edit of the texts included, and a picture mounted again opens where it was left. Every node stays mounted (the node
  * count is bounded by workflows and jobs, never legs or steps), so the card with the focus never leaves the page
  * under it. An unknown hovered in the Unknowns tab fades the cards it does not affect; the cards a pin changed flash
  * once. For an author who asked for less motion nothing on the canvas moves by itself: the viewport jumps, nothing
@@ -127,8 +127,9 @@ function Flow() {
   graphRef.current = graph;
   const rf = useReactFlow<FlowNode, NeedsFlowEdge>();
   useViewportCommands(rf, graphRef);
-  // New files are a new picture: it mounts afresh and is fitted. The project a restart numbers anew is not one.
-  return graph ? <Picture key={graph.for.files} graph={graph} graphRef={graphRef} /> : <Waiting />;
+  // A new source is a new picture: it mounts afresh and is fitted. Neither an edit of its texts nor the project a
+  // restart numbers anew is one: the picture stays mounted, where the author left it.
+  return graph ? <Picture key={graph.for.epoch} graph={graph} graphRef={graphRef} /> : <Waiting />;
 }
 
 /** The committed picture with the selection, the hovered node, a hovered unknown and the last pin's flash on it. */
@@ -143,7 +144,7 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
   const placed = useRef<NodeId>(undefined);
   const act = useMemo(() => cardActions(store), [store]);
   const flow = useFlow(store, graph, { selected, hovered });
-  const start = useStartView(store, graph.for.files);
+  const start = useStartView(store, graph.for.epoch);
   const onKeyDown = useCanvasKeys(store, { wrapper, placed }, graphRef, selected);
   const onFocus = useCardFocus(store, graphRef, placed);
   const onDoubleClick = useDoubleClickZoom();
@@ -236,22 +237,22 @@ const duration = (): number => (reducedMotion() ? 0 : 200);
  * by an effect until it has run, so StrictMode's second mount, whose reset drops a fit React Flow had queued, asks
  * again. Moves are kept once the start is done, so a picture unmounted before its fit is fitted next time.
  */
-function useStartView(store: SessionStore, files: number): { view: MountView; onMove: OnMove } {
+function useStartView(store: SessionStore, epoch: number): { view: MountView; onMove: OnMove } {
   const rf = useReactFlow<FlowNode, NeedsFlowEdge>();
-  const [view] = useState(() => mountView(memory.get(store), files));
+  const [view] = useState(() => mountView(memory.get(store), epoch));
   const started = useRef(!view.fit);
   useEffect(() => {
     if (started.current) return;
     void rf.fitView(FIT).then(() => {
       started.current = true;
-      memory.set(store, { files, viewport: rf.getViewport() });
+      memory.set(store, { epoch, viewport: rf.getViewport() });
     });
-  }, [rf, store, files]);
+  }, [rf, store, epoch]);
   const onMove = useCallback<OnMove>(
     (_, at) => {
-      if (started.current) memory.set(store, { files, viewport: at });
+      if (started.current) memory.set(store, { epoch, viewport: at });
     },
-    [store, files],
+    [store, epoch],
   );
   return { view, onMove };
 }

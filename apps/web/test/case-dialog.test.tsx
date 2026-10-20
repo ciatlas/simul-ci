@@ -49,7 +49,13 @@ function ready(scenario: ScenarioInput = push): Partial<SessionState> {
   });
   if (step.response.type !== 'plan') throw new Error(JSON.stringify(step.response));
   const { plan, derived, text, ms } = step.response;
-  const planState: PlanState = { plan, derived, text, ms, for: { files: 1, project: 1, assume: [] } };
+  const planState: PlanState = {
+    plan,
+    derived,
+    text,
+    ms,
+    for: { files: 1, epoch: 1, project: 1, assume: [] },
+  };
   return {
     project: {
       status: 'ready',

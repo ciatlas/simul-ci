@@ -787,7 +787,7 @@ jobs:
     });
     if (response.type !== 'plan') throw new Error(response.type);
     const { plan, derived, text, ms } = response;
-    return { plan, derived, text, ms, for: { files: 1, project: 1 } };
+    return { plan, derived, text, ms, for: { files: 1, epoch: 1, project: 1 } };
   }
 
   const storeOf = () => createSessionStore({ ...initialSessionState(), plan: planned(), focus: WF });

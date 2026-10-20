@@ -289,7 +289,7 @@ describe('a case from the starter sample', () => {
     if (simulated.response.type !== 'plan') throw new Error(JSON.stringify(simulated.response));
     const { plan, derived, text, ms } = simulated.response;
     const s: Inputs = {
-      plan: { plan, derived, text, ms, for: { files: 1, project, assume: [] } },
+      plan: { plan, derived, text, ms, for: { files: 1, epoch: 1, project, assume: [] } },
       focus: d.focus,
       project: { status: 'ready', version: project },
       scenario: d.scenario,

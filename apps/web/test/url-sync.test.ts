@@ -18,7 +18,7 @@ import { SimulateView } from '../src/app/SimulateView';
 import { UrlSync } from '../src/app/UrlSync';
 import { defaultScenario } from '../src/scenario/defaults';
 import { withEvent } from '../src/scenario/form';
-import { createSessionStore, type PlanState, type SessionStore } from '../src/state/store';
+import { createSessionStore, type SessionStore } from '../src/state/store';
 import { validateSearch } from '../src/state/url';
 import { createUrlSync, pageDefault, restoreDefault } from '../src/state/url-sync';
 import { deriveTables } from '../src/worker/derived';
@@ -534,7 +534,13 @@ describe('a scenario the page cannot render', () => {
     a.projectReady(1, outline, 1);
     const plan = simulate({ files, scenario: { event: 'push' }, assume: [], detail: 'steps' });
     const derived = deriveTables(plan, outline);
-    a.planReceived({ plan, derived, text: 'ci.yml ● build', ms: { simulate: 1, derive: 0 } } as PlanState);
+    a.planReceived({
+      plan,
+      derived,
+      text: 'ci.yml ● build',
+      ms: { simulate: 1, derive: 0 },
+      for: { files: 1, epoch: 1, project: 1 },
+    });
     a.setScenario({ event }, { from: 'url' });
     a.setView('text');
     const app = { store, sources: { canPickFolder: false } } as unknown as App;

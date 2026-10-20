@@ -39,7 +39,13 @@ const derived = deriveTables(simulated, outline);
 
 /** The one simulated plan with the text given, which is all the plan view above reads. */
 const plan = (text: string) =>
-  ({ plan: simulated, derived, text, ms: { simulate: 1, derive: 0 } }) as PlanState;
+  ({
+    plan: simulated,
+    derived,
+    text,
+    ms: { simulate: 1, derive: 0 },
+    for: { files: 1, epoch: 1, project: 1 },
+  }) as PlanState;
 
 /** The screen over a loaded project whose plan it can show as text; the test commits the next plans. */
 function mountView(): SessionStore {

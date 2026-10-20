@@ -448,7 +448,7 @@ function graphOf(): GraphState {
       },
       cards: { [BUILD]: { width: 200, height: 64 }, [TEST]: { width: 200, height: 78 } },
     },
-    for: { files: 1, project: 1 },
+    for: { files: 1, epoch: 1, project: 1 },
   };
 }
 
@@ -460,7 +460,7 @@ const frames = () => act(() => new Promise<void>((resolve) => setTimeout(resolve
 
 /** A plan the store holds, with its own `for`, as the session hands one to the store and the graph. */
 const answeredPlan = (): PlanState =>
-  ({ plan: { unknowns: [] }, for: { files: 1, project: 1 } }) as unknown as PlanState;
+  ({ plan: { unknowns: [] }, for: { files: 1, epoch: 1, project: 1 } }) as unknown as PlanState;
 
 /** A pin the plan answered, which changed the verdicts of `changed`. */
 const pinOf = (seq: number, plan: PlanState, changed: string[]): Pin => ({
@@ -563,7 +563,7 @@ describe('the canvas', () => {
     expect(transform()).not.toBe(ORIGIN);
   });
 
-  it('opens a picture mounted again where it was left, and fits newly loaded files', async () => {
+  it('opens a picture mounted again where it was left, keeps it through an edit, and fits a new source', async () => {
     vi.stubGlobal('matchMedia', () => ({ matches: true }));
     try {
       const store = storeOf({}, { graph: graphOf() });
@@ -578,12 +578,19 @@ describe('the canvas', () => {
       await frames();
       expect(transform()).toBe(moved);
       // A restarted engine numbers the same files' project afresh: the picture stays where it was.
-      act(() => store.getState().graphReady({ ...graphOf(), for: { files: 1, project: 2 } }));
+      act(() => store.getState().graphReady({ ...graphOf(), for: { files: 1, epoch: 1, project: 2 } }));
       await frames();
       expect(transform()).toBe(moved);
-      act(() => store.getState().graphReady({ ...graphOf(), for: { files: 2, project: 2 } }));
+      // The picture of texts edited within the epoch is the same picture: not mounted again, not fitted.
+      const mounted = document.querySelector('.sc-canvas');
+      act(() => store.getState().graphReady({ ...graphOf(), for: { files: 2, epoch: 1, project: 3 } }));
+      await frames();
+      expect(transform()).toBe(moved);
+      expect(document.querySelector('.sc-canvas')).toBe(mounted);
+      act(() => store.getState().graphReady({ ...graphOf(), for: { files: 3, epoch: 2, project: 4 } }));
       await frames();
       expect(transform()).toBe(fitted);
+      expect(document.querySelector('.sc-canvas')).not.toBe(mounted);
     } finally {
       vi.unstubAllGlobals();
     }

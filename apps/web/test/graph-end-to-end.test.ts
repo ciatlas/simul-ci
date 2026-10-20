@@ -9,7 +9,7 @@ import { createGraphSession } from '../src/graph/session';
 import { calleeOffset } from '../src/graph/size';
 import type { GraphLayout, GraphState, Point, ScopeModel, Size } from '../src/graph/types';
 import { sampleByName } from '../src/input/samples';
-import { createSessionStore, type SessionStore } from '../src/state/store';
+import { createSessionStore, type SessionStore, withTexts } from '../src/state/store';
 import type { WorkerLike } from '../src/worker/client';
 import { handle, initialState, type WorkerState } from '../src/worker/handle';
 import { createLayoutClient } from '../src/worker/layout-client';
@@ -47,10 +47,14 @@ class ElkWorker implements WorkerLike {
   terminate(): void {}
 }
 
-/** A page over one repository: the engine's state, the store and the graph session, as boot.ts wires them. */
+/**
+ * A page over one repository: the engine's state, the store and the graph session, as boot.ts wires them. `edit`
+ * takes new texts as an edit of the store's and loads them in the engine, as the session would.
+ */
 function page(files: Record<string, string>) {
   let engine: WorkerState = handle(initialState(), { id: 1, type: 'load', files, repository: 'o/r' }).state;
   let id = 1;
+  let project = 1;
   const store = createSessionStore();
   store.getState().setFiles(files, { kind: 'sample', name: 'test' });
   const worker = new ElkWorker();
@@ -60,7 +64,7 @@ function page(files: Record<string, string>) {
     const step = handle(engine, {
       id: ++id,
       type: 'simulate',
-      project: 1,
+      project,
       scenario,
       assume: [],
       detail: 'steps',
@@ -69,9 +73,24 @@ function page(files: Record<string, string>) {
     const r = step.response;
     if (r.type !== 'plan') throw new Error(JSON.stringify(r));
     const { plan, derived, text, ms } = r;
-    store.getState().planReceived({ plan, derived, text, ms, for: { files: 1, project: r.project } });
+    const { version, epoch } = store.getState().files;
+    store
+      .getState()
+      .planReceived({ plan, derived, text, ms, for: { files: version, epoch, project: r.project } });
   };
-  return { store, worker, session, simulate };
+  const edit = (texts: Record<string, string>): void => {
+    store.setState((s) => withTexts(s, texts));
+    const loaded = handle(engine, {
+      id: ++id,
+      type: 'load',
+      files: store.getState().files.byPath,
+      repository: 'o/r',
+    });
+    if (loaded.response.type !== 'loaded') throw new Error(JSON.stringify(loaded.response));
+    engine = loaded.state;
+    project = loaded.response.project;
+  };
+  return { store, worker, session, simulate, edit };
 }
 
 /** The next picture the session commits after `previous`. */
@@ -191,6 +210,33 @@ describe('the graph from a sample to the canvas', () => {
     ]);
     expect(second.layout.cards[job.id]!.height).toBeGreaterThan(first.layout.cards[job.id]!.height);
     expectPlaced(second);
+    p.session.dispose();
+  });
+
+  it('lays a job out again for its new name only when its card changes width, and no card sits on another', async () => {
+    const files = sampleByName('starter')!.files;
+    const CI = '.github/workflows/ci.yml';
+    const named = (name: string) => ({
+      [CI]: files[CI]!.replace('  build:\n', `  build:\n    name: ${name}\n`),
+    });
+    const p = page(files);
+    p.simulate({ event: 'push', branch: 'main' });
+    const first = await committed(p.store);
+    const build = `${first.model.roots[0]}#build`;
+    // A short name keeps the narrowest card: nothing is laid out again.
+    p.edit(named('Build it'));
+    p.simulate({ event: 'push', branch: 'main' });
+    const second = await committed(p.store, first);
+    expect(second.model.jobs[build]!.label).toBe('Build it');
+    expect(p.worker.sent).toHaveLength(1);
+    expect(second.layout).toEqual(first.layout);
+    // A long one widens the card: its workflow is laid out again around it, every card clear of the others.
+    p.edit(named('Build the site and every package it publishes'));
+    p.simulate({ event: 'push', branch: 'main' });
+    const third = await committed(p.store, second);
+    expect(p.worker.sent).toHaveLength(2);
+    expect(third.layout.cards[build]!.width).toBeGreaterThan(first.layout.cards[build]!.width);
+    expectPlaced(third);
     p.session.dispose();
   });
 
