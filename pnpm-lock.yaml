@@ -184,6 +184,9 @@ importers:
       fallow:
         specifier: ^3.33.1
         version: 3.33.1
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       oxfmt:
         specifier: 0.73.0
         version: 0.73.0
@@ -378,6 +381,8 @@ importers:
       tsdown:
         specifier: 0.23.1
         version: 0.23.1(tsx@4.23.15)(typescript@7.0.2)
+
+  packages/document: {}
 
   packages/engine:
     dependencies:
@@ -2278,6 +2283,10 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
+  fast-check@4.10.2:
+    resolution: {integrity: sha512-iK2f+YrcmoeGqk6fA0ea2bptcu/itMIm4NfEozq6N25+aG6h7s5HZbB/k1aV7b5w5sFLMCbbtRUsTVR+BgC3xw==}
+    engines: {node: '>=12.17.0'}
+
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
     engines: {node: '>=12.0.0'}
@@ -2956,6 +2965,9 @@ packages:
 
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
+
+  pure-rand@8.4.2:
+    resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
 
   quansync@1.0.0:
     resolution: {integrity: sha512-5xZacEEufv3HSTPQuchrvV6soaiACMFnq1H8wkVioctoH3TRha9Sz66lOxRwPK/qZj7HPiSveih9yAyh98gvqA==}
@@ -4889,6 +4901,10 @@ snapshots:
       '@fallow-cli/win32-x64-msvc': 3.33.1
       fallow-type-aware: 3.33.1
 
+  fast-check@4.10.2:
+    dependencies:
+      pure-rand: 8.4.2
+
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
@@ -5820,6 +5836,8 @@ snapshots:
       react-is: 17.0.2
 
   property-information@7.2.0: {}
+
+  pure-rand@8.4.2: {}
 
   quansync@1.0.0: {}
 

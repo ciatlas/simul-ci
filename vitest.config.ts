@@ -13,6 +13,7 @@ export default defineConfig({
       '@simulci/engine/render': fileURLToPath(
         new URL('./packages/engine/src/render/index.ts', import.meta.url),
       ),
+      '@simulci/document/edits': fileURLToPath(new URL('./packages/document/src/edits.ts', import.meta.url)),
       '@simulci/engine': src('engine'),
       '@simulci/node': src('node'),
     },
@@ -33,6 +34,7 @@ export default defineConfig({
       thresholds: {
         lines: 80,
         'packages/engine/src/**': { lines: 90 },
+        'packages/document/src/**': { lines: 90 },
       },
     },
   },

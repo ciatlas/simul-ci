@@ -16,9 +16,9 @@
   ],
   // Vite serves apps/web/public at the site root, where index.html asks for it.
   "ignoreUnresolvedImports": ["/theme.js"],
-  // The engine is a library inside the workspace: what its index exports, and the members of what it exports, are
-  // its API for the CLI, the Action, the web app and the server.
-  "publicPackages": ["@simulci/engine", "@simulci/node"],
+  // The engine and the document model are libraries inside the workspace: what their entries export, and the members
+  // of what they export, are their API for the CLI, the Action, the web app and the server.
+  "publicPackages": ["@simulci/engine", "@simulci/document", "@simulci/node"],
   // The licence map: packages/* are MIT, apps/* are FSL-1.1-MIT, ee/* is commercial. MIT code never imports the
   // other two, and the document model (the builder's foundation) depends on nothing else in the repository.
   "boundaries": {
