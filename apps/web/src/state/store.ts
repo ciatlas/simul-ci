@@ -81,13 +81,13 @@ export interface Change {
   /** Only keys typed in the pane: a burst whose plan changed nothing says nothing. */
   quiet?: true;
   /** What the answering plan changed; absent until it comes. */
-  after?: Answer;
+  after?: ChangeAnswer;
 }
 
 /** The plan a change was made over, with the inputs and the files it was simulated from. */
 export type Before = Pick<PlanState, 'plan' | 'derived' | 'for'>;
 
-export interface Answer {
+export interface ChangeAnswer {
   plan: RunPlan;
   /** Every node and check it added, removed or turned, in the order Details lists them. */
   rows: ChangeRow[];
