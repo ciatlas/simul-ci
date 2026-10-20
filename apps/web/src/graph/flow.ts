@@ -24,7 +24,7 @@ import {
  * dependency path (what it needs and what needs it, in its own workflow) is marked on, the other jobs of that
  * workflow off, and a faded call job fades the workflow it calls. While an unknown's "affects n" is hovered, the
  * cards it lights (highlight.ts) are on and every other card off instead, the selection keeping its outline; the
- * cards the last pin changed flash.
+ * cards the last change changed flash, and the cards it added get the added ring.
  *
  * Every node comes with the size and the handles it is drawn with, so React Flow never waits on a measurement to
  * draw an edge and keeps none it would lose when a node object is replaced; `keepUnchanged` hands back the objects
@@ -40,8 +40,8 @@ export interface FlowView {
    * ends are not both lit, over the selection's dependency path while the hover lasts.
    */
   lit?: ReadonlySet<NodeId>;
-  /** The cards the last pin changed, which flash. */
-  flash?: Pick<Flash, 'parity' | 'cards'>;
+  /** The cards the last change changed, which flash, and the ones it added, which get the ring. */
+  flash?: Pick<Flash, 'parity' | 'cards' | 'ring'>;
 }
 
 export type ScopeData = { scope: ScopeModel; caller?: string; state: CardState };
@@ -193,6 +193,7 @@ function stateOf(ctx: Context, id: NodeId, path: CardState['path']): CardState {
     path: lit ? litPath(lit, id) : path,
     hovered: ctx.view.hovered === id,
     flash: flash?.cards.has(id) ? flash.parity : undefined,
+    added: flash?.ring.has(id) ? flash.parity : undefined,
   };
 }
 

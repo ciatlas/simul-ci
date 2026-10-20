@@ -445,21 +445,27 @@ describe('a hovered unknown and a pin on the canvas', () => {
     expect(edges.every((e) => e.data!.faded && !e.data!.onPath)).toBe(true);
   });
 
-  it('flashes the cards the last pin changed, with its parity, and no other', () => {
+  it('flashes the cards the last change changed and rings the ones it added, with its parity, and no other', () => {
     const { model, layout } = picture();
-    const flash = { parity: 'b' as const, cards: new Set([j('deploy'), RELEASE]) };
+    const flash = {
+      parity: 'b' as const,
+      cards: new Set([j('deploy'), RELEASE]),
+      ring: new Set([j('lint')]),
+    };
     const { nodes } = toFlow(model, layout, { flash });
     const flashing = nodes.filter((n) => n.data.state.flash !== undefined);
     expect(flashing.map((n) => [n.id, n.data.state.flash])).toEqual([
       [j('deploy'), 'b'],
       [RELEASE, 'b'],
     ]);
+    const ringed = nodes.filter((n) => n.data.state.added !== undefined);
+    expect(ringed.map((n) => [n.id, n.data.state.added])).toEqual([[j('lint'), 'b']]);
   });
 
   it('keeps every card a flash or a hover leaves alone as the object it was', () => {
     const { model, layout } = picture();
     const before = toFlow(model, layout, {});
-    const flash = { parity: 'a' as const, cards: new Set([j('deploy')]) };
+    const flash = { parity: 'a' as const, cards: new Set([j('deploy')]), ring: new Set<string>() };
     const flashed = keepUnchanged(before, toFlow(model, layout, { flash }));
     expect(flashed.nodes.filter((n, i) => n !== before.nodes[i]).map((n) => n.id)).toEqual([j('deploy')]);
     expect(flashed.edges).toBe(before.edges);
