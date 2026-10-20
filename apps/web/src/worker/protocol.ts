@@ -177,7 +177,13 @@ export interface OutlineWorkflow {
 export interface OutlineFile {
   path: string;
   kind: 'workflow' | 'action' | 'other';
-  errors: { line: number; column: number; message: string }[];
+  /**
+   * `yaml`: the YAML parser refused the text (core's `parseErrors`), which the edit hold watches for; `workflow`: the
+   * workflow converter refused what parsed (an unknown event, a bad filter).
+   */
+  errors: { line: number; column: number; message: string; source?: 'yaml' | 'workflow' }[];
+  /** Core's marker of a generated workflow or action (`DO NOT EDIT`, `.lock.yml`): the pane keeps it read-only. */
+  generated?: string;
 }
 
 /** What the project holds, for the form, the outline tree and the YAML pane: hints, never results. */

@@ -2,6 +2,7 @@ import { Tabs } from '@base-ui/react/tabs';
 import { useMemo } from 'react';
 import { useSession } from '../app/providers';
 import type { PanelTab } from '../state/prefs';
+import { newestOutline } from '../state/store';
 import { NodeDetails } from './NodeDetails';
 import { Problems } from './Problems';
 import { problemRows } from './problem-rows';
@@ -20,7 +21,7 @@ export function Panels() {
   const panel = useSession((s) => s.ui.prefs.panel);
   const setPanel = useSession((s) => s.setPanel);
   const plan = useSession((s) => s.plan?.plan);
-  const outline = useSession((s) => s.project.outline);
+  const outline = useSession(newestOutline);
   const files = useSession((s) => s.files);
   const gating = plan ? plan.unknowns.filter((u) => u.affects.length > 0).length : 0;
   const problems = useMemo(() => problemRows(outline, plan, files).length, [outline, plan, files]);

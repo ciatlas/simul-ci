@@ -177,10 +177,13 @@ export function createSources({ store, persist }: { store: SessionStore; persist
         if (sample) actions.setFiles(sample.files, { kind: 'sample', name: stored.name });
         break;
       }
-      case 'paste':
-        if (stored.buffers.length)
-          actions.setFiles(filesOf(stored.buffers), { kind: 'paste', buffers: stored.buffers }, stored.meta);
+      case 'paste': {
+        if (!stored.buffers.length) break;
+        const source: Source = { kind: 'paste', buffers: stored.buffers };
+        if (typeof stored.name === 'string') source.name = stored.name;
+        actions.setFiles(filesOf(stored.buffers), source, stored.meta);
         break;
+      }
       case 'copy':
         actions.setFiles(
           filesOf(stored.buffers),

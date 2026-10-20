@@ -36,10 +36,10 @@
 }
 
 /*
- * The inputs moved on since this picture was drawn (a refused input keeps the last good plan). Only what carries no
- * text fades: the edges and the background's dots. The cards and the edges' labels keep their colours, so every word
- * keeps 4.5:1, and a dashed rule inside the canvas's edge marks the picture as the last good one; the top bar says
- * "stale" in words.
+ * The inputs moved on since this picture was drawn (a refused input keeps the last good plan), or the texts did and
+ * their plan is slow to come. Only what carries no text fades: the edges and the background's dots. The cards and
+ * the edges' labels keep their colours, so every word keeps 4.5:1, and a dashed rule inside the canvas's edge marks
+ * the picture as the last good one; the top bar says "stale" in words.
  */
 .sc-canvas .react-flow__edges,
 .sc-canvas .react-flow__background-pattern {
@@ -59,6 +59,29 @@
   inset: 0;
   border: 2px dashed var(--border-strong);
   pointer-events: none;
+}
+
+/*
+ * An edit's plan is on its way, and has taken longer than ordinary typing does (app/stale.ts): no rule round the
+ * picture, which would flicker with every pause, but a thin line along its top edge, running while the plan comes;
+ * under reduced motion it stands still.
+ */
+.sc-canvas[data-stale='edit']::after {
+  inset: 0 0 auto;
+  height: 2px;
+  border: 0;
+  background: linear-gradient(90deg, transparent, var(--muted) 50%, transparent) 0 0 / 40% 100% no-repeat;
+  animation: sc-progress 1.2s linear infinite;
+}
+
+@keyframes sc-progress {
+  from {
+    background-position: -40% 0;
+  }
+
+  to {
+    background-position: 140% 0;
+  }
 }
 
 /* Edges meet a card at its handles; nothing connects by hand, so they are never seen. */

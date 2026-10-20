@@ -2,7 +2,7 @@ import type { NodeId } from '@simulci/engine';
 import { useMemo } from 'react';
 import { useApp, useSession } from '../app/providers';
 import { planIndex, selectionOf } from '../plan/index';
-import type { PlanState } from '../state/store';
+import { newestOutline, type PlanState } from '../state/store';
 import { EmptyNote, LocLink } from './kit';
 import { type ProblemRow, placeOf, problemRows } from './problem-rows';
 
@@ -11,7 +11,7 @@ import { type ProblemRow, placeOf, problemRows } from './problem-rows';
  * workflow, the plan's diagnostics.
  */
 export function Problems() {
-  const outline = useSession((s) => s.project.outline);
+  const outline = useSession(newestOutline);
   const plan = useSession((s) => s.plan);
   const files = useSession((s) => s.files);
   const rows = useMemo(() => problemRows(outline, plan?.plan, files), [outline, plan, files]);

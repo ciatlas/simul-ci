@@ -11,7 +11,13 @@ import type { Source } from './store';
 
 export type StoredSource =
   | { kind: 'sample'; name: string }
-  | { kind: 'paste'; buffers: { path: string; text: string }[]; meta?: Record<string, FileMeta> }
+  | {
+      kind: 'paste';
+      buffers: { path: string; text: string }[];
+      meta?: Record<string, FileMeta>;
+      /** An edited sample's buffers say which sample they are a copy of. */
+      name?: string;
+    }
   | { kind: 'folder'; name: string; handle: FileSystemDirectoryHandle }
   | {
       kind: 'copy';
@@ -65,7 +71,13 @@ export function toStored(
   meta?: Record<string, FileMeta>,
 ): StoredSource | undefined {
   if (source.kind === 'sample') return { kind: 'sample', name: source.name };
-  if (source.kind === 'paste') return { kind: 'paste', buffers: source.buffers, ...(meta && { meta }) };
+  if (source.kind === 'paste')
+    return {
+      kind: 'paste',
+      buffers: source.buffers,
+      ...(meta && { meta }),
+      ...(source.name === undefined ? {} : { name: source.name }),
+    };
   if (source.kind === 'folder' && source.handle)
     return { kind: 'folder', name: source.name, handle: source.handle };
   if (source.kind === 'folder') {

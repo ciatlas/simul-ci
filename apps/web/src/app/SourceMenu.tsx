@@ -50,7 +50,12 @@ function SourceStatus({ source, fileCount }: { source: Source; fileCount: number
         sample: {source.name} · {files}
       </span>
     );
-  if (source.kind === 'paste') return <span className="text-muted text-xs">{files} pasted</span>;
+  if (source.kind === 'paste')
+    return (
+      <span className="text-muted text-xs">
+        {source.name === undefined ? `${files} pasted` : `${source.name} · ${files}`}
+      </span>
+    );
   return (
     <span className="text-muted text-xs">
       {source.name}

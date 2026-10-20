@@ -43,6 +43,11 @@
                 "name": "@simulci/engine",
                 "message": "only src/worker/** runs the engine; the page imports types, or values from @simulci/engine/plan and @simulci/engine/render",
                 "allowTypeImports": true
+              },
+              {
+                "name": "@simulci/document",
+                "message": "the page holds only @simulci/document/edits, which imports nothing; the document model and its YAML parser load with the edit runtime",
+                "allowTypeImports": true
               }
             ]
           }

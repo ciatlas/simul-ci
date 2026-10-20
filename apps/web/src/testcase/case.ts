@@ -1,3 +1,4 @@
+import { heldSentence } from '../engine/hold';
 import type { SessionState } from '../state/store';
 import type { CaseResult, EngineClient } from '../worker/client';
 import type { CaseRequest } from '../worker/protocol';
@@ -46,9 +47,11 @@ export type CaseAvailability =
 
 /**
  * Whether a case can be asked for: a project loaded, a plan for it, and a focused workflow the plan holds at depth
- * 0 (a case is about a workflow an event starts, never a callee).
+ * 0 (a case is about a workflow an event starts, never a callee). While the hold is on, the worker holds the broken
+ * texts, not the project the plan is of: the case waits with the plan.
  */
 export function caseAvailability(s: Pick<SessionState, 'plan' | 'focus' | 'project'>): CaseAvailability {
+  if (s.project.held) return { ok: false, reason: heldSentence(s.project.held) };
   if (s.project.status !== 'ready' || s.project.version === undefined || !s.plan)
     return { ok: false, reason: 'no plan yet' };
   const { focus } = s;

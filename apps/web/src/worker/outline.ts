@@ -143,20 +143,32 @@ function fileOf(
 ): OutlineFile {
   const { project } = loaded.index;
   const decl = project.workflows.get(path) ?? [...project.actions.values()].find((a) => a.file === path);
-  const kind = project.workflows.has(path) ? 'workflow' : actionFiles.has(path) ? 'action' : 'other';
-  const errors = (decl?.parseErrors ?? []).map((e) => ({
-    line: e.loc.line,
-    column: e.loc.column,
-    message: e.message,
-  }));
+  const kind = kindOf(project.workflows.has(path), actionFiles.has(path));
+  const errors = yamlErrors(decl?.parseErrors ?? []);
   // What the workflow parser's converter rejected (an unknown event, a bad filter) the YAML parser let through.
   if (kind === 'workflow' && errors.length === 0) errors.push(...settingsErrors(loaded, cache, path));
-  return { path, kind, errors };
+  const file: OutlineFile = { path, kind, errors };
+  if (decl?.generated !== undefined) file.generated = decl.generated;
+  return file;
 }
+
+const kindOf = (workflow: boolean, action: boolean): OutlineFile['kind'] =>
+  workflow ? 'workflow' : action ? 'action' : 'other';
+
+/** What the YAML parser refused, from core's `parseErrors`: what the edit hold watches for. */
+const yamlErrors = (
+  parseErrors: { loc: { line: number; column: number }; message: string }[],
+): OutlineFile['errors'] =>
+  parseErrors.map((e) => ({ line: e.loc.line, column: e.loc.column, message: e.message, source: 'yaml' }));
 
 function settingsErrors(loaded: LoadedProject, cache: FileCache, path: string): OutlineFile['errors'] {
   const { errors } = settingsOf(loaded, cache, path);
-  return errors.map((e) => ({ line: e.line ?? 1, column: e.column ?? 1, message: e.message }));
+  return errors.map((e) => ({
+    line: e.line ?? 1,
+    column: e.column ?? 1,
+    message: e.message,
+    source: 'workflow',
+  }));
 }
 
 /** A workflow's run settings, read once per text: the planner reads them from `loaded`, the next load from the cache. */

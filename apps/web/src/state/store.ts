@@ -1,9 +1,12 @@
 import type { AssumeEntry, RunPlan, ScenarioInput, UnknownId } from '@simulci/engine';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import type { TextEdit } from '@simulci/document/edits';
 import type { GraphState, GraphUi } from '../graph/types';
-import { type FileMeta, textMeta } from '../input/read';
+import { isProjectFile } from '../input/filter';
+import { classifyEol, type FileMeta, textMeta } from '../input/read';
 import { pinSentence, type VerdictChange, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
+import * as history from './history';
 import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
 
 /**
@@ -15,7 +18,8 @@ import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
 export type Source =
   | { kind: 'none' }
   | { kind: 'sample'; name: string }
-  | { kind: 'paste'; buffers: { path: string; text: string }[] }
+  /** Pasted files, or a sample once edited: its buffers follow every edit (`state/edit.ts`); `name` says which sample. */
+  | { kind: 'paste'; buffers: { path: string; text: string }[]; name?: string }
   | { kind: 'folder'; name: string; handle?: FileSystemDirectoryHandle; readAt: number };
 
 export interface Issue {
@@ -125,6 +129,12 @@ export interface SessionState {
     version?: number;
     outline?: Outline;
     files?: number;
+    /**
+     * An edit broke the YAML of a file that parsed on the plan shown (synthesis § 7.2): the newest texts' Outline,
+     * for the pane's problems and the status line, while the project, the plan and the picture stay those shown and
+     * nothing is simulated until a load without new YAML errors commits.
+     */
+    held?: Held;
   };
   scenario: ScenarioInput;
   /** Who set the scenario: the page's defaults (replaced on the next load), the URL, or the author. */
@@ -175,6 +185,19 @@ export interface SessionState {
     yamlFile?: string;
   };
   notices: Notice[];
+  /** The edit history (`state/history.ts`), cleared by a new epoch only. */
+  edit: history.History;
+}
+
+/** What an edit asked of the store came to: applied, or nothing changed (a refusal says why, if there was one). */
+export type EditOutcome = { ok: true } | { ok: false; refusal?: history.Refusal };
+
+/** A load the hold kept off the screen (§ 7.2): its files version, its Outline, and the lines that broke. */
+export interface Held {
+  files: number;
+  outline: Outline;
+  /** Per file that parsed on the plan shown and does not now, its first YAML error's line. */
+  broken: { path: string; line: number }[];
 }
 
 export interface SessionActions {
@@ -228,8 +251,22 @@ export interface SessionActions {
   showUnknown: (id: UnknownId) => void;
   /** The Unknowns tab took the request `seq`. */
   unknownFocused: (seq: number) => void;
+  /**
+   * A transaction over one or more files: all or none, one undo entry. It keeps the plan, the picture, the selection
+   * and the scenario: the plan is stale for the edit until the session brings the one of the new texts.
+   */
+  transact: (input: history.TxInput) => EditOutcome;
+  /** Text typed in the YAML pane, in the offsets of the file's text now; grouped into undo entries (§ 6). */
+  typed: (path: string, edits: readonly TextEdit[], alone?: history.Alone) => EditOutcome;
+  /** Closes the open typing group: the pane lost the focus or showed another file. */
+  closeGroup: () => void;
+  /** Undoes the last entry; false when there is none or the hash guard stopped it. */
+  undo: () => boolean;
+  redo: () => boolean;
   projectLoading: () => void;
   projectReady: (version: number, outline: Outline, files: number) => void;
+  /** A load of edited texts broke YAML that parsed: the project shown stays (§ 7.2). */
+  projectHeld: (held: Held) => void;
   projectFailed: (error: SessionError) => void;
   engineReady: (info: { version: string; models: ModelInfo[] }) => void;
   engineFailed: (error: SessionError) => void;
@@ -271,6 +308,7 @@ export function initialSessionState(prefs: Prefs = DEFAULT_PREFS): SessionState 
     caseOpen: false,
     ui: { view: 'graph', hideUntriggered: false, prefs, expanded: [], representative: {}, opened: [] },
     notices: [],
+    edit: history.emptyHistory(),
   };
 }
 
@@ -295,141 +333,225 @@ const UNLOADED = {
 } as const;
 
 export function createSessionStore(initial: SessionState = initialSessionState()): SessionStore {
-  return createStore<SessionState & SessionActions>((set, get) => ({
-    ...initial,
-    setFiles: (byPath, source, meta) =>
-      set((s) => ({
-        source,
-        files: sourceFiles(s.files, byPath, metaOf(byPath, meta)),
-        ...UNLOADED,
-        error: s.error?.kind === 'source' ? undefined : s.error,
-      })),
-    forgetSource: () =>
-      set((s) => ({
-        source: { kind: 'none' },
-        files: sourceFiles(s.files, {}, {}),
-        ...UNLOADED,
-        focus: undefined,
-        sel: undefined,
-        error: replaceError(s.error, undefined),
-      })),
-    // A new epoch, so the session takes it for a source with no files, not for an edit that emptied them.
-    awaitReopen: (source) => get().setFiles({}, source),
-    setScenario: (scenario, options) =>
-      set((s) => ({
-        scenario,
-        scenarioFrom: options?.from ?? 'author',
-        assumed: options?.assumed ?? [],
-        stale: inputsStale(s),
-        error: authorsErrorCleared(s.error, 'scenario'),
-      })),
-    patchScenario: (patch) =>
-      set((s) => ({
-        scenario: withPatch(s.scenario, patch),
-        scenarioFrom: 'author',
-        assumed: s.assumed.filter((k) => !edits(k, s.scenario, patch)),
-        stale: inputsStale(s),
-        error: authorsErrorCleared(s.error, 'scenario'),
-      })),
-    pinScenario: (scenario, keys, focus) =>
-      set((s) => ({
-        scenario,
-        scenarioFrom: 'author',
-        assumed: Array.from(new Set([...s.assumed, ...keys])),
-        stale: inputsStale(s),
-        error: authorsErrorCleared(s.error, 'scenario'),
-        fieldFocus: { ...focus, seq: ++requestSeq },
-        pin: pinOver(s, scenario, s.assume),
-      })),
-    focusField: (focus) => set({ fieldFocus: { ...focus, seq: ++requestSeq } }),
-    fieldFocused: (seq) => set((s) => (s.fieldFocus?.seq === seq ? { fieldFocus: undefined } : {})),
-    setAssume: (assume) =>
-      set((s) => ({ assume, stale: inputsStale(s), error: authorsErrorCleared(s.error, 'assume') })),
-    pinAssume: (assume) =>
-      set((s) => ({
-        assume,
-        stale: inputsStale(s),
-        error: authorsErrorCleared(s.error, 'assume'),
-        pin: pinOver(s, s.scenario, assume),
-      })),
-    setDetail: (detail) => set((s) => ({ detail, stale: inputsStale(s) })),
-    setFocus: (focus) => set({ focus }),
-    // Returning `s` skips the update: a held selection keeps the tab the author picked.
-    select: (focus, sel) =>
-      set((s) =>
-        s.focus === focus && s.sel === sel ? s : { focus, sel, ui: withYamlFile(s.ui, undefined) },
-      ),
-    toggleExpanded: (job) => set((s) => ({ ui: { ...s.ui, expanded: toggled(s.ui.expanded, job) } })),
-    setRepresentative: (job, leg) =>
-      set((s) => ({ ui: { ...s.ui, representative: { ...s.ui.representative, [job]: leg } } })),
-    toggleOpened: (scope) => set((s) => ({ ui: { ...s.ui, opened: toggled(s.ui.opened, scope) } })),
-    graphReady: (graph) => set({ graph }),
-    setView: (view) => set((s) => ({ ui: { ...s.ui, view } })),
-    setHideUntriggered: (hideUntriggered) => set((s) => ({ ui: { ...s.ui, hideUntriggered } })),
-    setPrefs: (patch) => set((s) => ({ ui: { ...s.ui, prefs: { ...s.ui.prefs, ...patch } } })),
-    setPanel: (panel) => get().setPrefs({ panel }),
-    togglePane: (pane) => {
-      const { collapsed } = get().ui.prefs;
-      get().setPrefs({ collapsed: { ...collapsed, [pane]: !collapsed[pane] } });
-    },
-    revealLine: ({ file, line }) =>
-      set((s) => ({
-        reveal: { file, line, seq: ++requestSeq },
-        ui: {
-          ...s.ui,
-          yamlFile: file,
-          prefs: { ...s.ui.prefs, collapsed: { ...s.ui.prefs.collapsed, yaml: false } },
-        },
-      })),
-    setYamlFile: (yamlFile) => set((s) => ({ ui: withYamlFile(s.ui, yamlFile) })),
-    openCase: () => set({ caseOpen: true }),
-    closeCase: () => set({ caseOpen: false }),
-    hoverUnknown: (hoveredUnknown) =>
-      set((s) => (s.hoveredUnknown === hoveredUnknown ? s : { hoveredUnknown })),
-    showUnknown: (id) =>
-      set((s) => ({
-        unknownFocus: { id, seq: ++requestSeq },
-        ui: {
-          ...s.ui,
-          prefs: { ...s.ui.prefs, panel: 'unknowns', collapsed: { ...s.ui.prefs.collapsed, right: false } },
-        },
-      })),
-    unknownFocused: (seq) => set((s) => (s.unknownFocus?.seq === seq ? { unknownFocus: undefined } : {})),
-    projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
-    projectReady: (version, outline, files) =>
-      set((s) => ({
-        project: { status: 'ready', version, outline, files },
-        error: replaceError(s.error, undefined),
-      })),
-    projectFailed: (error) =>
-      set((s) => ({ project: { status: 'error' }, error: replaceError(s.error, error) })),
-    engineReady: ({ version, models }) =>
-      set((s) => ({ engine: { ...s.engine, status: 'ready', version, models } })),
-    engineFailed: (error) => set((s) => ({ engine: { ...s.engine, status: 'failed', busy: false }, error })),
-    engineRestarted: (restarts, project) =>
-      set((s) => ({
-        engine: { ...s.engine, restarts },
-        project: project === undefined ? s.project : { ...s.project, version: project },
-      })),
-    engineBusy: (busy) => set((s) => ({ engine: { ...s.engine, busy } })),
-    planReceived: (plan) =>
-      set((s) => ({
-        plan,
-        // A plan of older texts (an input changed while an edit was loading) is still behind the edit.
-        stale: plan.for.files < s.files.version ? 'edit' : false,
-        error: replaceError(s.error, undefined),
-        pin: answered(s.pin, plan),
-      })),
-    rejected: (error) => set((s) => ({ error: replaceError(s.error, error) })),
-    clearError: () => set((s) => ({ error: replaceError(s.error, undefined) })),
-    notify: (text) => {
-      const id = ++noticeId;
-      set((s) => ({ notices: [...s.notices, { id, text }] }));
-      return id;
-    },
-    dismissNotice: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
-  }));
+  return createStore<SessionState & SessionActions>((set, get) => {
+    /** Commits a step of the history in one `set()` with the texts it changes (`committed`). */
+    const commit = (step: (s: SessionState) => StepOutcome, verb?: 'undo' | 'redo'): EditOutcome => {
+      let outcome: EditOutcome = { ok: false };
+      set((s) => {
+        const result = committed(s, step(s), verb && { verb, id: ++noticeId });
+        outcome = result.outcome;
+        return result.patch;
+      });
+      return outcome;
+    };
+    return {
+      ...initial,
+      setFiles: (byPath, source, meta) =>
+        set((s) => ({
+          source,
+          files: sourceFiles(s.files, byPath, metaOf(byPath, meta)),
+          ...UNLOADED,
+          edit: history.emptyHistory(s.edit.next),
+          error: s.error?.kind === 'source' ? undefined : s.error,
+        })),
+      forgetSource: () =>
+        set((s) => ({
+          source: { kind: 'none' },
+          files: sourceFiles(s.files, {}, {}),
+          ...UNLOADED,
+          edit: history.emptyHistory(s.edit.next),
+          focus: undefined,
+          sel: undefined,
+          error: replaceError(s.error, undefined),
+        })),
+      // A new epoch, so the session takes it for a source with no files, not for an edit that emptied them.
+      awaitReopen: (source) => get().setFiles({}, source),
+      setScenario: (scenario, options) =>
+        set((s) => ({
+          scenario,
+          scenarioFrom: options?.from ?? 'author',
+          assumed: options?.assumed ?? [],
+          stale: inputsStale(s),
+          error: authorsErrorCleared(s.error, 'scenario'),
+        })),
+      patchScenario: (patch) =>
+        set((s) => ({
+          scenario: withPatch(s.scenario, patch),
+          scenarioFrom: 'author',
+          assumed: s.assumed.filter((k) => !edits(k, s.scenario, patch)),
+          stale: inputsStale(s),
+          error: authorsErrorCleared(s.error, 'scenario'),
+        })),
+      pinScenario: (scenario, keys, focus) =>
+        set((s) => ({
+          scenario,
+          scenarioFrom: 'author',
+          assumed: Array.from(new Set([...s.assumed, ...keys])),
+          stale: inputsStale(s),
+          error: authorsErrorCleared(s.error, 'scenario'),
+          fieldFocus: { ...focus, seq: ++requestSeq },
+          pin: pinOver(s, scenario, s.assume),
+        })),
+      focusField: (focus) => set({ fieldFocus: { ...focus, seq: ++requestSeq } }),
+      fieldFocused: (seq) => set((s) => (s.fieldFocus?.seq === seq ? { fieldFocus: undefined } : {})),
+      setAssume: (assume) =>
+        set((s) => ({ assume, stale: inputsStale(s), error: authorsErrorCleared(s.error, 'assume') })),
+      pinAssume: (assume) =>
+        set((s) => ({
+          assume,
+          stale: inputsStale(s),
+          error: authorsErrorCleared(s.error, 'assume'),
+          pin: pinOver(s, s.scenario, assume),
+        })),
+      setDetail: (detail) => set((s) => ({ detail, stale: inputsStale(s) })),
+      setFocus: (focus) => set({ focus }),
+      // Returning `s` skips the update: a held selection keeps the tab the author picked.
+      select: (focus, sel) =>
+        set((s) =>
+          s.focus === focus && s.sel === sel ? s : { focus, sel, ui: withYamlFile(s.ui, undefined) },
+        ),
+      toggleExpanded: (job) => set((s) => ({ ui: { ...s.ui, expanded: toggled(s.ui.expanded, job) } })),
+      setRepresentative: (job, leg) =>
+        set((s) => ({ ui: { ...s.ui, representative: { ...s.ui.representative, [job]: leg } } })),
+      toggleOpened: (scope) => set((s) => ({ ui: { ...s.ui, opened: toggled(s.ui.opened, scope) } })),
+      graphReady: (graph) => set({ graph }),
+      setView: (view) => set((s) => ({ ui: { ...s.ui, view } })),
+      setHideUntriggered: (hideUntriggered) => set((s) => ({ ui: { ...s.ui, hideUntriggered } })),
+      setPrefs: (patch) => set((s) => ({ ui: { ...s.ui, prefs: { ...s.ui.prefs, ...patch } } })),
+      setPanel: (panel) => get().setPrefs({ panel }),
+      togglePane: (pane) => {
+        const { collapsed } = get().ui.prefs;
+        get().setPrefs({ collapsed: { ...collapsed, [pane]: !collapsed[pane] } });
+      },
+      revealLine: ({ file, line }) =>
+        set((s) => ({
+          reveal: { file, line, seq: ++requestSeq },
+          ui: {
+            ...s.ui,
+            yamlFile: file,
+            prefs: { ...s.ui.prefs, collapsed: { ...s.ui.prefs.collapsed, yaml: false } },
+          },
+        })),
+      setYamlFile: (yamlFile) => set((s) => ({ ui: withYamlFile(s.ui, yamlFile) })),
+      openCase: () => set({ caseOpen: true }),
+      closeCase: () => set({ caseOpen: false }),
+      hoverUnknown: (hoveredUnknown) =>
+        set((s) => (s.hoveredUnknown === hoveredUnknown ? s : { hoveredUnknown })),
+      showUnknown: (id) =>
+        set((s) => ({
+          unknownFocus: { id, seq: ++requestSeq },
+          ui: {
+            ...s.ui,
+            prefs: { ...s.ui.prefs, panel: 'unknowns', collapsed: { ...s.ui.prefs.collapsed, right: false } },
+          },
+        })),
+      unknownFocused: (seq) => set((s) => (s.unknownFocus?.seq === seq ? { unknownFocus: undefined } : {})),
+      transact: (input) => commit((s) => history.transact(s.edit, s.files.byPath, input, contextOf(s))),
+      typed: (path, splices, alone) =>
+        commit((s) => history.typed(s.edit, s.files.byPath, path, splices, contextOf(s), alone)),
+      closeGroup: () => set((s) => (s.edit.group ? { edit: history.close(s.edit, s.files.byPath) } : s)),
+      undo: () => commit((s) => history.undo(s.edit, s.files.byPath), 'undo').ok,
+      redo: () => commit((s) => history.redo(s.edit, s.files.byPath), 'redo').ok,
+      projectLoading: () => set((s) => ({ project: { ...s.project, status: 'loading' } })),
+      // A new project of the newest texts: whatever was held is released.
+      projectReady: (version, outline, files) =>
+        set((s) => ({
+          project: { status: 'ready', version, outline, files },
+          error: replaceError(s.error, undefined),
+        })),
+      projectHeld: (held) => set((s) => ({ project: { ...s.project, held } })),
+      projectFailed: (error) =>
+        set((s) => ({ project: { status: 'error' }, error: replaceError(s.error, error) })),
+      engineReady: ({ version, models }) =>
+        set((s) => ({ engine: { ...s.engine, status: 'ready', version, models } })),
+      engineFailed: (error) =>
+        set((s) => ({ engine: { ...s.engine, status: 'failed', busy: false }, error })),
+      engineRestarted: (restarts, project) =>
+        set((s) => ({
+          engine: { ...s.engine, restarts },
+          project: project === undefined ? s.project : { ...s.project, version: project },
+        })),
+      engineBusy: (busy) => set((s) => ({ engine: { ...s.engine, busy } })),
+      planReceived: (plan) =>
+        set((s) => ({
+          plan,
+          // A plan of older texts (an input changed while an edit was loading) is still behind the edit.
+          stale: plan.for.files < s.files.version ? 'edit' : false,
+          error: replaceError(s.error, undefined),
+          pin: answered(s.pin, plan),
+        })),
+      rejected: (error) => set((s) => ({ error: replaceError(s.error, error) })),
+      clearError: () => set((s) => ({ error: replaceError(s.error, undefined) })),
+      notify: (text) => {
+        const id = ++noticeId;
+        set((s) => ({ notices: [...s.notices, { id, text }] }));
+        return id;
+      },
+      dismissNotice: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
+    };
+  });
 }
+
+type StepOutcome = history.Step | history.Refusal | undefined;
+
+/**
+ * What a step of the history does to the store: its texts and its history in one patch, the source's buffers with
+ * them. A refused step changes nothing, but an undo or a redo the hash guard stopped clears the history and says so:
+ * none of its entries can be trusted any more.
+ */
+function committed(
+  s: SessionState,
+  outcome: StepOutcome,
+  stopped?: { verb: string; id: number },
+): { patch: Partial<SessionState>; outcome: EditOutcome } {
+  if (outcome === undefined) return { patch: s, outcome: { ok: false } };
+  if ('refused' in outcome) {
+    if (outcome.refused !== 'desync' || !stopped)
+      return { patch: s, outcome: { ok: false, refusal: outcome } };
+    const text = `${stopped.verb} stopped: ${outcome.path} changed outside the history`;
+    return {
+      patch: { edit: history.emptyHistory(s.edit.next), notices: [...s.notices, { id: stopped.id, text }] },
+      outcome: { ok: false, refusal: outcome },
+    };
+  }
+  const texts = withTexts(s, outcome.changes);
+  const patch: Partial<SessionState> = { ...texts, edit: outcome.history };
+  if (texts.files) patch.source = writtenThrough(s.source, outcome.changes, texts.files.byPath);
+  return { patch, outcome: { ok: true } };
+}
+
+/**
+ * The source after an edit (synthesis § 5.5). Pasted buffers follow their files' texts, so pasting another file,
+ * removing one or reloading the page keeps the edit, and the buffer writer persists them. A sample becomes the
+ * buffers of its edited copy: the sample itself never changes. A folder's edits are the crash snapshot's (A4).
+ */
+function writtenThrough(
+  source: Source,
+  changes: history.TextChanges,
+  byPath: Record<string, string>,
+): Source {
+  if (source.kind === 'sample')
+    return {
+      kind: 'paste',
+      name: `edited copy of the ${source.name} sample`,
+      buffers: Object.entries(byPath).map(([path, text]) => ({ path, text })),
+    };
+  if (source.kind !== 'paste') return source;
+  const buffers = source.buffers
+    .filter((b) => changes[b.path] !== null)
+    .map((b) => (Object.hasOwn(changes, b.path) ? { path: b.path, text: changes[b.path]! } : b));
+  for (const [path, text] of Object.entries(changes))
+    if (text !== null && !source.buffers.some((b) => b.path === path)) buffers.push({ path, text });
+  return { ...source, buffers };
+}
+
+const contextOf = (s: SessionState): history.Context => ({
+  at: Date.now(),
+  selection: {
+    ...(s.focus === undefined ? {} : { focus: s.focus }),
+    ...(s.sel === undefined ? {} : { sel: s.sel }),
+  },
+});
 
 /** The files of a new source: a new epoch, every file at the new version, its text as read and as opened. */
 function sourceFiles(
@@ -444,16 +566,19 @@ function sourceFiles(
 
 /**
  * The texts changed within the epoch: the files version moves, and so does the rev of each file whose text changed;
- * the epoch, the base and the opened texts stay, and a path new to the files gets the meta of a string. Nothing else
- * of the store moves, the plan, the picture, the selection and the scenario included: the plan is stale for the edit
- * until the session brings the one of the new texts. Texts the files already hold change nothing. This is what an
- * edit of the store's texts reduces to; the edit history's `transact` (M3b A3) is built on it.
+ * the epoch, the base and the opened texts stay. A path new to the files gets the meta of a string, and `null`
+ * removes a file. A file's `eol` follows its text, so a converted file is no longer mixed; its BOM and its encoding
+ * stay what reading found. Nothing else of the store moves, the plan, the picture, the selection and the scenario
+ * included: the plan is stale for the edit until the session brings the one of the new texts. Texts the files already
+ * hold change nothing. This is what an edit of the store's texts reduces to; the history's steps commit through it.
  */
 export function withTexts(
   s: SessionState,
-  texts: Readonly<Record<string, string>>,
+  texts: Readonly<Record<string, string | null>>,
 ): Partial<Pick<SessionState, 'files' | 'stale'>> {
-  const changed = Object.entries(texts).filter(([path, text]) => s.files.byPath[path] !== text);
+  const changed = Object.entries(texts).filter(([path, text]) =>
+    text === null ? Object.hasOwn(s.files.byPath, path) : s.files.byPath[path] !== text,
+  );
   if (changed.length === 0) return {};
   const version = s.files.version + 1;
   const files = {
@@ -464,12 +589,26 @@ export function withTexts(
     revs: { ...s.files.revs },
   };
   for (const [path, text] of changed) {
+    if (text === null) {
+      delete files.byPath[path];
+      delete files.meta[path];
+      delete files.revs[path];
+      continue;
+    }
     files.byPath[path] = text;
-    files.meta[path] ??= textMeta(text);
+    const meta = files.meta[path];
+    files.meta[path] = meta ? withEol(meta, text) : textMeta(text);
     files.revs[path] = version;
   }
-  return { files, stale: s.plan === undefined ? false : 'edit' };
+  // Only a project file's text is in the plan; a test file (C10) leaves it current.
+  const planned = changed.some(([path]) => isProjectFile(path));
+  return { files, stale: s.plan === undefined ? false : planned ? 'edit' : s.stale };
 }
+
+const withEol = (meta: FileMeta, text: string): FileMeta => {
+  const eol = classifyEol(text);
+  return eol === meta.eol ? meta : { ...meta, eol };
+};
 
 /** An input changed: the plan shown, if any, is stale for it. */
 const inputsStale = (s: SessionState): SessionState['stale'] => (s.plan === undefined ? false : 'inputs');
@@ -546,6 +685,14 @@ function answered(pin: Pin | undefined, plan: PlanState): Pin | undefined {
   const { seq, scenario, assume } = pin;
   return { seq, scenario, assume, after: { plan: plan.plan, changes, sentence: pinSentence(changes) } };
 }
+
+/** The Outline of the newest texts loaded: the held one while the hold is on, since its errors are what to fix. */
+export const newestOutline = (s: Pick<SessionState, 'project'>): Outline | undefined =>
+  s.project.held?.outline ?? s.project.outline;
+
+/** The files version `newestOutline` is of. */
+export const newestOutlined = (s: Pick<SessionState, 'project'>): number | undefined =>
+  s.project.held?.files ?? s.project.files;
 
 /** The errors only a reload clears: the engine never started, or it stopped and could not be restarted. */
 export function isBlocking(error: SessionError | undefined): boolean {

@@ -16,7 +16,14 @@ import { togglePaneKeepingFocus } from '../app/shortcuts';
 import { MARK_LABEL } from '../graph/Mark';
 import { planLabels } from '../panels/outline-tree';
 import { planIndex, resolveSelection, selectionOf } from '../plan/index';
-import type { PlanState, Reveal, SessionState, SessionStore } from '../state/store';
+import {
+  newestOutline,
+  newestOutlined,
+  type PlanState,
+  type Reveal,
+  type SessionState,
+  type SessionStore,
+} from '../state/store';
 import type { Outline } from '../worker/protocol';
 import {
   blankState,
@@ -89,8 +96,9 @@ interface PaneModel {
  */
 function usePaneModel(): PaneModel {
   const files = useSession((s) => s.files);
-  const outline = useSession((s) => s.project.outline);
-  const outlined = useSession((s) => s.project.files);
+  // While held, the Outline of the broken texts: its problems are what the author is fixing (synthesis § 7.2).
+  const outline = useSession(newestOutline);
+  const outlined = useSession(newestOutlined);
   const plan = useSession((s) => s.plan);
   const focus = useSession((s) => s.focus);
   const sel = useSession((s) => s.sel);

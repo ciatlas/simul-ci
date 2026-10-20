@@ -2,6 +2,7 @@ import { createSession, type Session } from '../engine/session';
 import { loadedMetrics } from '../graph/metrics';
 import { createGraphSession, type GraphSession } from '../graph/session';
 import { createSources, type Sources } from '../input/sources';
+import { type BufferWriter, createBufferWriter } from '../state/buffers';
 import { sourceStore } from '../state/persist';
 import { readPrefs, writePrefs } from '../state/prefs';
 import { createSessionStore, initialSessionState, type SessionStore } from '../state/store';
@@ -20,6 +21,8 @@ export interface App {
   /** Lays out each new plan and commits it to the store with its positions. */
   graph: GraphSession;
   sources: Sources;
+  /** Writes edited paste buffers to IndexedDB behind the edits. */
+  buffers: BufferWriter;
 }
 
 export function bootApp(): App {
@@ -30,7 +33,9 @@ export function bootApp(): App {
   const layout = createLayoutClient({ spawn: spawnLayoutWorker });
   // Cards are measured in their own faces, so the first layout waits for the fonts.
   const graph = createGraphSession({ store, layout, metrics: loadedMetrics() });
-  const sources = createSources({ store, persist: sourceStore() });
+  const persist = sourceStore();
+  const sources = createSources({ store, persist });
+  const buffers = createBufferWriter({ store, persist, win: window });
   applyTheme(prefs.theme);
   store.subscribe((s, prev) => {
     if (s.ui.prefs !== prev.ui.prefs) {
@@ -40,5 +45,5 @@ export function bootApp(): App {
   });
   installShortcuts(store);
   void sources.restore();
-  return { store, client, session, layout, graph, sources };
+  return { store, client, session, layout, graph, sources, buffers };
 }

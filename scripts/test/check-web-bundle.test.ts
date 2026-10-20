@@ -61,6 +61,20 @@ describe('the chunk rules', () => {
     expect(chunkProblems('engine.worker-abc.js', [...WORKER, files])).toHaveLength(1);
   });
 
+  it('let the page hold the document model’s text edits and nothing else of it, and keep it out of the workers', () => {
+    const edits = '../../../../packages/document/src/edits.ts';
+    const document = '../../../../packages/document/src/document.ts';
+    expect(chunkProblems('index-abc.js', [...PAGE, edits])).toEqual([]);
+    expect(chunkProblems('YamlPane-abc.js', [edits])).toEqual([]);
+    expect(chunkProblems('index-abc.js', [...PAGE, edits, document])).toEqual([
+      `index-abc.js holds ${document}: the page may use only @simulci/document/edits`,
+    ]);
+    expect(chunkProblems('engine.worker-abc.js', [...WORKER, edits])).toEqual([
+      `engine.worker-abc.js holds ${edits}: the document model edits on the page, not here`,
+    ]);
+    expect(chunkProblems('layout.worker-abc.js', [...LAYOUT, edits])).toHaveLength(1);
+  });
+
   it("keep core, zod and the engine proper in the worker, which builds from core's browser entry", () => {
     expect(
       chunkProblems('index-abc.js', [...PAGE, '../../../../packages/engine/src/trigger/push.ts']),
