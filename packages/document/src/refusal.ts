@@ -1,3 +1,4 @@
+import type { WorkflowOp } from './ops/types';
 import type { Eol, YamlPath } from './types';
 
 /** Why an edit cannot be made, in the terms the author sees it. */
@@ -33,21 +34,15 @@ export type RefusalReason =
   | 'not-utf8'
   | 'mixed-eol';
 
-/**
- * The ops a fix runs: the copies that take an anchor or an alias out of an edit's way, and the line-ending
- * conversion. Each is also an op of its own.
- */
-export type FixOp =
-  | { op: 'dealias'; file: string; path: YamlPath }
-  | { op: 'dealiasAnchor'; file: string; anchor: string; line?: number }
-  | { op: 'convertEol'; file: string; eol: Eol };
-
 /** A one-click way past a refusal. */
 export type Fix =
   /** Run the ops; with `retry`, then the refused op again. The fix and the retry commit as one transaction. */
-  | { kind: 'ops'; label: string; ops: FixOp[]; retry: boolean }
-  /** Retry the op with `ctx.shared = 'all'`: change every use of a shared anchor. */
-  | { kind: 'shared-all'; label: string }
+  | { kind: 'ops'; label: string; ops: WorkflowOp[]; retry: boolean }
+  /**
+   * Retry the op with `ctx.shared = 'all'`: change every use of a shared anchor. With `ops`, run them first (an anchor
+   * the change would take with it, copied into its uses); the ops and the retry commit as one transaction.
+   */
+  | { kind: 'shared-all'; label: string; ops?: WorkflowOp[] }
   /** "Edit in YAML": open the pane on the line. */
   | { kind: 'reveal'; label: string; line: number }
   /** Edit a generated file anyway, this session. */
@@ -241,7 +236,10 @@ export function sharedAnchor(
 }
 
 /** The op that copies an anchor into its uses; it names the definition's line when the name is used twice. */
-export function copyAnchor(file: string, def: { name: string; line: number; redefined?: boolean }): FixOp {
+export function copyAnchor(
+  file: string,
+  def: { name: string; line: number; redefined?: boolean },
+): WorkflowOp {
   return def.redefined
     ? { op: 'dealiasAnchor', file, anchor: def.name, line: def.line }
     : { op: 'dealiasAnchor', file, anchor: def.name };
