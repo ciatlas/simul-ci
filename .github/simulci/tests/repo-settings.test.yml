@@ -7,12 +7,23 @@ cases:
       run: [apply]
       skip:
         - check: if
+      units:
+        # The release bot's key is a secret of the release environment, which only main may use.
+        apply: { environment: release }
   - name: a ruleset change in a pull request is checked, not applied
     when: { event: pull_request, base: main, head: feat/x, changed: [.github/rulesets/main.json] }
     then:
       run: [check]
       skip:
         - apply: if
+  - name: the weekly run applies the settings
+    when: { event: schedule, branch: main }
+    then:
+      run: [apply]
+      skip:
+        - check: if
+      units:
+        apply: { environment: release }
   - name: a change elsewhere starts nothing
     when: { event: push, branch: main, changed: [packages/engine/src/x.ts] }
     then: { because: paths }

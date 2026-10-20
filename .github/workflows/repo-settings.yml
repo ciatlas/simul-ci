@@ -51,6 +51,11 @@ jobs:
     name: Apply settings
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # The release bot's private key is a secret of the release environment, which only main may use
+    # (.github/environments.json). Nothing is deployed, so no deployment is recorded.
+    environment:
+      name: release
+      deployment: false
     steps:
       - id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0

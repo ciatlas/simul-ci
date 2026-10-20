@@ -1,3 +1,4 @@
 {
-  "npm": { "branches": ["main"] }
+  "npm": { "branches": ["main"] },
+  "release": { "branches": ["main"] }
 }

@@ -31,6 +31,11 @@ jobs:
     runs-on: ubuntu-latest
     # Writes go through the ciatlas-release-bot app: unlike GITHUB_TOKEN, its pull requests, pushes and tags start the
     # usual workflows, so the release pull request gets the required checks like any other.
+    # The app's private key is a secret of the release environment, which only main may use (.github/environments.json),
+    # so no other job can read it. Nothing is deployed, so no deployment is recorded.
+    environment:
+      name: release
+      deployment: false
     permissions:
       contents: read
     outputs:
@@ -242,6 +247,9 @@ jobs:
     needs: [resolve, publish-release]
     if: ${{ !cancelled() && needs.publish-release.result == 'success' && needs.resolve.outputs.prerelease == 'false' }}
     runs-on: ubuntu-latest
+    environment: # the release bot's key (see release-please)
+      name: release
+      deployment: false
     permissions:
       contents: read
     steps:
