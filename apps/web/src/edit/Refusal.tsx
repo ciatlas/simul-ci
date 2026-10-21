@@ -1,6 +1,6 @@
 import type { Fix } from '@simulci/document';
 import { useApp, useSession } from '../app/providers';
-import { applyFix } from './dispatch';
+import { applyFix, type Dispatched } from './dispatch';
 import type { Refused } from './types';
 
 /**
@@ -12,16 +12,19 @@ import type { Refused } from './types';
 const BUTTON =
   'rounded border border-border bg-surface px-2 py-0.5 text-text text-xs hover:bg-chrome focus-visible:outline-2 focus-visible:outline-accent';
 
+/** What a gesture does once a fix of its refusal committed (the case dialog shows the case it wrote). */
+type OnFixed = (result: Extract<Dispatched, { ok: true }>) => void;
+
 /**
  * The refusal under the control whose gesture it answers: shown while the store's last refusal is the one that
  * gesture got (`seq`). The status line says it aloud; this one is not a live region, so it is not read twice.
  */
-export function RefusalNote({ seq }: { seq: number | undefined }) {
+export function RefusalNote({ seq, onFixed }: { seq: number | undefined; onFixed?: OnFixed }) {
   const refused = useSession((s) => s.edit.refused);
   if (!refused || refused.seq !== seq) return null;
   return (
     <div className="flex flex-col gap-1.5 rounded border border-might bg-might-soft px-2 py-1.5 text-xs">
-      <RefusalView refused={refused} />
+      <RefusalView refused={refused} {...(onFixed ? { onFixed } : {})} />
     </div>
   );
 }
@@ -41,10 +44,19 @@ export function RefusalLine() {
  * A refusal's sentence and its fixes. Taking a fix runs it against the texts the refusal was made on; Dismiss takes
  * the store's refusal away (one shown before any edit, a field's read-only reason, has none to dismiss).
  */
-export function RefusalView({ refused, dismiss = true }: { refused: Refused; dismiss?: boolean }) {
+export function RefusalView({
+  refused,
+  dismiss = true,
+  onFixed,
+}: {
+  refused: Refused;
+  dismiss?: boolean;
+  onFixed?: OnFixed;
+}) {
   const { store } = useApp();
   const take = (fix: Fix): void => {
-    applyFix(store, refused, fix);
+    const result = applyFix(store, refused, fix);
+    if (result?.ok && result.changed) onFixed?.(result);
   };
   return (
     <>

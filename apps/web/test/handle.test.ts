@@ -416,8 +416,54 @@ runs: { using: node20, main: index.js }
     ]);
   });
 
+  it('checks the route tests a load carries as simulci test does, and never loads them into the project', () => {
+    const ok =
+      'workflow: ci.yml\ncases:\n  - { name: a push, when: { event: push }, then: { run: [build] } }\n';
+    const bad =
+      'workflow: ci.yml\ncases:\n  - name: a\n    when: { evnt: push }\n    then: { run: [build] }\n';
+    const tests = {
+      '.github/simulci/tests/ci.test.yml': ok,
+      '.github/simulci/tests/nested/bad.test.yml': bad,
+      '.github/simulci/tests/broken.test.yml': 'workflow: ci.yml\ncases: [\n',
+    };
+    const r = handle(initialState(), { id: 1, type: 'load', files, tests });
+    if (r.response.type !== 'loaded') throw new Error(JSON.stringify(r.response));
+    const { outline } = r.response;
+    // Among the files, by path, as the tests they are.
+    expect(outline.files.map((f) => f.path)).toEqual(
+      [...Object.keys(files), ...Object.keys(tests)].sort((a, b) => a.localeCompare(b)),
+    );
+    const byPath = new Map(outline.files.map((f) => [f.path, f]));
+    expect(byPath.get('.github/simulci/tests/ci.test.yml')).toEqual({
+      path: '.github/simulci/tests/ci.test.yml',
+      kind: 'test',
+      errors: [],
+    });
+    expect(byPath.get('.github/simulci/tests/nested/bad.test.yml')!.errors).toEqual([
+      {
+        line: 4,
+        column: 13,
+        message: "T002 cases.0.when.evnt: unknown key; did you mean 'event'?",
+        source: 'test',
+      },
+    ]);
+    expect(byPath.get('.github/simulci/tests/broken.test.yml')!.errors).toEqual([
+      expect.objectContaining({ line: 3, source: 'test', message: expect.stringMatching(/^T001 /) }),
+    ]);
+    // The project is the workflows and actions alone: no test is a workflow, a cache entry or a plan's file.
+    expect(Object.keys(r.state.project!.loaded.files)).toEqual(Object.keys(files));
+    expect([...r.state.cache.keys()]).toEqual(Object.keys(files));
+    expect(outline.workflows.map((w) => w.path)).not.toContain('.github/simulci/tests/ci.test.yml');
+    // A load without tests outlines as before.
+    const without = handle(initialState(), { id: 1, type: 'load', files });
+    if (without.response.type !== 'loaded') throw new Error(JSON.stringify(without.response));
+    expect(without.response.outline.files.some((f) => f.kind === 'test')).toBe(false);
+  });
+
   it('accepts only well-formed requests', () => {
     expect(isEngineRequest({ id: 1, type: 'load', files })).toBe(true);
+    expect(isEngineRequest({ id: 1, type: 'load', files, tests: {} })).toBe(true);
+    expect(isEngineRequest({ id: 1, type: 'load', files, tests: 'ci.test.yml' })).toBe(false);
     expect(isEngineRequest(sim())).toBe(true);
     expect(isEngineRequest({ id: 1, type: 'simulate', project: 1, scenario: {} })).toBe(false);
     expect(isEngineRequest({ id: '1', type: 'load', files })).toBe(false);

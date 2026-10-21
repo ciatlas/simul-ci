@@ -1,0 +1,5 @@
+  - name: added from the page
+    when: { event: push, branch: main }
+    then:
+      run: [analysis]
+      conclusion: success

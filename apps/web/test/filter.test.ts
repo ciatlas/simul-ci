@@ -1,9 +1,16 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { readWorkflowFiles } from '@simulci/node';
+import { discoverTests, readWorkflowFiles } from '@simulci/node';
 import { afterAll, describe, expect, it } from 'vitest';
-import { filterFiles, isProjectFile, mayHoldProjectFiles, normalizePath } from '../src/input/filter';
+import {
+  filterFiles,
+  isKeptFile,
+  isProjectFile,
+  isTestFile,
+  mayHoldProjectFiles,
+  normalizePath,
+} from '../src/input/filter';
 import { LIMITS, overLimit } from '../src/input/limits';
 
 /** Every file under a directory, as a browser walk would hand them over: relative path → text. */
@@ -29,6 +36,16 @@ const SYNTHETIC = [
   '.github/actions/ACTION.YML',
   '.github/dependabot.yml',
   '.github/simulci/tests/ci.test.yml',
+  '.github/simulci/tests/nested/deep/release.test.yaml',
+  '.github/simulci/tests/.test.yml',
+  '.github/simulci/tests/Upper.TEST.YML',
+  '.github/simulci/tests/ci.test.yml.bak',
+  '.github/simulci/tests/README.md',
+  '.github/simulci/tests/__snapshots__/ci.test.snap.json',
+  '.github/simulci/tests/__snapshots__/odd.test.yml',
+  '.github/simulci/tests/nested/__snapshots__/deep.test.yml',
+  '.github/simulci/other.test.yml',
+  'tests/ci.test.yml',
   'action.yml',
   'node_modules/x/action.yml',
   'packages/a/action.yaml',
@@ -42,10 +59,20 @@ for (const path of SYNTHETIC) {
 }
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
+/** Of the files the filter keeps, the ones a predicate takes. */
+const pick = (files: Record<string, string>, keep: (path: string) => boolean): Record<string, string> =>
+  Object.fromEntries(Object.entries(files).filter(([path]) => keep(path)));
+
+/** The route tests the filter keeps, by path, as `discoverTests` lists them. */
+const testsOf = (files: Record<string, string>): string[] =>
+  Object.keys(pick(files, isTestFile)).sort((x, y) => x.localeCompare(y));
+
 describe('the browser file filter', () => {
   it('keeps exactly what @simulci/node reads from the routes lab', () => {
     const root = join(import.meta.dirname, '../../../fixtures/routes-lab/repo');
-    expect(filterFiles(everyFile(root))).toEqual(readWorkflowFiles(root));
+    const kept = filterFiles(everyFile(root));
+    expect(pick(kept, isProjectFile)).toEqual(readWorkflowFiles(root));
+    expect(testsOf(kept)).toEqual(discoverTests(root));
   });
 
   it('keeps exactly what @simulci/node reads from a tree with every edge', () => {
@@ -58,7 +85,23 @@ describe('the browser file filter', () => {
       '.github/workflows/ci.yml',
       'action.yml',
     ]);
-    expect(filterFiles(everyFile(tmp))).toEqual(node);
+    const kept = filterFiles(everyFile(tmp));
+    expect(pick(kept, isProjectFile)).toEqual(node);
+    expect(discoverTests(tmp)).toEqual([
+      '.github/simulci/tests/.test.yml',
+      '.github/simulci/tests/ci.test.yml',
+      '.github/simulci/tests/nested/deep/release.test.yaml',
+    ]);
+    expect(testsOf(kept)).toEqual(discoverTests(tmp));
+    // Nothing else: a kept file is a project file or a route test.
+    expect(Object.keys(kept).every((p) => isProjectFile(p) !== isTestFile(p))).toBe(true);
+  });
+
+  it('finds the route tests simulci test finds in this repository', () => {
+    const root = join(import.meta.dirname, '../../..');
+    const tests = testsOf(filterFiles(everyFile(join(root, '.github'), '.github')));
+    expect(tests.length).toBeGreaterThan(0);
+    expect(tests).toEqual(discoverTests(root));
   });
 
   it('normalizes the paths a picker or a drop hands over', () => {
@@ -66,6 +109,10 @@ describe('the browser file filter', () => {
     expect(normalizePath('/action.yml')).toBe('action.yml');
     expect(isProjectFile('repo/.github/workflows/ci.yml')).toBe(false);
     expect(isProjectFile('Action.yml')).toBe(false);
+    expect(isTestFile('./.github\\simulci\\tests\\ci.test.yml')).toBe(true);
+    expect(isTestFile('repo/.github/simulci/tests/ci.test.yml')).toBe(false);
+    expect(isKeptFile('.github/simulci/tests/ci.test.yml')).toBe(true);
+    expect(isKeptFile('.github/simulci/tests/ci.yml')).toBe(false);
   });
 
   it('knows which directories a walk may skip', () => {
@@ -74,7 +121,10 @@ describe('the browser file filter', () => {
     expect(mayHoldProjectFiles('.github/actions/setup/deep')).toBe(true);
     expect(mayHoldProjectFiles('.github/workflows')).toBe(true);
     expect(mayHoldProjectFiles('node_modules')).toBe(false);
-    expect(mayHoldProjectFiles('.github/simulci')).toBe(false);
+    expect(mayHoldProjectFiles('.github/simulci')).toBe(true);
+    expect(mayHoldProjectFiles('.github/simulci/tests/nested/deep')).toBe(true);
+    expect(mayHoldProjectFiles('.github/simulci/tests/__snapshots__')).toBe(false);
+    expect(mayHoldProjectFiles('.github/simulci/other')).toBe(false);
     expect(mayHoldProjectFiles('.github/workflowsx')).toBe(false);
   });
 

@@ -1,0 +1,6 @@
+  - name: added from the page
+    when: { event: push, branch: main, changed: [.github/rulesets/main.json] }
+    then:
+      run: [apply]
+      skip: [check]
+      conclusion: success

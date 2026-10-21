@@ -87,6 +87,44 @@ function setup(
   return { store, kv, sources, notices };
 }
 
+describe('route tests among the files', () => {
+  const TEST = '.github/simulci/tests/ci.test.yml';
+  const tree = (tests: Tree): Tree => ({
+    '.github': { workflows: { 'ci.yml': 'on: push\n' }, simulci: { tests }, 'dependabot.yml': 'x' },
+  });
+
+  it('takes a folder’s route tests in beside its workflows, but not their snapshots, and not tests alone', async () => {
+    const { store, sources } = setup();
+    const tests = { 'ci.test.yml': 'workflow: ci.yml\n', __snapshots__: { 'old.test.yml': 'x' } };
+    await sources.drop(dropOf(folderItem(folder('repo', tree(tests)))));
+    expect(Object.keys(store.getState().files.byPath).sort()).toEqual([TEST, CI]);
+
+    await sources.drop(dropOf(folderItem(folder('tests', { '.github': { simulci: { tests } } }))));
+    expect(store.getState().error?.message).toMatch(/^no workflow files in the folder tests/);
+    expect(Object.keys(store.getState().files.byPath).sort()).toEqual([TEST, CI]);
+  });
+
+  it('keeps a route test added among pasted buffers through the next paste and the next visit, unsaved (P1)', async () => {
+    const { store, kv, sources } = setup();
+    const first = sources.paste(CI, 'on: push\n');
+    expect(first.ok && (await first.done)).toBe(true);
+    const files = [
+      { path: TEST, edits: [{ from: 0, to: 0, insert: 'workflow: ci.yml\n' }], create: true as const },
+    ];
+    expect(store.getState().transact({ label: 'Added', origin: 'op', files }).ok).toBe(true);
+    const pasted = sources.paste('.github/workflows/b.yml', 'on: pull_request\n');
+    expect(pasted.ok && (await pasted.done)).toBe(true);
+    const now = store.getState().files;
+    expect(now.byPath[TEST]).toBe('workflow: ci.yml\n');
+    expect(now.base).not.toHaveProperty(TEST);
+    // Written through to the buffers on the next visit, still a file the folder never had.
+    const next = setup(() => sourceStore(kv));
+    await next.sources.restore();
+    expect(next.store.getState().files.byPath[TEST]).toBe('workflow: ci.yml\n');
+    expect(next.store.getState().files.base).not.toHaveProperty(TEST);
+  });
+});
+
 describe('the sources of a session, at their edges', () => {
   it('reports a drop with no workflow file in it and leaves the pasted buffers as they were', async () => {
     const { store, sources } = setup();

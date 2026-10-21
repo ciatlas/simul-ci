@@ -98,13 +98,15 @@ async function expectAxeClean(page: Page, view: string): Promise<void> {
     .toEqual([]);
 }
 
-/** The case dialog at each format, its text written before axe looks. */
+/** The case dialog at each format, its text written, and a test case's place in the repository, before axe looks. */
 async function expectCaseFormatsClean(page: Page, theme: string): Promise<void> {
   await caseButton(page).click();
   const dialog = caseDialog(page);
   for (const label of FORMATS) {
     await dialog.getByRole('radio', { name: label }).check();
     await expect(dialog.getByRole('textbox', { name: 'Text to copy' })).toHaveAttribute('aria-busy', 'false');
+    if (label.startsWith('Test case'))
+      await expect(dialog.getByRole('button', { name: 'Create ci.test.yml' })).toBeEnabled();
     await expectAxeClean(page, `${theme}: the Copy as test case dialog at ${label}`);
   }
   await page.keyboard.press('Escape');

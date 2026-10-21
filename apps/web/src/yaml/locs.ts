@@ -1,4 +1,5 @@
 import type { JobPlan, LegPlan, NodeId, RunPlan, StepPlan, Tri, WorkflowPlan } from '@simulci/engine';
+import { isTestFile } from '../input/filter';
 import { planIndex } from '../plan/index';
 import { declaredAt, decisionOf, type PlanNode, planNodes } from '../plan/nodes';
 import type { Derived, Outline, OutlineFile } from '../worker/protocol';
@@ -165,11 +166,11 @@ export interface FileTab {
   problems: number;
 }
 
-const KIND_ORDER: Record<OutlineFile['kind'], number> = { workflow: 0, action: 1, other: 2 };
+const KIND_ORDER: Record<OutlineFile['kind'], number> = { workflow: 0, action: 1, test: 2, other: 3 };
 
 /**
- * Every loaded file as a tab: workflows, then actions, then the rest, each by path. The outline says what a file is;
- * until it arrives, the path does.
+ * Every loaded file as a tab: workflows, then actions, then route tests (a group of their own), then the rest, each by
+ * path. The outline says what a file is; until it arrives, the path does.
  */
 export function fileTabs(outline: Outline | undefined, byPath: Readonly<Record<string, string>>): FileTab[] {
   const known = new Map(outline?.files.map((f) => [f.path, f]));
@@ -189,6 +190,7 @@ export function fileTabs(outline: Outline | undefined, byPath: Readonly<Record<s
 }
 
 function kindOfPath(path: string): OutlineFile['kind'] {
+  if (isTestFile(path)) return 'test';
   if (path.startsWith('.github/workflows/')) return 'workflow';
   return /(?:^|\/)action\.ya?ml$/.test(path) ? 'action' : 'other';
 }

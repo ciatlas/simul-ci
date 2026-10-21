@@ -318,16 +318,32 @@ describe('problem lines', () => {
 });
 
 describe('the tabs', () => {
-  it('list every loaded file, workflows then actions then the rest, each by path, with its problems', () => {
+  it('list every loaded file, workflows then actions then the route tests then the rest, each by path, with its problems', () => {
     const files = { ...starter, 'notes.yml': 'a: [', '.github/workflows/b.yml': 'on: push\njobs:\n  b: [\n' };
-    const { outline } = simulated(files, { event: 'push' });
-    expect(fileTabs(outline, files)).toEqual([
+    const tests = {
+      '.github/simulci/tests/ci.test.yml': 'workflow: ci.yml\ncases: []\n',
+      '.github/simulci/tests/a/release.test.yml':
+        'workflow: release.yml\ncases:\n  - { name: x, when: { event: push }, then: { run: [a] } }\n',
+    };
+    const loaded = handle(initialState(), { id: 1, type: 'load', files, tests });
+    if (loaded.response.type !== 'loaded') throw new Error(JSON.stringify(loaded.response));
+    expect(fileTabs(loaded.response.outline, { ...files, ...tests })).toEqual([
       { path: '.github/workflows/b.yml', kind: 'workflow', label: 'b.yml', problems: 1 },
       { path: CI, kind: 'workflow', label: 'ci.yml', problems: 0 },
       { path: RELEASE, kind: 'workflow', label: 'release.yml', problems: 0 },
       { path: SETUP, kind: 'action', label: 'action.yml', problems: 0 },
+      {
+        path: '.github/simulci/tests/a/release.test.yml',
+        kind: 'test',
+        label: 'release.test.yml',
+        problems: 0,
+      },
+      // `cases: []`: T002, a test file needs a case.
+      { path: '.github/simulci/tests/ci.test.yml', kind: 'test', label: 'ci.test.yml', problems: 1 },
       { path: 'notes.yml', kind: 'other', label: 'notes.yml', problems: 0 },
     ]);
+    // Before the outline, the path says a route test is one.
+    expect(fileTabs(undefined, tests).map((t) => t.kind)).toEqual(['test', 'test']);
   });
 
   it('name each file by as much of its path as tells it apart, and sort by the path until the outline comes', () => {

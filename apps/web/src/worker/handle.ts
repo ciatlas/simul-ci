@@ -3,13 +3,16 @@ import {
   AssumeListSchema,
   caseFromPlan,
   fileFromPlan,
+  GivenSchema,
   type LoadedProject,
   loadFiles,
+  mergeScenario,
   parseScenario,
   renderMermaid,
   renderText,
   ScenarioError,
   ScenarioInputSchema,
+  type SimulateOptions,
   simulate,
 } from '@simulci/engine';
 import { carry, type FileCache, prefill } from './cache';
@@ -24,6 +27,7 @@ import type {
   Outline,
   SimulateRequest,
 } from './protocol';
+import { withTests } from './tests';
 
 /**
  * The worker's state: one loaded project, numbered so a reply can be told from a stale one, and what its files' texts
@@ -75,7 +79,8 @@ function load(state: WorkerState, request: LoadRequest): { state: WorkerState; r
     const loaded = loadFiles(request.files, request.repository);
     const cache = carry(state.cache, request.files);
     prefill(loaded, cache);
-    const outline = outlineOf(loaded, cache);
+    // The route tests are only checked: the project, the plan and the cache never hold them.
+    const outline = withTests(outlineOf(loaded, cache), request.tests);
     const version = state.nextVersion;
     return {
       state: { project: { version, loaded, outline }, nextVersion: version + 1, cache },
@@ -156,6 +161,30 @@ function plan(project: NonNullable<WorkerState['project']>, request: SimulateReq
   };
 }
 
+/**
+ * What a case is planned from: the request's scenario and mocks, under its test file's `given` as `simulci test` runs a
+ * case (`mergeScenario`, and the `given` mock layer beneath the case's). A `given` the schema refuses, or one that
+ * leaves no valid scenario, is not applied.
+ */
+function planInputs(request: CaseRequest): Pick<SimulateOptions, 'scenario' | 'assume' | 'mocks'> {
+  const plain = { scenario: request.scenario, assume: request.assume };
+  if (request.given === undefined || request.format !== 'test') return plain;
+  const given = GivenSchema.safeParse(request.given);
+  if (!given.success) return plain;
+  const scenario = mergeScenario(given.data, request.scenario);
+  try {
+    parseScenario(scenario);
+  } catch (e) {
+    if (e instanceof ScenarioError) return plain;
+    throw e;
+  }
+  return {
+    scenario,
+    assume: request.assume,
+    ...(given.data.assume ? { mocks: { given: given.data.assume } } : {}),
+  };
+}
+
 function testCase(project: NonNullable<WorkerState['project']>, request: CaseRequest): EngineResponse {
   const known = project.outline.workflows.some(
     (w) => w.path === request.workflow || w.path.endsWith(`/${request.workflow}`),
@@ -167,12 +196,7 @@ function testCase(project: NonNullable<WorkerState['project']>, request: CaseReq
       what: 'workflow',
       issues: [{ path: ['workflow'], message: `no workflow at ${request.workflow}` }],
     };
-  const result = simulate({
-    project: project.loaded,
-    scenario: request.scenario,
-    assume: request.assume,
-    detail: 'steps',
-  });
+  const result = simulate({ project: project.loaded, detail: 'steps', ...planInputs(request) });
   if (request.format === 'text') return { id: request.id, type: 'case', text: renderText(result) };
   if (request.format === 'mermaid') return { id: request.id, type: 'case', text: renderMermaid(result) };
   const opts = {
