@@ -70,6 +70,17 @@ async function opened(page: Page): Promise<void> {
   await expect(jobNode(page, 'deploy')).toBeVisible();
   await page.getByRole('switch', { name: /^Edit/ }).click();
   await expect(page.getByRole('button', { name: '+ Add job' })).toBeAttached();
+  // Edit mode opens the YAML pane, and the canvas refits to the room left: the viewport is measured after that.
+  await expect(pane(page)).toBeVisible();
+  await expect
+    .poll(async () => {
+      const at = await transform(page);
+      await page.evaluate(
+        () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+      );
+      return at === (await transform(page));
+    })
+    .toBe(true);
 }
 
 /** The file as the pane's Download hands it over, byte for byte. */
@@ -145,8 +156,8 @@ test('a double-click on a card’s title renames it in edit mode and does not zo
   await expect(review).toContainText('2 places on 2 lines of ci.yml: the id and 1 expression read.');
   await review.getByRole('button', { name: 'Rename' }).click();
   await expect(page).toHaveURL(/sel=test\.unit-tests/);
+  expect(await transform(page)).toBe(before);
   expect(await downloaded(page)).toBe(
     CI.replace('id: unit', 'id: unit-tests').replace('steps.unit.outcome', 'steps.unit-tests.outcome'),
   );
-  expect(await transform(page)).toBe(before);
 });

@@ -31,7 +31,7 @@ const BUDGETS = [
   // React, the router, React Flow and its d3 modules, Base UI, the scenario form, the panels and the edit history,
   // with the crash snapshot, the replace prompt, edit mode, what an edit changed (the plan diff and Details, a
   // platform popover), the edit runtime's and the dialogs' loaders, Save's buttons and keys with its permission
-  // request, the canvas's side of its gestures, and a rename's remaps: 240.0 kB measured (246.5 before the dialogs
+  // request, the canvas's side of its gestures, and a rename's remaps: 240.1 kB measured (246.5 before the dialogs
   // moved to their own chunk). The synthesis keeps 251 (§ 8.5).
   { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 251 },
   // CodeMirror's view, state, language and commands with the YAML grammar, and the pane's edit mode, fetched when the
