@@ -19,7 +19,7 @@
  * Usage: node scripts/build-catalog.mjs [--out <path>] [--strict]
  */
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -326,6 +326,20 @@ function perRepository(/** @type {(owner: string, repo: string) => Promise<any>}
   };
 }
 
+/**
+ * The committed catalog's text, read at once (no check before it, which the file could change after); none before
+ * the first build.
+ * @param {string} path
+ */
+function committedText(path) {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error) {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 const warn = (/** @type {string} */ message) =>
   console.warn(process.env.GITHUB_ACTIONS ? `::warning::${message}` : `warning: ${message}`);
 
@@ -335,7 +349,7 @@ async function main() {
   const out = resolve(ROOT, at === -1 ? OUT : (args[at + 1] ?? OUT));
   const strict = args.includes('--strict');
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || undefined;
-  const before = existsSync(out) ? readFileSync(out, 'utf8') : undefined;
+  const before = committedText(out);
   const committed = new Map((before ? JSON.parse(before) : []).map((e) => [e.uses, e]));
   const refs = perRepository(lsRemote);
   const license = perRepository((owner, repo) => licenseOf(owner, repo, token));
