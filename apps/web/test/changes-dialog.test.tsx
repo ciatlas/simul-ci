@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { App } from '../src/app/boot';
-import { ChangesButton } from '../src/app/ChangesDialog';
+import { ChangesButton } from '../src/app/ChangesButton';
 import { AppProvider } from '../src/app/providers';
 import { createReplacePrompt } from '../src/app/replace';
 import { ReplacePrompt } from '../src/app/ReplaceDialog';
@@ -58,7 +58,8 @@ describe('the Changes dialog', () => {
     const store = edited();
     renderWith(store);
     await userEvent.click(screen.getByRole('button', { name: 'Changes (1)' }));
-    const dialog = screen.getByRole('dialog', { name: 'Changes' });
+    // The dialog is in the dialogs chunk, which the first open fetches.
+    const dialog = await screen.findByRole('dialog', { name: 'Changes' });
     const file = within(dialog).getByRole('region', { name: CI });
     expect(file.textContent).toContain('1 line added, 1 removed');
     expect(within(file).getByLabelText(`Changes to ${CI}`).textContent).toBe(
@@ -90,7 +91,7 @@ describe('the Changes dialog', () => {
     });
     renderWith(store);
     await userEvent.click(screen.getByRole('button', { name: 'Changes (3)' }));
-    const removed = screen.getByRole('region', { name: RELEASE });
+    const removed = await screen.findByRole('region', { name: RELEASE });
     expect(removed.textContent).toContain('removed');
     expect(within(removed).queryByRole('button', { name: /^Download/ })).toBeNull();
     const created = screen.getByRole('region', { name: '.github/workflows/new.yml' });

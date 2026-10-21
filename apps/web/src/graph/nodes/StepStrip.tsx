@@ -1,7 +1,8 @@
 import type { NodeId } from '@simulci/engine';
 import type { MouseEvent } from 'react';
 import { stripLayout } from '../card';
-import { Mark, MARK_LABEL } from '../Mark';
+import { MARK_LABEL } from '../../lib/words';
+import { Mark } from '../Mark';
 import type { StepMark } from '../types';
 
 /**

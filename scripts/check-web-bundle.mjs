@@ -30,8 +30,9 @@ const BUDGETS = [
   { name: 'the layout worker', test: (f) => f.startsWith('layout.worker-'), kB: 493 },
   // React, the router, React Flow and its d3 modules, Base UI, the scenario form, the panels and the edit history,
   // with the crash snapshot, the replace prompt, edit mode, what an edit changed (the plan diff and Details, a
-  // platform popover), the edit runtime's loader, saving to the folder and the canvas's side of its gestures:
-  // 246.5 kB measured (238.0 before saving and the gestures). The synthesis keeps 251 (§ 8.5).
+  // platform popover), the edit runtime's and the dialogs' loaders, Save's buttons and keys with its permission
+  // request, and the canvas's side of its gestures: 238.6 kB measured (246.5 before the dialogs moved to their own
+  // chunk). The synthesis keeps 251 (§ 8.5).
   { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 251 },
   // CodeMirror's view, state, language and commands with the YAML grammar, and the pane's edit mode, fetched when the
   // pane first opens: 107.1 kB measured (95.4 before edit mode).
@@ -41,6 +42,9 @@ const BUDGETS = [
   // own, not Base UI's, which would add 33 kB) and the triggers editor, fetched for editing: 84.8 kB measured (78.9
   // before the triggers editor); the budget is that and 15 %.
   { name: 'the edit runtime', test: (f) => f.startsWith('edit-'), kB: 98 },
+  // The Changes, save and test case dialogs with the restore conflicts' rows, the line diff and the patch, and what
+  // Save and Reload run against the folder, fetched on idle once a file is unsaved (synthesis § 8.5): 9.6 kB measured.
+  { name: 'the dialogs', test: (f) => f.startsWith('dialogs-'), kB: 12 },
 ];
 
 const problems = [];

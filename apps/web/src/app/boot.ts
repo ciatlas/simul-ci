@@ -12,6 +12,7 @@ import { readPrefs, writePrefs } from '../state/prefs';
 import { createSessionStore, initialSessionState, type SessionStore } from '../state/store';
 import { createEngineClient, type EngineClient, spawnEngineWorker } from '../worker/client';
 import { createLayoutClient, type LayoutClient, spawnLayoutWorker } from '../worker/layout-client';
+import { installDialogsPrefetch } from './dialogs-load';
 import { installLeaveGuard } from './leave';
 import { createReplacePrompt, type ReplacePrompt } from './replace';
 import { createSaver, type Saver } from './saver';
@@ -79,6 +80,7 @@ export function bootApp(): App {
   installShortcuts(store, window, () => void saver.save());
   installStaleClock({ store });
   installEditPrefetch(store);
+  installDialogsPrefetch(store);
   void sources.restore();
   return { store, client, session, layout, graph, sources, buffers, keeper, prompt, saver };
 }

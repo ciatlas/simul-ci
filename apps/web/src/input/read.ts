@@ -1,3 +1,5 @@
+import { downloadText } from '../lib/download';
+
 /**
  * Reading a file as save-back needs it (synthesis § 5.1). `Blob.text()` strips a UTF-8 BOM and replaces invalid
  * bytes with U+FFFD without a word; this reader still strips the BOM, so the text, its offsets and its line-1 columns
@@ -51,3 +53,17 @@ export const textMeta = (text: string): FileMeta => ({ bom: false, eol: classify
 /** The text as a file holds it: its BOM put back, for a download or a save. */
 export const asWritten = (text: string, meta: Pick<FileMeta, 'bom'> | undefined): string =>
   meta?.bom ? `\uFEFF${text}` : text;
+
+/** Hands one file to the browser to save as it would be written, its BOM back; nothing for a file removed. */
+export function downloadOne(
+  files: { byPath: Readonly<Record<string, string>>; meta: Readonly<Record<string, FileMeta>> },
+  path: string,
+): void {
+  const text = files.byPath[path];
+  if (text !== undefined)
+    downloadText(
+      path.slice(path.lastIndexOf('/') + 1),
+      asWritten(text, files.meta[path]),
+      'application/yaml',
+    );
+}

@@ -103,9 +103,10 @@ const button = (name: string) => within(dialog()).getByRole<HTMLButtonElement>('
 const pathLine = () => document.getElementById(dialog().getAttribute('aria-describedby') ?? '')?.textContent;
 const status = () => within(dialog()).getByRole('status').textContent;
 
+/** Opens the dialog; it is in the dialogs chunk, which the first open fetches. */
 async function open(user: ReturnType<typeof userEvent.setup>) {
   await user.click(opener());
-  return dialog();
+  return screen.findByRole('dialog', { name: 'Copy as test case' });
 }
 
 /** Opens the dialog over the starter's plan with the session answering every format with the text given. */
@@ -130,9 +131,9 @@ describe('Copy as test case', () => {
     const { store, user } = mount(ready(), async () => answer(''));
     expect(opener()).toHaveProperty('disabled', false);
     expect(screen.queryByRole('dialog')).toBeNull();
-    await user.click(opener());
+    const opened = await open(user);
     expect(store.getState().caseOpen).toBe(true);
-    expect(dialog().getAttribute('open')).not.toBeNull();
+    expect(opened.getAttribute('open')).not.toBeNull();
   });
 
   it('names its c key only while the page keys are on', () => {

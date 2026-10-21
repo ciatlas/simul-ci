@@ -2,7 +2,8 @@ import type { NodeId } from '@simulci/engine';
 import { type KeyboardEvent, type MouseEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useApp, useSession } from '../app/providers';
 import { gestures } from '../edit/gestures';
-import { MARK_LABEL, Mark } from '../graph/Mark';
+import { Mark } from '../graph/Mark';
+import { MARK_LABEL } from '../lib/words';
 import { planIndex, resolveSelection, selectionOf } from '../plan/index';
 import type { PlanState } from '../state/store';
 import {

@@ -2,7 +2,8 @@ import type { NodeId } from '@simulci/engine';
 import type { MouseEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { useApp } from '../app/providers';
-import { MARK_LABEL, Mark } from '../graph/Mark';
+import { Mark } from '../graph/Mark';
+import { MARK_LABEL } from '../lib/words';
 import { type PlanIndex, selectionOf } from '../plan/index';
 import { EmptyNote, SectionTitle, useSelected } from './kit';
 import {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { installLeaveGuard } from '../src/app/leave';
 import { createReplacePrompt } from '../src/app/replace';
 import { type ReplaceChoice, createSources } from '../src/input/sources';
@@ -12,7 +12,7 @@ const CI = '.github/workflows/ci.yml';
 const RELEASE = '.github/workflows/release.yml';
 
 /** Sources whose prompt answers `choice` and records what it was asked, and whose downloads are recorded. */
-function setup(choice: ReplaceChoice = 'cancel') {
+function setup(choice: ReplaceChoice = 'cancel', load?: Parameters<typeof createSources>[0]['load']) {
   const store = createSessionStore();
   const asked: string[] = [];
   const dropping: (readonly string[])[] = [];
@@ -28,6 +28,7 @@ function setup(choice: ReplaceChoice = 'cancel') {
       return Promise.resolve(choice);
     },
     download: (name, text) => downloads.push([name, text]),
+    ...(load && { load }),
   });
   return { store, sources, asked, dropping, downloads, kv, persist };
 }
@@ -99,14 +100,28 @@ describe('the replace prompt', () => {
     edit(store, CI);
     edit(store, RELEASE);
     sources.useSample('starter');
-    await settle();
-    expect(downloads.map(([name]) => name)).toEqual(['simulci-changes.patch']);
+    // The patch is made by the dialogs chunk, fetched on the answer.
+    await vi.waitFor(() => expect(downloads.map(([name]) => name)).toEqual(['simulci-changes.patch']));
     const patch = downloads[0]![1];
     expect(patch).toContain(`diff --git a/${CI} b/${CI}\n`);
     // Both sides of the BOM file's first line carry it; its CRLF is kept.
     expect(patch).toContain('-\uFEFFon: push\r\n+\uFEFF# edited\n+on: push\r\n');
     expect(patch).toContain(`diff --git a/${RELEASE} b/${RELEASE}\n`);
     expect(store.getState().source).toEqual({ kind: 'sample', name: 'starter' });
+  });
+
+  it('keeps the files when the patch cannot be made, and says so', async () => {
+    const { store, sources, downloads } = setup('patch', () => Promise.reject(new Error('offline')));
+    store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'folder', name: 'repo', readAt: 0 });
+    edit(store, CI);
+    sources.useSample('starter');
+    await vi.waitFor(() =>
+      expect(store.getState().notices.map((n) => n.text)).toEqual([
+        'The patch could not be made, so nothing was replaced: try again',
+      ]),
+    );
+    expect(downloads).toEqual([]);
+    expect(store.getState().source).toEqual({ kind: 'folder', name: 'repo', readAt: 0 });
   });
 
   it('asks only for edits a paste would overwrite: a paste of another file keeps the edited buffers', async () => {

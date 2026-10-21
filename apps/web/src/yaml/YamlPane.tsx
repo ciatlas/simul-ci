@@ -12,7 +12,7 @@ import {
   useState,
 } from 'react';
 import { useApp, useSession } from '../app/providers';
-import { MARK_LABEL } from '../graph/Mark';
+import { MARK_LABEL } from '../lib/words';
 import { planLabels } from '../panels/outline-tree';
 import { planIndex, resolveSelection, selectionOf } from '../plan/index';
 import {

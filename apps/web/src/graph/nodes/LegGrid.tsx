@@ -2,7 +2,7 @@ import type { NodeId } from '@simulci/engine';
 import { MARK } from '@simulci/engine/render';
 import type { MouseEvent } from 'react';
 import { cellAt, cellChars, clip, histogram, legTitle } from '../card';
-import { MARK_LABEL } from '../Mark';
+import { MARK_LABEL } from '../../lib/words';
 import { legGrid } from '../size';
 import type { LegCell } from '../types';
 

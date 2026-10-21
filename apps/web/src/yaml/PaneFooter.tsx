@@ -1,7 +1,7 @@
 import type { MouseEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useApp, useSession } from '../app/providers';
-import { togglePaneKeepingFocus } from '../app/shortcuts';
+import { togglePaneKeepingFocus } from '../app/panes';
 import { type SessionState, type Writable, writable } from '../state/store';
 import { indentOf } from './editing';
 import { convertLineEndings, downloadFile, markerLine } from './pane-edit';

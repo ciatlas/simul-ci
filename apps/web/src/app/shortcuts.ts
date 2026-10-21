@@ -3,10 +3,11 @@ import { gestures } from '../edit/gestures';
 import { viewport } from '../graph/commands';
 import { cardOf } from '../graph/navigate';
 import { planIndex, resolveSelection } from '../plan/index';
-import type { PanelTab, Prefs } from '../state/prefs';
+import type { PanelTab } from '../state/prefs';
 import { dirtyPaths, type SessionActions, type SessionState, type SessionStore } from '../state/store';
 import { historyCommand, letterOf } from '../lib/history-keys';
 import { caseAvailability } from '../testcase/case';
+import { type Pane, togglePaneKeepingFocus } from './panes';
 import { canSave } from './saver';
 
 /**
@@ -43,8 +44,6 @@ export type PageCommand =
   | 'step'
   | `panel:${PanelTab}`
   | `pane:${Pane}`;
-
-type Pane = keyof Prefs['collapsed'];
 
 /** What `keyFor` reads of a KeyboardEvent. */
 export interface PageKey {
@@ -262,22 +261,6 @@ function runEdit(command: PageCommand, s: SessionState & SessionActions, store?:
     return true;
   }
   return gestures.ask(store, (g) => (command === 'needs' ? g.needs() : g.palette()));
-}
-
-/**
- * Opens or closes a pane (`data-pane` in app/SimulateView.tsx). A pane that closes with the focus inside it first
- * hands the focus to the plan (`data-plan`), so the focus never drops to the page's body.
- */
-export function togglePaneKeepingFocus(
-  s: Pick<SessionState, 'ui'> & Pick<SessionActions, 'togglePane'>,
-  pane: Pane,
-  doc: Document = document,
-): void {
-  const open = !s.ui.prefs.collapsed[pane];
-  if (open && doc.querySelector(`[data-pane="${pane}"]`)?.contains(doc.activeElement)) {
-    doc.querySelector<HTMLElement>('[data-plan]')?.focus();
-  }
-  s.togglePane(pane);
 }
 
 /**

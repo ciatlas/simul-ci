@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createSaver, targetsOf } from '../src/app/saver';
+import { targetsOf } from '../src/app/save-targets';
+import { createSaver } from '../src/app/saver';
 import { readFolder } from '../src/input/folder';
 import { type Choice, type Choices, type DiskConflict, saveTo } from '../src/input/save';
 import { memoryStore } from '../src/lib/idb';
@@ -429,6 +430,23 @@ describe('saving to the folder', () => {
     expect(s().files.base[CI]).toBe('other\n');
     // The new files have no save to speak of.
     expect(s().saving).toBeUndefined();
+  });
+
+  it('asks for write access first even when the save’s code cannot be fetched, then writes nothing and says so', async () => {
+    const { fake, store } = await opened({ [CI]: 'a\n' });
+    const saver = createSaver({ store, now: () => 0, load: () => Promise.reject(new Error('offline')) });
+    edit(store, CI);
+    expect(await saver.save()).toBe(false);
+    expect(fake.calls).toEqual(['requestPermission']);
+    expect(dirtyPaths(store.getState().files)).toEqual([CI]);
+    expect(report(store)).toEqual({
+      status: 'done',
+      folder: 'repo',
+      at: 0,
+      files: [],
+      sentence: 'Saving to repo stopped: the page could not fetch the save; nothing was written',
+      open: false,
+    });
   });
 
   it('runs one save at a time', async () => {
