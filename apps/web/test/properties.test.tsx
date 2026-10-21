@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
+import catalog from '../src/catalog/catalog.json';
 import { Properties } from '../src/edit/property/Properties';
 import { createSessionStore, type SessionStore } from '../src/state/store';
 import { handle, initialState } from '../src/worker/handle';
@@ -206,6 +207,43 @@ describe('Properties', () => {
     ).toHaveLength(3);
     expect(rows.getByRole<HTMLInputElement>('textbox', { name: 'wait' }).placeholder).toBe('30');
     expect(rows.getByText('not an input of Deploy')).toBeTruthy();
+  });
+
+  it('offers a common action’s inputs from the catalog, warns of a required one not set, and pins it to its commit', async () => {
+    const upload = catalog.find((a) => a.uses === 'actions/upload-artifact')!;
+    const by = `actions/upload-artifact@${upload.ref}`;
+    const store = opened(
+      { [CI]: `on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ${by}\n` },
+      'build.#1',
+    );
+    const user = mount(store);
+    const rows = within(screen.getByRole('region', { name: 'With' }));
+    // The catalog's chunk comes in, then its rows.
+    const path = await rows.findByRole('textbox', { name: 'path' });
+    expect(path.closest('[class*="border-might"]')).toBeTruthy();
+    expect(rows.getByText(`required by ${by}, and not set`)).toBeTruthy();
+    expect(rows.getAllByRole('textbox', { name: /^(?!New key|Value of)/ })).toHaveLength(
+      upload.inputs.length,
+    );
+    // Setting it takes the warning away.
+    await user.type(path, 'dist{Enter}');
+    expect(text(store)).toContain(`      - uses: ${by}\n        with:\n          path: dist\n`);
+    expect(rows.queryByText(`required by ${by}, and not set`)).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Pin to SHA' }));
+    expect(text(store)).toContain(`      - uses: actions/upload-artifact@${upload.sha} # ${upload.ref}\n`);
+    expect(screen.getByText(`Pinned to ${upload.ref}`)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Pin to SHA' })).toBeNull();
+    expect(store.getState().edit.past.at(-1)?.label).toBe(
+      `Pin the action of build's step 1 to ${upload.ref}'s commit`,
+    );
+  });
+
+  it('offers no pin for a ref the catalog has no commit of, and says which it has', async () => {
+    const checkout = catalog.find((a) => a.uses === 'actions/checkout')!;
+    const store = opened({ [CI]: TEXT }, 'build.#1');
+    mount(store);
+    expect(await screen.findByText(`The catalog records the commit of ${checkout.ref} only`)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Pin to SHA' })).toBeNull();
   });
 
   it('says why a generated file takes no input, and Edit it anyway unlocks it', async () => {

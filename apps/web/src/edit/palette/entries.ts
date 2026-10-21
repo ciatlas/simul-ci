@@ -1,13 +1,22 @@
 import type { Outline } from '../../worker/protocol';
+import { type CatalogAction, catalogAction, mustSet, splitUses } from '../catalog';
 
 /**
- * The palette's entries (synthesis § 4.8), without the bundled catalog (C8): this repository's actions and callable
- * workflows from the Outline, every `uses:` the repository has with its count and the ref it uses most, and Run a
- * script. A step's entry writes `uses: <ref>` and nothing else; a reusable workflow's adds a job that calls it. Typed
- * text narrows every section; the sections keep their order, and Used here lists the commonest first.
+ * The palette's entries (synthesis § 4.8), in sections: this repository's actions and callable workflows from the
+ * Outline; every `uses:` the repository has, with its count and the ref it uses most; the bundled catalog's common
+ * actions at their refs, but those the repository already uses, whose ref wins; a typed `owner/repo[/path]@ref`, as
+ * written; and Run a script. A step's entry writes `uses: <ref>` and nothing else; a reusable workflow's adds a job
+ * that calls it. Typed text narrows every section; the sections keep their order, Used here lists the commonest first
+ * and the catalog keeps its own order, the commonest across GitHub first.
  */
 
-export const SECTIONS = { here: 'In this repository', used: 'Used here', write: 'Write your own' } as const;
+export const SECTIONS = {
+  here: 'In this repository',
+  used: 'Used here',
+  common: 'Common actions',
+  other: 'Other',
+  write: 'Write your own',
+} as const;
 
 export type Entry =
   | { kind: 'step'; key: string; section: string; label: string; detail?: string; uses: string }
@@ -22,32 +31,42 @@ export function paletteEntries(
   file: string,
   query: string,
   mode: PaletteMode,
+  catalog?: readonly CatalogAction[],
 ): Entry[] {
-  const all = [...local(outline, file), ...usedHere(outline), ...(mode === 'add' ? writeOwn() : [])];
+  const used = usedHere(outline, catalog);
+  const listed = [...local(outline, file), ...used, ...common(catalog, used)];
   const typed = query.trim().toLowerCase();
-  return all.filter(
-    (e) =>
-      (mode === 'add' || e.kind === 'step') &&
-      (typed === '' || `${e.label} ${e.detail ?? ''}`.toLowerCase().includes(typed)),
-  );
+  const shown = (e: Entry): boolean =>
+    (mode === 'add' || e.kind === 'step') &&
+    (typed === '' || `${e.label} ${e.detail ?? ''}`.toLowerCase().includes(typed));
+  return [
+    ...listed.filter(shown),
+    ...other(query.trim(), listed, mode),
+    ...(mode === 'add' ? writeOwn().filter(shown) : []),
+  ];
 }
 
 /** A local action's `uses:`, from its directory: `./.github/actions/setup`, the root's `./`. */
 export const localUses = (dir: string): string =>
   dir === '' || dir === '.' ? './' : `./${dir.replace(/\/+$/, '')}`;
 
+/** An action's name and how many inputs it needs set: `Setup · 1 required input`. */
+function described(
+  name: string | undefined,
+  inputs: readonly { required: boolean; default?: unknown }[],
+): string {
+  const required = inputs.filter(mustSet).length;
+  return [name, required > 0 ? `${required} required input${required === 1 ? '' : 's'}` : undefined]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 /** This repository's actions, then the workflows that may be called but this one, by path. */
 function local(outline: Outline | undefined, file: string): Entry[] {
   const actions = [...(outline?.actions ?? [])]
     .sort((a, b) => a.dir.localeCompare(b.dir))
     .map((a): Entry => {
-      const required = a.inputs.filter((i) => i.required).length;
-      const detail = [
-        a.name,
-        required > 0 ? `${required} required input${required === 1 ? '' : 's'}` : undefined,
-      ]
-        .filter(Boolean)
-        .join(' · ');
+      const detail = described(a.name, a.inputs);
       const uses = localUses(a.dir);
       const entry: Entry = { kind: 'step', key: `local:${uses}`, section: SECTIONS.here, label: uses, uses };
       if (detail) entry.detail = detail;
@@ -88,10 +107,10 @@ interface Used {
 
 /**
  * Every remote `uses:` of the repository's steps and jobs by `owner/repo[/path]`, with how often it is used and the
- * ref used most (the first written, on a tie), commonest first. Local ones are this repository's, listed above; a
- * `docker://` image is listed as written.
+ * ref used most (the first written, on a tie), commonest first, named as the catalog names it. Local ones are this
+ * repository's, listed above; a `docker://` image is listed as written.
  */
-export function usedHere(outline: Outline | undefined): Entry[] {
+export function usedHere(outline: Outline | undefined, catalog?: readonly CatalogAction[]): Entry[] {
   const used = new Map<string, Used>();
   const add = (uses: string, call: boolean): void => {
     if (uses.startsWith('./') || uses.includes('${{')) return;
@@ -113,7 +132,9 @@ export function usedHere(outline: Outline | undefined): Entry[] {
     .map((u) => {
       const ref = [...u.refs.entries()].sort((a, b) => b[1] - a[1])[0]![0];
       const uses = ref === '' ? u.name : `${u.name}@${ref}`;
-      const detail = `${u.count} ${u.count === 1 ? 'use' : 'uses'} here${u.refs.size > 1 ? `, ${u.refs.size} refs` : ''}`;
+      const count = `${u.count} ${u.count === 1 ? 'use' : 'uses'} here${u.refs.size > 1 ? `, ${u.refs.size} refs` : ''}`;
+      const known = catalogAction(catalog, u.name)?.name;
+      const detail = known ? `${known} · ${count}` : count;
       return u.call
         ? {
             kind: 'call',
@@ -126,6 +147,44 @@ export function usedHere(outline: Outline | undefined): Entry[] {
           }
         : { kind: 'step', key: `used:${u.name}`, section: SECTIONS.used, label: uses, detail, uses };
     });
+}
+
+/** The catalog's actions the repository does not use yet, at the catalog's refs, in its order. */
+function common(catalog: readonly CatalogAction[] | undefined, used: readonly Entry[]): Entry[] {
+  const taken = new Set(used.map((e) => ('uses' in e ? splitUses(e.uses).name.toLowerCase() : '')));
+  return (catalog ?? [])
+    .filter((a) => !taken.has(a.uses.toLowerCase()))
+    .map((a) => {
+      const uses = `${a.uses}@${a.ref}`;
+      const detail = described(a.name, a.inputs);
+      const entry: Entry = {
+        kind: 'step',
+        key: `catalog:${a.uses}`,
+        section: SECTIONS.common,
+        label: uses,
+        uses,
+      };
+      if (detail) entry.detail = detail;
+      return entry;
+    });
+}
+
+/** `owner/repo[/path]@ref`, as `uses:` names a remote action or reusable workflow. */
+const REMOTE = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+(?:\/[^\s@]+)?@[^\s@]+$/;
+const WORKFLOW = /^[^/]+\/[^/]+\/\.github\/workflows\/[^/@]+\.ya?ml@/;
+
+/**
+ * What the author typed, when it names a remote action (or, to add, a reusable workflow) that no entry above writes:
+ * inserted as written. Nothing is fetched, so nothing is known of its inputs.
+ */
+function other(typed: string, listed: readonly Entry[], mode: PaletteMode): Entry[] {
+  if (!REMOTE.test(typed) || listed.some((e) => 'uses' in e && e.uses === typed)) return [];
+  const detail = 'no interface known; inputs are free-form; remote interfaces arrive with M4';
+  if (!WORKFLOW.test(typed))
+    return [{ kind: 'step', key: 'other', section: SECTIONS.other, label: typed, detail, uses: typed }];
+  if (mode === 'change') return [];
+  const id = callId(splitUses(typed).name);
+  return [{ kind: 'call', key: 'other', section: SECTIONS.other, label: typed, detail, uses: typed, id }];
 }
 
 function writeOwn(): Entry[] {

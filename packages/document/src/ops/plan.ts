@@ -12,7 +12,7 @@ import { addJob, removeJob, setJobField, setWorkflowField } from './jobs';
 import { setMatrixDim, setMatrixEntry, setStrategyField } from './matrix';
 import { setNeeds } from './needs';
 import { renameJob, renameStepId } from './rename';
-import { addStep, moveStep, removeStep, setStepField } from './steps';
+import { addStep, moveStep, pinStepUses, removeStep, setStepField } from './steps';
 import {
   addEvent,
   removeEvent,
@@ -150,6 +150,7 @@ const PLANNERS: Record<Exclude<WorkflowOp['op'], 'createFile'>, Planner> = {
   removeStep,
   moveStep,
   setStepField,
+  pinStepUses,
   setMatrixDim,
   setMatrixEntry,
   setStrategyField,

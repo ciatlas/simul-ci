@@ -11,9 +11,11 @@ import { RefusalView } from '../Refusal';
 import { type Target, targetOf } from '../selection';
 import type { Refused } from '../types';
 import { MatrixEditor } from '../matrix/MatrixEditor';
+import { catalogAction, catalogInputs, splitUses, useCatalog } from '../catalog';
 import { PropertyField } from './Field';
 import { KeyValueRows } from './KeyValueRows';
 import { asText, type FieldSpec, jobFields, stepFields, workflowFields } from './model';
+import { PinToSha } from './Pin';
 import { PanelSteps } from '../steps/PanelSteps';
 import { EvaluatesTo, Needs, YamlRows } from './sections';
 import type { SessionTarget } from './session';
@@ -116,7 +118,14 @@ function Fields({ specs, target, doc, locked }: PartProps & { specs: FieldSpec[]
           {...(request?.field === spec.key ? { request } : {})}
           {...(spec.key === 'runs-on' ? { options } : {})}
           {...(spec.key === 'uses' && target.step
-            ? { after: <ChangeUses target={target} locked={locked} /> }
+            ? {
+                after: (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <ChangeUses target={target} locked={locked} />
+                    <PinToSha target={target} doc={doc} locked={locked} />
+                  </div>
+                ),
+              }
             : {})}
         />
       ))}
@@ -287,6 +296,10 @@ function StepProperties({ target, doc, locked }: PartProps) {
   const uses = doc.get([...at, 'uses'])?.value;
   const action = typeof uses === 'string';
   const local = action ? outline?.actions?.find((a) => a.dir === localPath(uses)) : undefined;
+  // A remote action's inputs come from the bundled catalog, as of the ref it records.
+  const remote = action && !local ? splitUses(uses) : undefined;
+  const { catalog } = useCatalog(remote?.ref !== undefined);
+  const known = remote?.ref === undefined ? undefined : catalogAction(catalog, remote.name);
   const id = doc.get([...at, 'id']);
   const session = { file: target.file, step: { job, index } };
   return (
@@ -318,7 +331,11 @@ function StepProperties({ target, doc, locked }: PartProps) {
             name,
             value,
           })}
-          {...(local ? { declared: { inputs: local.inputs, by: local.name ?? uses } } : {})}
+          {...(local
+            ? { declared: { inputs: local.inputs, by: local.name ?? uses } }
+            : known
+              ? { declared: { inputs: catalogInputs(known), by: `${known.uses}@${known.ref}` } }
+              : {})}
           locked={locked}
         />
       )}

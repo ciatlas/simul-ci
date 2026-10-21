@@ -126,6 +126,19 @@ describe('the chunk rules', () => {
     ]);
   });
 
+  it('keep the action catalog in a chunk of its own, holding it alone', () => {
+    const catalog = '../../src/catalog/catalog.json';
+    expect(chunkProblems('catalog-abc.js', [catalog])).toEqual([]);
+    expect(chunkProblems('catalog-abc.js', [catalog, '../../src/edit/catalog.ts'])).toEqual([
+      'catalog-abc.js holds ../../src/edit/catalog.ts: the catalog chunk holds catalog.json alone',
+    ]);
+    expect(chunkProblems('catalog-abc.js', ['../../src/edit/catalog.ts'])).toHaveLength(2);
+    for (const chunk of ['edit-abc.js', 'index-abc.js', 'engine.worker-abc.js'])
+      expect(chunkProblems(chunk, [catalog])).toContain(
+        `${chunk} holds ${catalog}, which only the catalog chunk may: import() it`,
+      );
+  });
+
   it('keep elkjs in the layout worker, and the engine and what it depends on out of it', () => {
     expect(chunkProblems('index-abc.js', [...PAGE, ELKJS])).toEqual([
       `index-abc.js holds ${ELKJS}, which only the layout worker may`,
@@ -169,11 +182,12 @@ describe('the web app as it builds', () => {
   }, 60_000);
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('splits the page, the YAML pane, the edit runtime, the dialogs and the two workers, and no chunk they share', () => {
+  it('splits the page, the YAML pane, the edit runtime, the dialogs, the catalog and the two workers, and no chunk they share', () => {
     // A module two lazy chunks share that the page does not hold goes to a chunk of its own, named after it; so does
     // the page's when rolldown cannot leave it there: a name outside this list is that.
     expect(chunks.map((f) => f.replace(/-[\w-]{8}\.js$/, '')).sort()).toEqual([
       'YamlPane',
+      'catalog',
       'dialogs',
       'edit',
       'engine.worker',
@@ -193,6 +207,29 @@ describe('the web app as it builds', () => {
     const code = readFileSync(join(dir, 'assets', page), 'utf8');
     expect(code).toContain(`import(\`./${edit}\`)`);
     expect(code).not.toMatch(new RegExp(`from\\s*["'\`]\\./${edit.replace('.', '\\.')}`));
+  });
+
+  it('puts the action catalog alone in its chunk, which the edit runtime loads only on demand', () => {
+    const catalog = chunks.find((f) => f.startsWith('catalog-'))!;
+    expect(sourcesOf(catalog)).toEqual([expect.stringMatching(/apps\/web\/src\/catalog\/catalog\.json$/)]);
+    const edit = readFileSync(
+      join(
+        dir,
+        'assets',
+        chunks.find((f) => f.startsWith('edit-'))!,
+      ),
+      'utf8',
+    );
+    expect(edit).toContain(`import(\`./${catalog}\`)`);
+    const page = readFileSync(
+      join(
+        dir,
+        'assets',
+        chunks.find((f) => f.startsWith('index-'))!,
+      ),
+      'utf8',
+    );
+    expect(page).not.toContain(catalog);
   });
 
   it('puts the Changes, save and test case dialogs, the diff, the patch and the folder writes in the dialogs chunk, which the page loads only on demand', () => {

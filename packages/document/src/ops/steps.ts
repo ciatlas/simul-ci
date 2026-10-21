@@ -137,6 +137,47 @@ export function setStepField(doc: WorkflowDocument, op: Op<'setStepField'>, shar
   return isRefusal(draft) ? draft : { ...draft, select: step };
 }
 
+/**
+ * A step's action pinned to a commit (synthesis § 4.8, Pin to SHA): its `uses:` written `<action>@<sha>` in place,
+ * with `# <tag>` as the line's comment, which replaces a comment already there (the tag a pin wrote before). Refused
+ * for a step without a remote action, and for a `uses:` that does not end its line (a flow map).
+ */
+export function pinStepUses(doc: WorkflowDocument, op: Op<'pinStepUses'>): Draft | Refusal {
+  const moved = checkStep(doc, op.job, op.index, op.fp);
+  if (moved) return moved;
+  const step = ['jobs', op.job, 'steps', op.index];
+  const path = [...step, 'uses'];
+  const uses = doc.get(path)?.value;
+  const at = typeof uses === 'string' && !uses.startsWith('./') ? uses.lastIndexOf('@') : -1;
+  if (at <= 0 || !/^[0-9a-f]{40}$/.test(op.sha) || /[\r\n]/.test(op.tag))
+    return refusals.unsupported(
+      doc.path,
+      path,
+      `${refusals.describe(step)} has no remote action to pin`,
+      doc.lineOf(path),
+    );
+  const draft = fieldDraft(doc, path, `${(uses as string).slice(0, at)}@${op.sha}`);
+  if (isRefusal(draft) || draft.edits.length === 0) return draft;
+  const [edit] = draft.edits;
+  const lines = doc.tree.lines;
+  const end = lines.breakAt(lines.lineAt(edit!.from));
+  const rest = /^([ \t]*)(#.*)?$/.exec(doc.text.slice(edit!.to, end));
+  if (draft.edits.length > 1 || edit!.insert.includes('\n') || !rest || edit!.to > end)
+    return refusals.unsupported(
+      doc.path,
+      path,
+      `the \`uses\` of ${refusals.describe(step)} shares its line with other keys`,
+      doc.lineOf(path),
+    );
+  // A comment already there keeps its column.
+  const gap = rest[2] === undefined ? ' ' : rest[1] || ' ';
+  return {
+    ...draft,
+    edits: [{ from: edit!.from, to: end, insert: `${edit!.insert}${gap}# ${op.tag}` }],
+    select: step,
+  };
+}
+
 /** Fields only one kind of step takes: a script's `shell` and `working-directory`, an action's `uses`. */
 const SCRIPT_FIELDS = new Set<string>(['run', 'shell', 'working-directory']);
 

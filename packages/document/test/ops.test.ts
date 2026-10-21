@@ -20,6 +20,9 @@ function fp(doc: WorkflowDocument, job: string, index: number): Fp {
 
 type Make = (doc: WorkflowDocument) => WorkflowOp;
 
+/** A commit an action's tag points at, as Pin to SHA writes it. */
+const SHA = '49933ea5288caeca8642d1e84afbd3f7d6820020';
+
 /** Op goldens on the app's starter sample, kept in `golden/ops/<name>.yml` and read by eye once. */
 const cases: [name: string, fixture: string, make: Make][] = [
   [
@@ -294,6 +297,32 @@ const cases: [name: string, fixture: string, make: Make][] = [
       value: 'bash',
     }),
   ],
+  [
+    'pin-step-uses',
+    'starter.yml',
+    (d) => ({
+      op: 'pinStepUses',
+      file: FILE,
+      job: 'test',
+      index: 1,
+      fp: fp(d, 'test', 1),
+      sha: SHA,
+      tag: 'v4',
+    }),
+  ],
+  [
+    'pin-step-uses-comment',
+    'comments.yml',
+    (d) => ({
+      op: 'pinStepUses',
+      file: FILE,
+      job: 'build',
+      index: 1,
+      fp: fp(d, 'build', 1),
+      sha: SHA,
+      tag: 'v4',
+    }),
+  ],
   ['dealias-op', 'shared.yml', () => ({ op: 'dealias', file: FILE, path: ['jobs', 'test', 'runs-on'] })],
   ['dealias-anchor-op', 'shared.yml', () => ({ op: 'dealiasAnchor', file: FILE, anchor: 'checkout' })],
 ];
@@ -513,6 +542,37 @@ describe('refusals of the job and step ops', () => {
           kind: 'secrets',
           name: 'A',
           value: 'x',
+        }),
+      ).reason,
+    ).toBe('unsupported-shape');
+  });
+
+  it('unsupported-shape: a pin of a script, of a local action, of a uses that does not end its line', () => {
+    const pin = (d: WorkflowDocument, job: string, index: number) =>
+      refused(
+        plan(d, { op: 'pinStepUses', file: FILE, job, index, fp: fp(d, job, index), sha: SHA, tag: 'v4' }),
+      );
+    expect(pin(doc, 'test', 2).message).toBe(
+      "test's step 3 has no remote action to pin; edit it in the YAML pane.",
+    );
+    const local = open(
+      'on: push\njobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: ./.github/actions/setup\n',
+    );
+    expect(pin(local, 'a', 0).reason).toBe('unsupported-shape');
+    const shapes = open(fixture('shapes.yml'));
+    expect(pin(shapes, 'flow-steps', 0).message).toBe(
+      "The `uses` of flow-steps's step 1 shares its line with other keys; edit it in the YAML pane.",
+    );
+    expect(
+      refused(
+        plan(doc, {
+          op: 'pinStepUses',
+          file: FILE,
+          job: 'test',
+          index: 0,
+          fp: fp(doc, 'test', 0),
+          sha: 'v4',
+          tag: 'v4',
         }),
       ).reason,
     ).toBe('unsupported-shape');

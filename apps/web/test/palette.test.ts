@@ -1,10 +1,12 @@
 /**
- * The palette's entries (synthesis § 4.8, without the catalog): this repository's actions by directory, then the
- * workflows that may be called but the one being edited; every remote `uses:` the repository has with its count and
- * the ref it uses most, commonest first; Run a script last. Typed text narrows each section and keeps their order;
- * changing a step's action offers actions alone.
+ * The palette's entries (synthesis § 4.8): this repository's actions by directory, then the workflows that may be
+ * called but the one being edited; every remote `uses:` the repository has with its count and the ref it uses most,
+ * commonest first; the bundled catalog's actions in its order, but those used here, whose ref wins; a typed
+ * `owner/repo@ref` as written; Run a script last. Typed text narrows each section and keeps their order; changing a
+ * step's action offers actions alone.
  */
 import { describe, expect, it } from 'vitest';
+import type { CatalogAction } from '../src/edit/catalog';
 import { callId, localUses, paletteEntries, SECTIONS, usedHere } from '../src/edit/palette/entries';
 import type { Outline, OutlineJob } from '../src/worker/protocol';
 
@@ -62,6 +64,27 @@ const OUTLINE: Outline = {
   ],
 };
 
+/** A catalog of three: two the outline uses (by another ref, in another case), one it does not, then another. */
+const CATALOG: CatalogAction[] = [
+  action('Actions/Checkout', 'v7', 'Checkout'),
+  action('actions/upload-artifact', 'v7', 'Upload a Build Artifact', [
+    { id: 'name', required: false, default: 'artifact' },
+    { id: 'path', required: true },
+    { id: 'retention-days', required: true, default: '0' },
+  ]),
+  action('actions/setup-node', 'v7', 'Setup Node.js environment'),
+  action('docker/login-action', 'v4', 'Docker Login'),
+];
+
+function action(
+  uses: string,
+  ref: string,
+  name: string,
+  inputs: CatalogAction['inputs'] = [],
+): CatalogAction {
+  return { uses, ref, sha: 'a'.repeat(40), name, inputs, outputs: [], license: 'MIT' };
+}
+
 const rows = (query = '', mode: 'add' | 'change' = 'add') =>
   paletteEntries(OUTLINE, CI, query, mode).map((e) => [e.section, e.label, e.detail ?? '']);
 
@@ -117,6 +140,54 @@ describe('the palette', () => {
 
   it('has Run a script alone in a repository with nothing to list', () => {
     expect(paletteEntries(undefined, CI, '', 'add').map((e) => e.label)).toEqual(['Run a script']);
+  });
+
+  it('lists the catalog’s actions after Used here, in its order, but those the repository uses, whose ref wins', () => {
+    const listed = paletteEntries(OUTLINE, CI, '', 'add', CATALOG)
+      .filter((e) => e.section === SECTIONS.used || e.section === SECTIONS.common)
+      .map((e) => [e.section, e.label, e.detail ?? '']);
+    expect(listed).toEqual([
+      [SECTIONS.used, 'actions/checkout@v4', 'Checkout · 3 uses here, 2 refs'],
+      [SECTIONS.used, 'actions/setup-node@v4', 'Setup Node.js environment · 2 uses here'],
+      [SECTIONS.used, 'actions/cache@v3', '1 use here'],
+      [SECTIONS.used, 'docker://alpine:3.20', '1 use here'],
+      [SECTIONS.used, 'org/shared/.github/workflows/release.yml@v2', '1 use here'],
+      [SECTIONS.common, 'actions/upload-artifact@v7', 'Upload a Build Artifact · 1 required input'],
+      [SECTIONS.common, 'docker/login-action@v4', 'Docker Login'],
+    ]);
+    const sections = paletteEntries(OUTLINE, CI, '', 'add', CATALOG).map((e) => e.section);
+    expect([...new Set(sections)]).toEqual([SECTIONS.here, SECTIONS.used, SECTIONS.common, SECTIONS.write]);
+  });
+
+  it('narrows the catalog by name too, and offers it when a step’s action changes', () => {
+    expect(
+      paletteEntries(OUTLINE, CI, 'artifact', 'add', CATALOG).map((e) => ('uses' in e ? e.uses : e.label)),
+    ).toEqual(['actions/upload-artifact@v7']);
+    expect(paletteEntries(OUTLINE, CI, 'login', 'change', CATALOG).map((e) => e.label)).toEqual([
+      'docker/login-action@v4',
+    ]);
+  });
+
+  it('offers a typed owner/repo@ref under Other, as written, unless an entry writes it', () => {
+    const typed = (query: string, mode: 'add' | 'change' = 'add') =>
+      paletteEntries(OUTLINE, CI, query, mode, CATALOG)
+        .filter((e) => e.section === SECTIONS.other)
+        .map((e) => [e.kind, 'uses' in e ? e.uses : undefined, 'id' in e ? e.id : undefined]);
+    expect(typed('  octo/tool/sub@v1.2 ')).toEqual([['step', 'octo/tool/sub@v1.2', undefined]]);
+    expect(typed('octo/tool@main', 'change')).toEqual([['step', 'octo/tool@main', undefined]]);
+    expect(typed('octo/ci/.github/workflows/lint.yml@v1')).toEqual([
+      ['call', 'octo/ci/.github/workflows/lint.yml@v1', 'lint'],
+    ]);
+    expect(typed('octo/ci/.github/workflows/lint.yml@v1', 'change')).toEqual([]);
+    expect(typed('actions/checkout@v4')).toEqual([]);
+    expect(typed('actions/upload-artifact@v7')).toEqual([]);
+    expect(typed('octo/tool')).toEqual([]);
+    expect(typed('not a ref@v1')).toEqual([]);
+    const other = paletteEntries(OUTLINE, CI, 'octo/run@v1', 'add', CATALOG);
+    expect(other.map((e) => e.section)).toEqual([SECTIONS.other]);
+    expect(other[0]!.detail).toBe(
+      'no interface known; inputs are free-form; remote interfaces arrive with M4',
+    );
   });
 
   it('names a local action’s uses by its directory, and a calling job by the file it calls', () => {
