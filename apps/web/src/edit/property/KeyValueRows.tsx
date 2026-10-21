@@ -2,7 +2,7 @@ import type { Fp, Json, WorkflowDocument, WorkflowOp, YamlPath } from '@simulci/
 import { useId, useState } from 'react';
 import { useApp } from '../../app/providers';
 import { control, monoControl } from '../../scenario/fields/kit';
-import type { OutlineInput } from '../../worker/protocol';
+import { type DeclaredInput, mustSet } from '../catalog';
 import { dispatch } from '../dispatch';
 import { RefusalNote } from '../Refusal';
 import { LineLink, PropertyField } from './Field';
@@ -12,9 +12,10 @@ import { fingerprintOf, type SessionTarget } from './session';
 /**
  * The pairs of a map Properties edits a key at a time (synthesis § 4.4): a job's `outputs` and `env`, a step's `with`
  * and `env`, a call's `with` and `secrets`. Each value is a field of its own; × removes its key, and the last row
- * adds one. Inputs an action or a reusable workflow declares come first, the required ones marked and their defaults
- * as placeholders; a key they do not declare says so. A map written as YAML a row cannot hold (an alias, a merge key,
- * flow over several lines) is shown with Edit in YAML.
+ * adds one. Inputs an action or a reusable workflow declares come first, with their descriptions, the required ones
+ * marked and their defaults as placeholders: a required input with no default that is not set is an amber row, which
+ * a value typed into it adds. A key they do not declare says so, and so does a deprecated input. A map written as
+ * YAML a row cannot hold (an alias, a merge key, flow over several lines) is shown with Edit in YAML.
  */
 
 export interface KeyValueRowsProps {
@@ -26,7 +27,7 @@ export interface KeyValueRowsProps {
   /** The op that sets one key, or removes it with `null`; a step's carries the fingerprint the gesture read. */
   op: (name: string, value: Json | null, fp?: Fp) => WorkflowOp;
   /** What may be passed: an action's or a reusable workflow's inputs, and who declares them. */
-  declared?: { inputs: readonly OutlineInput[]; by: string };
+  declared?: { inputs: readonly DeclaredInput[]; by: string };
   locked?: boolean;
 }
 
@@ -34,7 +35,7 @@ interface Row {
   name: string;
   /** Written in the file. */
   present: boolean;
-  input?: OutlineInput;
+  input?: DeclaredInput;
 }
 
 export function KeyValueRows({ title, target, doc, path, op, declared, locked }: KeyValueRowsProps) {
@@ -65,7 +66,7 @@ const multilineFlow = (map: { flow: boolean; source: string }): boolean =>
   map.flow && (map.source.includes('\n') || map.source.includes('#'));
 
 /** The keys written, in file order, then the declared ones not written: the required first. */
-function rowsOf(value: Json | undefined, inputs: readonly OutlineInput[] = []): Row[] {
+function rowsOf(value: Json | undefined, inputs: readonly DeclaredInput[] = []): Row[] {
   const written = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
   const byName = new Map(inputs.map((i) => [i.name.toLowerCase(), i]));
   const rows: Row[] = written.map((name) => {
@@ -109,8 +110,10 @@ function PairRow({
     const result = dispatch(store, op(row.name, null, fingerprintOf(store, target)));
     setRefusedSeq(result.ok ? undefined : result.refused.seq);
   };
+  const missing = row.input !== undefined && mustSet(row.input) && !row.present;
+  const description = row.input?.description;
   return (
-    <div className="flex flex-col gap-1">
+    <div className={`flex flex-col gap-1 ${missing ? 'border-might border-l-2 pl-1.5' : ''}`}>
       <div className="flex items-end gap-1.5">
         <div className="min-w-0 flex-1">
           <PropertyField spec={spec} target={target} doc={doc} locked={locked} />
@@ -126,7 +129,17 @@ function PairRow({
           </button>
         )}
       </div>
-      {row.input?.required && !row.present && <p className="text-muted text-xs">required by {by}</p>}
+      {description && (
+        <p className="truncate text-muted text-xs" title={description}>
+          {description}
+        </p>
+      )}
+      {missing ? (
+        <p className="text-might-text text-xs">required by {by}, and not set</p>
+      ) : (
+        row.input?.required && !row.present && <p className="text-muted text-xs">required by {by}</p>
+      )}
+      {row.input?.deprecated && row.present && <p className="text-might-text text-xs">deprecated by {by}</p>}
       {by && !row.input && <p className="text-might-text text-xs">not an input of {by}</p>}
       <RefusalNote seq={refusedSeq} />
     </div>

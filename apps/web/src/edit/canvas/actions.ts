@@ -4,6 +4,7 @@ import { listed } from '../../lib/words';
 import { planIndex, selectionOf } from '../../plan/index';
 import type { SessionStore } from '../../state/store';
 import type { Outline } from '../../worker/protocol';
+import { type CatalogAction, catalogAction } from '../catalog';
 import { type Dispatched, dispatch } from '../dispatch';
 import { documents } from '../documents';
 import { type Gestures, pendingEdges } from '../gestures';
@@ -249,15 +250,23 @@ function commonest(labels: readonly string[]): string {
   );
 }
 
-/** Checkout as this repository writes it (its commonest ref), else the current major. */
-export function checkoutOf(outline: Outline | undefined): string {
+/**
+ * Checkout as this repository writes it (its commonest ref), else at the bundled catalog's ref; none while the
+ * repository has none and the catalog is not in.
+ */
+export function checkoutOf(
+  outline: Outline | undefined,
+  catalog?: readonly CatalogAction[],
+): string | undefined {
   const counts = new Map<string, number>();
   for (const wf of outline?.workflows ?? [])
     for (const job of wf.jobs)
       for (const step of job.steps)
         if (step.uses?.startsWith('actions/checkout@'))
           counts.set(step.uses, (counts.get(step.uses) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'actions/checkout@v5';
+  const used = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const ref = catalogAction(catalog, 'actions/checkout')?.ref;
+  return used ?? (ref === undefined ? undefined : `actions/checkout@${ref}`);
 }
 
 /** The gestures the page asks for, answered on this store with this host's popovers and questions. */

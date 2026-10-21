@@ -5,11 +5,12 @@
  * needs lists the jobs that can be needed without a loop, adds the one picked with Enter, and takes the last need away
  * with Backspace in the empty input, asking first when an expression still reads it.
  */
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
+import catalog from '../src/catalog/catalog.json';
 import { AddJobPopover } from '../src/edit/canvas/AddJob';
 import { NeedsPopover } from '../src/edit/canvas/Needs';
 import type { Ask, GestureUi } from '../src/edit/canvas/ui';
@@ -42,10 +43,10 @@ jobs:
       - run: npm run lint
 `;
 
-function opened(): SessionStore {
+function opened(text = TEXT): SessionStore {
   const store = createSessionStore();
   const s = store.getState();
-  const files = { [CI]: TEXT };
+  const files = { [CI]: text };
   s.setFiles(files, { kind: 'folder', name: 'repo', readAt: 0 });
   const loaded = handle(initialState(), { id: 1, type: 'load', files });
   if (loaded.response.type !== 'loaded') throw new Error(JSON.stringify(loaded.response));
@@ -115,6 +116,21 @@ describe('Add job', () => {
     expect(text(store).indexOf('  e2e:')).toBeLessThan(text(store).indexOf('  deploy:'));
     expect(onClose).toHaveBeenCalled();
     expect(store.getState().edit.past.at(-1)?.label).toBe('Added job e2e after build');
+  });
+
+  it('takes Checkout’s ref from the catalog in a repository without one, adding the job once it is in', async () => {
+    const ref = catalog.find((a) => a.uses === 'actions/checkout')!.ref;
+    const store = opened(TEXT.replace('      - uses: actions/checkout@v4\n', ''));
+    const { user, onClose } = mount(store, 'build');
+    // Enter before the catalog's chunk is in: the job waits for its ref.
+    expect(screen.getByText('actions/checkout@…')).toBeTruthy();
+    await user.keyboard('{Enter}');
+    await waitFor(() =>
+      expect(text(store)).toContain(
+        `  job:\n    runs-on: macos-14\n    needs: build\n    steps:\n      - uses: actions/checkout@${ref}\n`,
+      ),
+    );
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('adds an independent job last, without a first step when Checkout is left out', async () => {

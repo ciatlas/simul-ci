@@ -1,8 +1,9 @@
-import { type FormEvent, useId, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useId, useMemo, useState } from 'react';
 import { useApp, useSession } from '../../app/providers';
 import { newestOutline } from '../../state/store';
 import { documents } from '../documents';
 import { RefusalNote } from '../Refusal';
+import { useCatalog } from '../catalog';
 import { addJob, checkoutOf, idProblem, offeredId, runsOnFor } from './actions';
 import type { GestureUi, Open } from './ui';
 import { AnchoredPopover } from './Popover';
@@ -12,9 +13,10 @@ const BUTTON = 'rounded border border-border px-2 py-1 text-xs hover:bg-chrome';
 
 /**
  * Add job (synthesis § 4.2), at the card it follows or the workflow's frame: an id offered free, the runner of the job
- * it follows, that job as its need, and a first step that checks the repository out, at the ref the repository uses.
- * Enter adds it; the new card is selected and takes the focus once it is drawn. An id that is not one, or is taken,
- * is said under the field before anything is written.
+ * it follows, that job as its need, and a first step that checks the repository out, at the ref the repository uses,
+ * else the bundled catalog's. Enter adds it (once the catalog's chunk is in, when its ref is the one to write); the new
+ * card is selected and takes the focus once it is drawn. An id that is not one, or is taken, is said under the field
+ * before anything is written.
  */
 export function AddJobPopover({
   open,
@@ -28,22 +30,23 @@ export function AddJobPopover({
   const { store } = useApp();
   // The text the gesture read: an op made from this form refuses `stale` once it moved.
   const [doc] = useState(() => documents(store).of(store.getState(), open.file));
-  const outline = useSession(newestOutline);
   const jobs = useMemo(() => doc?.jobs().map((j) => j.id) ?? [], [doc]);
   const [id, setId] = useState(() => (doc ? offeredId(doc) : 'job'));
   const [runsOn, setRunsOn] = useState(() => (doc ? runsOnFor(doc, open.after) : 'ubuntu-latest'));
   const [needs, setNeeds] = useState<string[]>(open.after === undefined ? [] : [open.after]);
   const [checkout, setCheckout] = useState(true);
-  const ref = useMemo(() => checkoutOf(outline), [outline]);
+  const ref = useCheckoutRef();
   const [refusedSeq, setRefusedSeq] = useState<number>();
   const problem = idProblem(id.trim(), jobs);
-  const submit = (e: FormEvent): void => {
-    e.preventDefault();
-    if (problem) return;
+  const add = useOnceKnown(ref, (at) => {
     const form = { id: id.trim(), runsOn, needs, ...(open.after === undefined ? {} : { after: open.after }) };
-    const result = addJob(store, ui, open, checkout ? { ...form, checkout: ref } : form);
+    const result = addJob(store, ui, open, checkout && at ? { ...form, checkout: at } : form);
     if (result.ok) onClose();
     else setRefusedSeq(result.refused.seq);
+  });
+  const submit = (e: FormEvent): void => {
+    e.preventDefault();
+    if (!problem) add(checkout);
   };
   const title = open.after === undefined ? 'Add a job' : `Add a job after ${open.after}`;
   return (
@@ -64,7 +67,7 @@ export function AddJobPopover({
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={checkout} onChange={(e) => setCheckout(e.target.checked)} />
           <span>
-            Start with Checkout <code className="font-mono text-muted">{ref}</code>
+            Start with Checkout <code className="font-mono text-muted">{ref ?? 'actions/checkout@…'}</code>
           </span>
         </label>
         <RefusalNote seq={refusedSeq} />
@@ -86,6 +89,32 @@ export function AddJobPopover({
 }
 
 /** The id, its text selected when the popover opens so typing replaces it, and why it cannot be one. */
+/** Checkout's ref: the repository's, else the catalog's once its chunk is in, else, if it failed, `v5`. */
+function useCheckoutRef(): string | undefined {
+  const outline = useSession(newestOutline);
+  const used = useMemo(() => checkoutOf(outline), [outline]);
+  const { catalog, failed } = useCatalog(used === undefined);
+  // The major that was current when the builder was written.
+  return used ?? checkoutOf(undefined, catalog) ?? (failed ? 'actions/checkout@v5' : undefined);
+}
+
+/**
+ * Runs `run` with `value` now, or, when it needs the value and the value is not known yet (Enter pressed before the
+ * catalog's chunk is in), once it is.
+ */
+function useOnceKnown<T>(
+  value: T | undefined,
+  run: (value: T | undefined) => void,
+): (needed: boolean) => void {
+  const [waiting, setWaiting] = useState(false);
+  useEffect(() => {
+    if (!waiting || value === undefined) return;
+    setWaiting(false);
+    run(value);
+  });
+  return (needed) => (needed && value === undefined ? setWaiting(true) : run(value));
+}
+
 function IdField({
   id,
   problem,

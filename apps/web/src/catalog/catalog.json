@@ -1,0 +1,5382 @@
+[
+  {
+    "uses": "actions/checkout",
+    "ref": "v7",
+    "sha": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "name": "Checkout",
+    "description": "Checkout a Git repository at a particular version",
+    "inputs": [
+      {
+        "id": "repository",
+        "required": false,
+        "default": "${{ github.repository }}",
+        "description": "Repository name with owner. For example, actions/checkout"
+      },
+      {
+        "id": "ref",
+        "required": false,
+        "description": "The branch, tag or SHA to checkout. When checking out the repository that triggered a workflow, this defaults to the reference or SHA for t…"
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "Personal access token (PAT) used to fetch the repository. The PAT is configured with the local git config, which enables your scripts to ru…"
+      },
+      {
+        "id": "ssh-key",
+        "required": false,
+        "description": "SSH key used to fetch the repository. The SSH key is configured with the local git config, which enables your scripts to run authenticated…"
+      },
+      {
+        "id": "ssh-known-hosts",
+        "required": false,
+        "description": "Known hosts in addition to the user and global host key database. The public SSH keys for a host may be obtained using the utility `ssh-key…"
+      },
+      {
+        "id": "ssh-strict",
+        "required": false,
+        "default": "true",
+        "description": "Whether to perform strict host key checking. When true, adds the options `StrictHostKeyChecking=yes` and `CheckHostIP=no` to the SSH comman…"
+      },
+      {
+        "id": "ssh-user",
+        "required": false,
+        "default": "git",
+        "description": "The user to use when connecting to the remote SSH host. By default 'git' is used."
+      },
+      {
+        "id": "persist-credentials",
+        "required": false,
+        "default": "true",
+        "description": "Whether to configure the token or SSH key with the local git config"
+      },
+      {
+        "id": "path",
+        "required": false,
+        "description": "Relative path under $GITHUB_WORKSPACE to place the repository"
+      },
+      {
+        "id": "clean",
+        "required": false,
+        "default": "true",
+        "description": "Whether to execute `git clean -ffdx && git reset --hard HEAD` before fetching"
+      },
+      {
+        "id": "filter",
+        "required": false,
+        "description": "Partially clone against a given filter. Overrides sparse-checkout if set."
+      },
+      {
+        "id": "sparse-checkout",
+        "required": false,
+        "description": "Do a sparse checkout on given patterns. Each pattern should be separated with new lines."
+      },
+      {
+        "id": "sparse-checkout-cone-mode",
+        "required": false,
+        "default": "true",
+        "description": "Specifies whether to use cone-mode when doing a sparse checkout."
+      },
+      {
+        "id": "fetch-depth",
+        "required": false,
+        "default": "1",
+        "description": "Number of commits to fetch. 0 indicates all history for all branches and tags."
+      },
+      {
+        "id": "fetch-tags",
+        "required": false,
+        "default": "false",
+        "description": "Whether to fetch tags, even if fetch-depth > 0."
+      },
+      {
+        "id": "show-progress",
+        "required": false,
+        "default": "true",
+        "description": "Whether to show progress status output when fetching."
+      },
+      {
+        "id": "lfs",
+        "required": false,
+        "default": "false",
+        "description": "Whether to download Git-LFS files"
+      },
+      {
+        "id": "submodules",
+        "required": false,
+        "default": "false",
+        "description": "Whether to checkout submodules: `true` to checkout submodules or `recursive` to recursively checkout submodules."
+      },
+      {
+        "id": "set-safe-directory",
+        "required": false,
+        "default": "true",
+        "description": "Add repository path as safe.directory for Git global config by running `git config --global --add safe.directory <path>`"
+      },
+      {
+        "id": "github-server-url",
+        "required": false,
+        "description": "The base URL for the GitHub instance that you are trying to clone from, will use environment defaults to fetch from the same instance that…"
+      },
+      {
+        "id": "allow-unsafe-pr-checkout",
+        "required": false,
+        "default": "false",
+        "description": "Required to check out fork pull request code from a workflow triggered by `pull_request_target` or `workflow_run`. These workflows run with…"
+      }
+    ],
+    "outputs": [
+      "ref",
+      "commit"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/setup-node",
+    "ref": "v7",
+    "sha": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+    "name": "Setup Node.js environment",
+    "description": "Setup a Node.js environment by adding problem matchers and optionally downloading and adding it to the PATH.",
+    "inputs": [
+      {
+        "id": "node-version",
+        "required": false,
+        "description": "Version Spec of the version to use. Examples: 12.x, 10.15.1, >=10.15.0."
+      },
+      {
+        "id": "node-version-file",
+        "required": false,
+        "description": "File containing the version Spec of the version to use.  Examples: package.json, .nvmrc, .node-version, .tool-versions, mise.toml."
+      },
+      {
+        "id": "architecture",
+        "required": false,
+        "description": "Target architecture for Node to use. Examples: x86, x64. Will use system architecture by default."
+      },
+      {
+        "id": "check-latest",
+        "required": false,
+        "default": "false",
+        "description": "Set this option if you want the action to check for the latest available version that satisfies the version spec."
+      },
+      {
+        "id": "registry-url",
+        "required": false,
+        "description": "Optional registry to set up for auth. Will set the registry in a project level .npmrc and .yarnrc file, and set up auth to read in from env…"
+      },
+      {
+        "id": "scope",
+        "required": false,
+        "description": "Optional scope for authenticating against scoped registries. Will fall back to the repository owner when using the GitHub Packages registry…"
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}",
+        "description": "Used to pull node distributions from node-versions. Since there's a default, this is typically not supplied by the user. When running this…"
+      },
+      {
+        "id": "cache",
+        "required": false,
+        "description": "Used to specify a package manager for caching in the default directory. Supported values: npm, yarn, pnpm."
+      },
+      {
+        "id": "package-manager-cache",
+        "required": false,
+        "default": "true",
+        "description": "Set to false to disable automatic caching. By default, caching is enabled when either devEngines.packageManager or the top-level packageMan…"
+      },
+      {
+        "id": "cache-dependency-path",
+        "required": false,
+        "description": "Used to specify the path to a dependency file: package-lock.json, yarn.lock, etc. Supports wildcards or a list of file names for caching mu…"
+      },
+      {
+        "id": "mirror",
+        "required": false,
+        "description": "Used to specify an alternative mirror to download Node.js binaries from"
+      },
+      {
+        "id": "mirror-token",
+        "required": false,
+        "description": "The token used as Authorization header when fetching from the mirror"
+      }
+    ],
+    "outputs": [
+      "cache-hit",
+      "cache-primary-key",
+      "cache-matched-key",
+      "node-version"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/upload-artifact",
+    "ref": "v7",
+    "sha": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+    "name": "Upload a Build Artifact",
+    "description": "Upload a build artifact that can be used by subsequent workflow steps",
+    "inputs": [
+      {
+        "id": "name",
+        "required": false,
+        "default": "artifact",
+        "description": "Artifact name. If the `archive` input is `false`, the name of the file uploaded will be the artifact name."
+      },
+      {
+        "id": "path",
+        "required": true,
+        "description": "A file, directory or wildcard pattern that describes what to upload."
+      },
+      {
+        "id": "if-no-files-found",
+        "required": false,
+        "default": "warn",
+        "description": "The desired behavior if no files are found using the provided path."
+      },
+      {
+        "id": "retention-days",
+        "required": false,
+        "description": "Duration after which artifact will expire in days. 0 means using default retention."
+      },
+      {
+        "id": "compression-level",
+        "required": false,
+        "default": "6",
+        "description": "The level of compression for Zlib to be applied to the artifact archive. The value can range from 0 to 9: - 0: No compression - 1: Best spe…"
+      },
+      {
+        "id": "overwrite",
+        "required": false,
+        "default": "false",
+        "description": "If true, an artifact with a matching name will be deleted before a new one is uploaded. If false, the action will fail if an artifact for t…"
+      },
+      {
+        "id": "include-hidden-files",
+        "required": false,
+        "default": "false",
+        "description": "If true, hidden files will be included in the artifact. If false, hidden files will be excluded from the artifact."
+      },
+      {
+        "id": "archive",
+        "required": false,
+        "default": "true",
+        "description": "If true, the artifact will be archived (zipped) before uploading. If false, the artifact will be uploaded as-is without archiving. When `ar…"
+      }
+    ],
+    "outputs": [
+      "artifact-id",
+      "artifact-url",
+      "artifact-digest"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/setup-python",
+    "ref": "v7",
+    "sha": "5fda3b95a4ea91299a34e894583c3862153e4b97",
+    "name": "Setup Python",
+    "description": "Set up a specific version of Python and add the command-line tools to the PATH.",
+    "inputs": [
+      {
+        "id": "python-version",
+        "required": false,
+        "description": "Version range or exact version of Python or PyPy to use, using SemVer's version range syntax. Reads from .python-version if unset."
+      },
+      {
+        "id": "python-version-file",
+        "required": false,
+        "description": "File containing the Python version to use. Example: .python-version"
+      },
+      {
+        "id": "cache",
+        "required": false,
+        "description": "Used to specify a package manager for caching in the default directory. Supported values: pip, pipenv, poetry."
+      },
+      {
+        "id": "architecture",
+        "required": false,
+        "description": "The target architecture (x86, x64, arm64) of the Python or PyPy interpreter."
+      },
+      {
+        "id": "check-latest",
+        "required": false,
+        "default": "false",
+        "description": "Set this option if you want the action to check for the latest available version that satisfies the version spec."
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}",
+        "description": "The token used to authenticate when fetching Python distributions from https://github.com/actions/python-versions. When running this action…"
+      },
+      {
+        "id": "cache-dependency-path",
+        "required": false,
+        "description": "Used to specify the path to dependency files. Supports wildcards or a list of file names for caching multiple dependencies."
+      },
+      {
+        "id": "update-environment",
+        "required": false,
+        "default": "true",
+        "description": "Set this option if you want the action to update environment variables."
+      },
+      {
+        "id": "allow-prereleases",
+        "required": false,
+        "default": "false",
+        "description": "When 'true', a version range passed to 'python-version' input will match prerelease versions if no GA versions are found. Only 'x.y' versio…"
+      },
+      {
+        "id": "freethreaded",
+        "required": false,
+        "default": "false",
+        "description": "When 'true', use the freethreaded version of Python."
+      },
+      {
+        "id": "pip-version",
+        "required": false,
+        "description": "Used to specify the version of pip to install with the Python. Supported format: major[.minor][.patch]."
+      }
+    ],
+    "outputs": [
+      "python-version",
+      "cache-hit",
+      "python-path"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/cache",
+    "ref": "v6",
+    "sha": "55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+    "name": "Cache",
+    "description": "Cache artifacts like dependencies and build outputs to improve workflow execution time",
+    "inputs": [
+      {
+        "id": "path",
+        "required": true,
+        "description": "A list of files, directories, and wildcard patterns to cache and restore"
+      },
+      {
+        "id": "key",
+        "required": true,
+        "description": "An explicit key for restoring and saving the cache"
+      },
+      {
+        "id": "restore-keys",
+        "required": false,
+        "description": "An ordered multiline string listing the prefix-matched keys, that are used for restoring stale cache if no cache hit occurred for key. Note…"
+      },
+      {
+        "id": "upload-chunk-size",
+        "required": false,
+        "description": "The chunk size used to split up large files during upload, in bytes"
+      },
+      {
+        "id": "enableCrossOsArchive",
+        "required": false,
+        "default": "false",
+        "description": "An optional boolean when enabled, allows windows runners to save or restore caches that can be restored or saved respectively on other plat…"
+      },
+      {
+        "id": "fail-on-cache-miss",
+        "required": false,
+        "default": "false",
+        "description": "Fail the workflow if cache entry is not found"
+      },
+      {
+        "id": "lookup-only",
+        "required": false,
+        "default": "false",
+        "description": "Check if a cache entry exists for the given input(s) (key, restore-keys) without downloading the cache"
+      },
+      {
+        "id": "save-always",
+        "required": false,
+        "default": "false",
+        "deprecated": true,
+        "description": "Run the post step to save the cache even if another step before fails"
+      }
+    ],
+    "outputs": [
+      "cache-hit"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/setup-java",
+    "ref": "v6",
+    "sha": "b843ebf9b913146b38da2eaa7aeddf76074ae1ad",
+    "name": "Setup Java JDK",
+    "description": "Set up a specific version of the Java JDK and add the command-line tools to the PATH",
+    "inputs": [
+      {
+        "id": "java-version",
+        "required": false,
+        "description": "The Java version to set up. Takes a whole or semver Java version, or the \"latest\" alias to use the newest available stable release. See exa…"
+      },
+      {
+        "id": "java-version-file",
+        "required": false,
+        "description": "The path to a file containing the Java version to set up (.java-version, .tool-versions, .sdkmanrc). Used when java-version is not set. See…"
+      },
+      {
+        "id": "distribution",
+        "required": false,
+        "description": "Java distribution. See the list of supported distributions in README file. This input is required except when java-version-file points to .…"
+      },
+      {
+        "id": "java-package",
+        "required": false,
+        "default": "jdk",
+        "description": "The package type (`jdk`, `jre`, `jdk+fx`, `jre+fx`, `jdk+crac`, `jre+crac`, `jdk+jmods`, `jdk+jcef`, `jre+jcef`, `jdk+ft`, or `jre+ft`). Su…"
+      },
+      {
+        "id": "architecture",
+        "required": false,
+        "description": "The architecture of the package (`x86`, `x64`, `armv7`, `aarch64`, `ppc64le`, `ppc64`, `riscv64`, or `s390x`). Aliases `ia32`, `amd64`, `ar…"
+      },
+      {
+        "id": "jdk-file",
+        "required": false,
+        "description": "Path to where the compressed JDK is located"
+      },
+      {
+        "id": "jdkFile",
+        "required": false,
+        "deprecated": true,
+        "description": "Deprecated alias for `jdk-file`. Path to where the compressed JDK is located. Use `jdk-file` instead; this alias may be removed in a future…"
+      },
+      {
+        "id": "check-latest",
+        "required": false,
+        "default": "false",
+        "description": "Set this option if you want the action to check for the latest available version that satisfies the version spec"
+      },
+      {
+        "id": "force-download",
+        "required": false,
+        "default": "false",
+        "description": "Set this option to always download Java and replace any matching version in the tool cache"
+      },
+      {
+        "id": "set-default",
+        "required": false,
+        "default": "true",
+        "description": "Set this option to false if you want to install a JDK but not make it the default. When false, JAVA_HOME and PATH are not updated, but JAVA…"
+      },
+      {
+        "id": "verify-signature",
+        "required": false,
+        "description": "Check downloaded Java package signatures when supported by the selected distribution. When omitted, failures produce warnings. Explicitly s…"
+      },
+      {
+        "id": "verify-signature-public-key",
+        "required": false,
+        "description": "One or more ASCII-armored GPG public keys used to verify downloaded package signatures. Concatenate multiple armored key blocks. Custom key…"
+      },
+      {
+        "id": "server-id",
+        "required": false,
+        "default": "github",
+        "description": "ID of the distributionManagement repository in the pom.xml file. Default is `github`"
+      },
+      {
+        "id": "server-username-env-var",
+        "required": false,
+        "description": "Environment variable name for the username for authentication to the Apache Maven repository. Default is $GITHUB_ACTOR"
+      },
+      {
+        "id": "server-username",
+        "required": false,
+        "description": "Deprecated alias for server-username-env-var"
+      },
+      {
+        "id": "server-password-env-var",
+        "required": false,
+        "description": "Environment variable name for password or token for authentication to the Apache Maven repository. Default is $GITHUB_TOKEN"
+      },
+      {
+        "id": "server-password",
+        "required": false,
+        "description": "Deprecated alias for server-password-env-var"
+      },
+      {
+        "id": "mvn-server-credentials",
+        "required": false,
+        "description": "Multiline list of Maven server credentials in the format `server-id:USERNAME_ENV:PASSWORD_ENV`. When set, replaces the single server config…"
+      },
+      {
+        "id": "mvn-server-repository-origins",
+        "required": false,
+        "description": "Multiline list of Maven credential origins in the format `server-id:repository-origin`. Each origin must belong to a configured server ID.…"
+      },
+      {
+        "id": "mvn-repositories",
+        "required": false,
+        "description": "Multiline list of Maven dependency repositories in the format `repository-id:repository-url:snapshots-enabled`."
+      },
+      {
+        "id": "mvn-plugin-repositories",
+        "required": false,
+        "description": "Multiline list of Maven plugin repositories in the format `repository-id:repository-url:snapshots-enabled`."
+      },
+      {
+        "id": "mvn-repositories-include-central",
+        "required": false,
+        "default": "true",
+        "description": "Include Maven Central for dependency and plugin repositories in the generated profile. When false, Central is disabled for both types unles…"
+      },
+      {
+        "id": "mvn-repositories-prioritize-central",
+        "required": false,
+        "default": "true",
+        "description": "Place Maven Central before custom dependency and plugin repositories. Has no effect when Maven Central is excluded or neither repository li…"
+      },
+      {
+        "id": "settings-path",
+        "required": false,
+        "description": "Path to where the settings.xml file will be written. Default is ~/.m2."
+      },
+      {
+        "id": "overwrite-settings",
+        "required": false,
+        "default": "true",
+        "description": "Overwrite the settings.xml file if it exists. Default is \"true\"."
+      },
+      {
+        "id": "gpg-private-key",
+        "required": false,
+        "default": "",
+        "description": "GPG private key to import into an isolated temporary keyring. Default is empty string."
+      },
+      {
+        "id": "gpg-passphrase-env-var",
+        "required": false,
+        "description": "Environment variable name for the GPG private key passphrase. Defaults to GPG_PASSPHRASE when gpg-private-key is set."
+      },
+      {
+        "id": "gpg-passphrase",
+        "required": false,
+        "description": "Deprecated alias for gpg-passphrase-env-var"
+      },
+      {
+        "id": "cache",
+        "required": false,
+        "description": "Name of the build platform to cache dependencies. It can be \"maven\", \"gradle\" or \"sbt\"."
+      },
+      {
+        "id": "cache-jdk",
+        "required": false,
+        "description": "Cache downloaded JDK installations between jobs. Defaults to enabled when dependency caching is configured with `cache`; set explicitly to…"
+      },
+      {
+        "id": "cache-dependency-path",
+        "required": false,
+        "description": "The path to a dependency file: pom.xml, build.gradle, build.sbt, etc. This option can be used with the `cache` option. If this option is om…"
+      },
+      {
+        "id": "cache-path",
+        "required": false,
+        "description": "The path to cache instead of the default dependency cache path for the selected package manager. This option can be used with the `cache` o…"
+      },
+      {
+        "id": "cache-read-only",
+        "required": false,
+        "default": "false",
+        "description": "Restore caches without saving cache changes in the post action."
+      },
+      {
+        "id": "job-status",
+        "required": false,
+        "default": "${{ job.status }}",
+        "description": "Workaround to pass job status to post job step. This variable is not intended for manual setting"
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}",
+        "description": "The token used to authenticate when fetching version manifests hosted on github.com, such as for the Microsoft Build of OpenJDK. When runni…"
+      },
+      {
+        "id": "mvn-toolchain-id",
+        "required": false,
+        "description": "Name of Maven Toolchain ID if the default name of \"${mvn-toolchain-vendor}_${java-version}\" is not wanted. The toolchain vendor defaults to…"
+      },
+      {
+        "id": "mvn-toolchain-vendor",
+        "required": false,
+        "description": "Name of Maven Toolchain Vendor if the default name of \"${distribution}\" is not wanted. See examples of supported syntax in Advanced Usage f…"
+      },
+      {
+        "id": "show-download-progress",
+        "required": false,
+        "default": "false",
+        "description": "Whether Maven should print artifact download/transfer progress to the build log. When \"false\" (default) the action sets \"-ntp\" (--no-transf…"
+      },
+      {
+        "id": "problem-matcher",
+        "required": false,
+        "default": "true",
+        "description": "Whether to register the Java problem matcher (compiler errors/warnings and uncaught exceptions). Set to \"false\" to disable annotations."
+      }
+    ],
+    "outputs": [
+      "distribution",
+      "version",
+      "path",
+      "cache-hit",
+      "cache-primary-key"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "docker/login-action",
+    "ref": "v4",
+    "sha": "dbcb813823bdd20940b903addbd779551569679f",
+    "name": "Docker Login",
+    "description": "GitHub Action to login against a Docker registry",
+    "inputs": [
+      {
+        "id": "registry",
+        "required": false,
+        "description": "Server address of Docker registry. If not set then will default to Docker Hub"
+      },
+      {
+        "id": "username",
+        "required": false,
+        "description": "Username used to log against the Docker registry"
+      },
+      {
+        "id": "password",
+        "required": false,
+        "description": "Password or personal access token used to log against the Docker registry"
+      },
+      {
+        "id": "ecr",
+        "required": false,
+        "description": "Specifies whether the given registry is ECR (auto, true or false)"
+      },
+      {
+        "id": "scope",
+        "required": false,
+        "description": "Scope for the authentication token"
+      },
+      {
+        "id": "logout",
+        "required": false,
+        "default": "true",
+        "description": "Log out from the Docker registry at the end of a job"
+      },
+      {
+        "id": "registry-auth",
+        "required": false,
+        "description": "Raw authentication to registries, defined as YAML objects"
+      }
+    ],
+    "outputs": [],
+    "license": "Apache-2.0"
+  },
+  {
+    "uses": "actions/download-artifact",
+    "ref": "v8",
+    "sha": "9000827ccba6bdab643e8b6fd33ac0654aef8333",
+    "name": "Download a Build Artifact",
+    "description": "Download a build artifact that was previously uploaded in the workflow by the upload-artifact action",
+    "inputs": [
+      {
+        "id": "name",
+        "required": false,
+        "description": "Name of the artifact to download. If unspecified, all artifacts for the run are downloaded."
+      },
+      {
+        "id": "artifact-ids",
+        "required": false,
+        "description": "IDs of the artifacts to download, comma-separated. Either inputs `artifact-ids` or `name` can be used, but not both."
+      },
+      {
+        "id": "path",
+        "required": false,
+        "description": "Destination path. Supports basic tilde expansion. Defaults to $GITHUB_WORKSPACE"
+      },
+      {
+        "id": "pattern",
+        "required": false,
+        "description": "A glob pattern matching the artifacts that should be downloaded. Ignored if name is specified."
+      },
+      {
+        "id": "merge-multiple",
+        "required": false,
+        "default": "false",
+        "description": "When multiple artifacts are matched, this changes the behavior of the destination directories. If true, the downloaded artifacts will be in…"
+      },
+      {
+        "id": "github-token",
+        "required": false,
+        "description": "The GitHub token used to authenticate with the GitHub API. This is required when downloading artifacts from a different repository or from…"
+      },
+      {
+        "id": "repository",
+        "required": false,
+        "default": "${{ github.repository }}",
+        "description": "The repository owner and the repository name joined together by \"/\". If github-token is specified, this is the repository that artifacts wi…"
+      },
+      {
+        "id": "run-id",
+        "required": false,
+        "default": "${{ github.run_id }}",
+        "description": "The id of the workflow run where the desired download artifact was uploaded from. If github-token is specified, this is the run that artifa…"
+      },
+      {
+        "id": "skip-decompress",
+        "required": false,
+        "default": "false",
+        "description": "If true, the downloaded artifact will not be automatically extracted/decompressed. This is useful when you want to handle the artifact as-i…"
+      },
+      {
+        "id": "digest-mismatch",
+        "required": false,
+        "default": "error",
+        "description": "The behavior when a downloaded artifact's digest does not match the expected digest. Options: ignore, info, warn, error. Default is error w…"
+      }
+    ],
+    "outputs": [
+      "download-path"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "docker/setup-buildx-action",
+    "ref": "v4",
+    "sha": "f87e5991a6d7451dcb8d9637bfbc97413f497069",
+    "name": "Docker Setup Buildx",
+    "description": "Set up Docker Buildx",
+    "inputs": [
+      {
+        "id": "version",
+        "required": false,
+        "description": "Buildx version. (eg. v0.3.0)"
+      },
+      {
+        "id": "driver",
+        "required": false,
+        "default": "docker-container",
+        "description": "Sets the builder driver to be used"
+      },
+      {
+        "id": "driver-opts",
+        "required": false,
+        "description": "List of additional driver-specific options. (eg. image=moby/buildkit:master)"
+      },
+      {
+        "id": "buildkitd-flags",
+        "required": false,
+        "description": "BuildKit daemon flags"
+      },
+      {
+        "id": "buildkitd-config",
+        "required": false,
+        "description": "BuildKit daemon config file"
+      },
+      {
+        "id": "buildkitd-config-inline",
+        "required": false,
+        "description": "Inline BuildKit daemon config"
+      },
+      {
+        "id": "use",
+        "required": false,
+        "default": "true",
+        "description": "Switch to this builder instance"
+      },
+      {
+        "id": "name",
+        "required": false,
+        "description": "Name of the builder. If not specified, one will be generated or if it already exists, it will be used instead of creating a new one."
+      },
+      {
+        "id": "endpoint",
+        "required": false,
+        "description": "Optional address for docker socket or context from `docker context ls`"
+      },
+      {
+        "id": "platforms",
+        "required": false,
+        "description": "Fixed platforms for current node. If not empty, values take priority over the detected ones"
+      },
+      {
+        "id": "append",
+        "required": false,
+        "description": "Append additional nodes to the builder"
+      },
+      {
+        "id": "keep-state",
+        "required": false,
+        "default": "false",
+        "description": "Keep BuildKit state on cleanup. This is only useful on persistent self-hosted runners."
+      },
+      {
+        "id": "cache-binary",
+        "required": false,
+        "default": "true",
+        "description": "Cache buildx binary to GitHub Actions cache backend"
+      },
+      {
+        "id": "cleanup",
+        "required": false,
+        "default": "true",
+        "description": "Cleanup temp files and remove builder at the end of a job"
+      }
+    ],
+    "outputs": [
+      "name",
+      "driver",
+      "platforms",
+      "nodes",
+      "endpoint",
+      "status",
+      "flags"
+    ],
+    "license": "Apache-2.0"
+  },
+  {
+    "uses": "docker/build-push-action",
+    "ref": "v7",
+    "sha": "c3c9e263c25d99ce0380d002d59b67737d91b0dc",
+    "name": "Build and push Docker images",
+    "description": "Build and push Docker images with Buildx",
+    "inputs": [
+      {
+        "id": "add-hosts",
+        "required": false,
+        "description": "List of a customs host-to-IP mapping (e.g., docker:10.180.0.1)"
+      },
+      {
+        "id": "allow",
+        "required": false,
+        "description": "List of extra privileged entitlement (e.g., network.host,security.insecure)"
+      },
+      {
+        "id": "annotations",
+        "required": false,
+        "description": "List of annotation to set to the image"
+      },
+      {
+        "id": "attests",
+        "required": false,
+        "description": "List of attestation parameters (e.g., type=sbom,generator=image)"
+      },
+      {
+        "id": "build-args",
+        "required": false,
+        "description": "List of build-time variables"
+      },
+      {
+        "id": "build-contexts",
+        "required": false,
+        "description": "List of additional build contexts (e.g., name=path)"
+      },
+      {
+        "id": "builder",
+        "required": false,
+        "description": "Builder instance"
+      },
+      {
+        "id": "cache-from",
+        "required": false,
+        "description": "List of external cache sources for buildx (e.g., user/app:cache, type=local,src=path/to/dir)"
+      },
+      {
+        "id": "cache-to",
+        "required": false,
+        "description": "List of cache export destinations for buildx (e.g., user/app:cache, type=local,dest=path/to/dir)"
+      },
+      {
+        "id": "call",
+        "required": false,
+        "description": "Set method for evaluating build (e.g., check)"
+      },
+      {
+        "id": "cgroup-parent",
+        "required": false,
+        "description": "Optional parent cgroup for the container used in the build"
+      },
+      {
+        "id": "context",
+        "required": false,
+        "description": "Build's context is the set of files located in the specified PATH or URL"
+      },
+      {
+        "id": "file",
+        "required": false,
+        "description": "Path to the Dockerfile"
+      },
+      {
+        "id": "labels",
+        "required": false,
+        "description": "List of metadata for an image"
+      },
+      {
+        "id": "load",
+        "required": false,
+        "default": "false",
+        "description": "Load is a shorthand for --output=type=docker"
+      },
+      {
+        "id": "network",
+        "required": false,
+        "description": "Set the networking mode for the RUN instructions during build"
+      },
+      {
+        "id": "no-cache",
+        "required": false,
+        "default": "false",
+        "description": "Do not use cache when building the image"
+      },
+      {
+        "id": "no-cache-filters",
+        "required": false,
+        "description": "Do not cache specified stages"
+      },
+      {
+        "id": "outputs",
+        "required": false,
+        "description": "List of output destinations (format: type=local,dest=path)"
+      },
+      {
+        "id": "platforms",
+        "required": false,
+        "description": "List of target platforms for build"
+      },
+      {
+        "id": "provenance",
+        "required": false,
+        "description": "Generate provenance attestation for the build (shorthand for --attest=type=provenance)"
+      },
+      {
+        "id": "pull",
+        "required": false,
+        "default": "false",
+        "description": "Always attempt to pull all referenced images"
+      },
+      {
+        "id": "push",
+        "required": false,
+        "default": "false",
+        "description": "Push is a shorthand for --output=type=registry"
+      },
+      {
+        "id": "sbom",
+        "required": false,
+        "description": "Generate SBOM attestation for the build (shorthand for --attest=type=sbom)"
+      },
+      {
+        "id": "secrets",
+        "required": false,
+        "description": "List of secrets to expose to the build (e.g., key=string, GIT_AUTH_TOKEN=mytoken)"
+      },
+      {
+        "id": "secret-envs",
+        "required": false,
+        "description": "List of secret env vars to expose to the build (e.g., key=envname, MY_SECRET=MY_ENV_VAR)"
+      },
+      {
+        "id": "secret-files",
+        "required": false,
+        "description": "List of secret files to expose to the build (e.g., key=filename, MY_SECRET=./secret.txt)"
+      },
+      {
+        "id": "shm-size",
+        "required": false,
+        "description": "Size of /dev/shm (e.g., 2g)"
+      },
+      {
+        "id": "ssh",
+        "required": false,
+        "description": "List of SSH agent socket or keys to expose to the build"
+      },
+      {
+        "id": "tags",
+        "required": false,
+        "description": "List of tags"
+      },
+      {
+        "id": "target",
+        "required": false,
+        "description": "Sets the target stage to build"
+      },
+      {
+        "id": "ulimit",
+        "required": false,
+        "description": "Ulimit options (e.g., nofile=1024:1024)"
+      },
+      {
+        "id": "github-token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "GitHub Token used to authenticate against a repository for Git context"
+      }
+    ],
+    "outputs": [
+      "imageid",
+      "digest",
+      "metadata"
+    ],
+    "license": "Apache-2.0"
+  },
+  {
+    "uses": "codecov/codecov-action",
+    "ref": "v7",
+    "sha": "303a32d7a59b442fa8d48b6a1cc6825c09c847a5",
+    "name": "Codecov",
+    "description": "GitHub Action that uploads coverage reports for your repository to codecov.io",
+    "inputs": [
+      {
+        "id": "base_sha",
+        "required": false,
+        "description": "The base SHA to select. This is only used in the \"pr-base-picking\" run command"
+      },
+      {
+        "id": "binary",
+        "required": false,
+        "description": "The file location of a pre-downloaded version of the CLI. If specified, integrity checking will be bypassed."
+      },
+      {
+        "id": "cleanup",
+        "required": false,
+        "default": "false",
+        "description": "If true, download the CLI into a temporary directory and clean it up after the run. Off by default to preserve legacy behavior of downloadi…"
+      },
+      {
+        "id": "codecov_yml_path",
+        "required": false,
+        "description": "The location of the codecov.yml file. This is crrently ONLY used for automated test selection (https://docs.codecov.com/docs/getting-starte…"
+      },
+      {
+        "id": "commit_parent",
+        "required": false,
+        "description": "SHA (with 40 chars) of what should be the parent of this commit."
+      },
+      {
+        "id": "directory",
+        "required": false,
+        "description": "Folder to search for coverage files. Default to the current working directory"
+      },
+      {
+        "id": "disable_file_fixes",
+        "required": false,
+        "default": "false",
+        "description": "Disable file fixes to ignore common lines from coverage (e.g. blank lines or empty brackets). Read more here https://docs.codecov.com/docs/…"
+      },
+      {
+        "id": "disable_search",
+        "required": false,
+        "default": "false",
+        "description": "Disable search for coverage files. This is helpful when specifying what files you want to upload with the files option."
+      },
+      {
+        "id": "disable_safe_directory",
+        "required": false,
+        "default": "false",
+        "description": "Disable setting safe directory. Set to true to disable."
+      },
+      {
+        "id": "disable_telem",
+        "required": false,
+        "default": "false",
+        "description": "Disable sending telemetry data to Codecov. Set to true to disable."
+      },
+      {
+        "id": "dry_run",
+        "required": false,
+        "default": "false",
+        "description": "Don't upload files to Codecov"
+      },
+      {
+        "id": "env_vars",
+        "required": false,
+        "description": "Environment variables to tag the upload with (e.g. PYTHON | OS,PYTHON)"
+      },
+      {
+        "id": "exclude",
+        "required": false,
+        "description": "Comma-separated list of folders to exclude from search."
+      },
+      {
+        "id": "fail_ci_if_error",
+        "required": false,
+        "default": "false",
+        "description": "On error, exit with non-zero code"
+      },
+      {
+        "id": "files",
+        "required": false,
+        "description": "Comma-separated list of explicit files to upload. These will be added to the coverage files found for upload. If you wish to only upload th…"
+      },
+      {
+        "id": "flags",
+        "required": false,
+        "description": "Comma-separated list of flags to upload to group coverage metrics."
+      },
+      {
+        "id": "force",
+        "required": false,
+        "description": "Only used for empty-upload run command"
+      },
+      {
+        "id": "git_service",
+        "required": false,
+        "default": "github",
+        "description": "Override the git_service (e.g. github_enterprise)"
+      },
+      {
+        "id": "gcov_args",
+        "required": false,
+        "description": "Extra arguments to pass to gcov"
+      },
+      {
+        "id": "gcov_executable",
+        "required": false,
+        "default": "gcov",
+        "description": "gcov executable to run. Defaults to 'gcov'"
+      },
+      {
+        "id": "gcov_ignore",
+        "required": false,
+        "description": "Paths to ignore during gcov gathering"
+      },
+      {
+        "id": "gcov_include",
+        "required": false,
+        "description": "Paths to include during gcov gathering"
+      },
+      {
+        "id": "handle_no_reports_found",
+        "required": false,
+        "default": "false",
+        "description": "If no coverage reports are found, do not raise an exception."
+      },
+      {
+        "id": "job_code",
+        "required": false
+      },
+      {
+        "id": "name",
+        "required": false,
+        "description": "Custom defined name of the upload. Visible in the Codecov UI"
+      },
+      {
+        "id": "network_filter",
+        "required": false,
+        "description": "Specify a filter on the files listed in the network section of the Codecov report. This will only add files whose path begin with the speci…"
+      },
+      {
+        "id": "network_prefix",
+        "required": false,
+        "description": "Specify a prefix on files listed in the network section of the Codecov report. Useful to help resolve path fixing."
+      },
+      {
+        "id": "os",
+        "required": false,
+        "description": "Override the assumed OS. Options available at cli.codecov.io"
+      },
+      {
+        "id": "override_branch",
+        "required": false,
+        "description": "Specify the branch to be displayed with this commit on Codecov"
+      },
+      {
+        "id": "override_build",
+        "required": false,
+        "description": "Specify the build number manually"
+      },
+      {
+        "id": "override_build_url",
+        "required": false,
+        "description": "The URL of the build where this is running"
+      },
+      {
+        "id": "override_commit",
+        "required": false,
+        "description": "Commit SHA (with 40 chars)"
+      },
+      {
+        "id": "override_pr",
+        "required": false,
+        "description": "Specify the pull request number manually. Used to override pre-existing CI environment variables."
+      },
+      {
+        "id": "plugins",
+        "required": false,
+        "description": "Comma-separated list of plugins to run. Specify `noop` to turn off all plugins"
+      },
+      {
+        "id": "recurse_submodules",
+        "required": false,
+        "default": "false",
+        "description": "Whether to enumerate files inside of submodules for path-fixing purposes. Off by default."
+      },
+      {
+        "id": "report_code",
+        "required": false,
+        "description": "The code of the report if using local upload. If unsure, leave default. Read more here https://docs.codecov.com/docs/the-codecov-cli#how-to…"
+      },
+      {
+        "id": "report_type",
+        "required": false,
+        "description": "The type of file to upload, coverage by default. Possible values are \"test_results\", \"coverage\"."
+      },
+      {
+        "id": "root_dir",
+        "required": false,
+        "description": "Root folder from which to consider paths on the network section. Defaults to current working directory."
+      },
+      {
+        "id": "run_command",
+        "required": false,
+        "default": "upload-coverage",
+        "description": "Choose which CLI command to run. Options are \"upload-coverage\", \"empty-upload\", \"pr-base-picking\", \"send-notifications\". \"upload-coverage\"…"
+      },
+      {
+        "id": "skip_validation",
+        "required": false,
+        "default": "false",
+        "description": "Skip integrity checking of the CLI. This is NOT recommended."
+      },
+      {
+        "id": "slug",
+        "required": false,
+        "description": "[Required when using the org token] Set to the owner/repo slug used instead of the private repo token. Only applicable to some Enterprise u…"
+      },
+      {
+        "id": "swift_project",
+        "required": false,
+        "description": "Specify the swift project name. Useful for optimization."
+      },
+      {
+        "id": "token",
+        "required": false,
+        "description": "Repository Codecov token. Used to authorize report uploads"
+      },
+      {
+        "id": "url",
+        "required": false,
+        "description": "Set to the Codecov instance URl. Used by Dedicated Enterprise Cloud customers."
+      },
+      {
+        "id": "use_legacy_upload_endpoint",
+        "required": false,
+        "default": "false",
+        "description": "Use the legacy upload endpoint."
+      },
+      {
+        "id": "use_oidc",
+        "required": false,
+        "default": "false",
+        "description": "Use OIDC instead of token. This will ignore any token supplied"
+      },
+      {
+        "id": "use_pypi",
+        "required": false,
+        "default": "false",
+        "description": "Use the pypi version of the CLI instead of from cli.codecov.io"
+      },
+      {
+        "id": "verbose",
+        "required": false,
+        "default": "false",
+        "description": "Enable verbose logging"
+      },
+      {
+        "id": "version",
+        "required": false,
+        "default": "latest",
+        "description": "Which version of the Codecov CLI to use (defaults to 'latest')"
+      },
+      {
+        "id": "working-directory",
+        "required": false,
+        "description": "Directory in which to execute codecov.sh"
+      }
+    ],
+    "outputs": [],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/setup-go",
+    "ref": "v7",
+    "sha": "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+    "name": "Setup Go environment",
+    "description": "Setup a Go environment and add it to the PATH",
+    "inputs": [
+      {
+        "id": "go-version",
+        "required": false,
+        "description": "The Go version to download (if necessary) and use. Supports semver spec and ranges. Be sure to enclose this option in single quotation mark…"
+      },
+      {
+        "id": "go-version-file",
+        "required": false,
+        "description": "Path to the go.mod, go.work, .go-version, or .tool-versions file."
+      },
+      {
+        "id": "check-latest",
+        "required": false,
+        "default": "false",
+        "description": "Set this option to true if you want the action to always check for the latest available version that satisfies the version spec"
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}",
+        "description": "Used to pull Go distributions from go-versions. Since there's a default, this is typically not supplied by the user. When running this acti…"
+      },
+      {
+        "id": "cache",
+        "required": false,
+        "default": "true",
+        "description": "Used to specify whether caching is needed. Set to true, if you'd like to enable caching."
+      },
+      {
+        "id": "cache-dependency-path",
+        "required": false,
+        "description": "Used to specify the path to a dependency file (e.g., go.mod, go.sum)"
+      },
+      {
+        "id": "architecture",
+        "required": false,
+        "description": "Target architecture for Go to use. Examples: x86, x64. Will use system architecture by default."
+      },
+      {
+        "id": "go-download-base-url",
+        "required": false,
+        "description": "Custom base URL for downloading Go distributions. Use this to download Go from a mirror or custom source. Defaults to \"https://go.dev/dl\".…"
+      }
+    ],
+    "outputs": [
+      "go-version",
+      "cache-hit"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/deploy-pages",
+    "ref": "v5",
+    "sha": "368f82528645a54fb793d4d04e342629a3f51346",
+    "name": "Deploy GitHub Pages site",
+    "description": "A GitHub Action to deploy an artifact as a GitHub Pages site",
+    "inputs": [
+      {
+        "id": "token",
+        "required": true,
+        "default": "${{ github.token }}",
+        "description": "GitHub token"
+      },
+      {
+        "id": "timeout",
+        "required": false,
+        "default": "600000",
+        "description": "Time in milliseconds after which to timeout and cancel the deployment (default: 10 minutes)"
+      },
+      {
+        "id": "error_count",
+        "required": false,
+        "default": "10",
+        "description": "Maximum number of status report errors before cancelling a deployment (default: 10)"
+      },
+      {
+        "id": "reporting_interval",
+        "required": false,
+        "default": "5000",
+        "description": "Initial time between deployment status reports; successful polls use capped backoff and jitter, with error backoff added separately (defaul…"
+      },
+      {
+        "id": "artifact_name",
+        "required": false,
+        "default": "github-pages",
+        "description": "Name of the artifact to deploy"
+      },
+      {
+        "id": "preview",
+        "required": false,
+        "default": "false",
+        "description": "Is this attempting to deploy a pull request as a GitHub Pages preview site? (NOTE: This feature is only in alpha currently and is not avail…"
+      }
+    ],
+    "outputs": [
+      "page_url"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/upload-pages-artifact",
+    "ref": "v5",
+    "sha": "fc324d3547104276b827a68afc52ff2a11cc49c9",
+    "name": "Upload GitHub Pages artifact",
+    "description": "A composite action that prepares your static assets to be deployed to GitHub Pages",
+    "inputs": [
+      {
+        "id": "name",
+        "required": false,
+        "default": "github-pages",
+        "description": "Artifact name"
+      },
+      {
+        "id": "path",
+        "required": true,
+        "default": "_site/",
+        "description": "Path of the directory containing the static assets."
+      },
+      {
+        "id": "retention-days",
+        "required": false,
+        "default": "1",
+        "description": "Duration after which artifact will expire in days."
+      },
+      {
+        "id": "include-hidden-files",
+        "required": false,
+        "default": "false",
+        "description": "Include hidden files and directories (those starting with a dot) in the artifact. Excludes .git and .github regardless."
+      }
+    ],
+    "outputs": [
+      "artifact_id"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "docker/setup-qemu-action",
+    "ref": "v4",
+    "sha": "99012661954931238ded8c8b007157a8430204e1",
+    "name": "Docker Setup QEMU",
+    "description": "Install QEMU static binaries",
+    "inputs": [
+      {
+        "id": "image",
+        "required": false,
+        "default": "docker.io/tonistiigi/binfmt:latest",
+        "description": "QEMU static binaries Docker image (e.g. tonistiigi/binfmt:latest)"
+      },
+      {
+        "id": "platforms",
+        "required": false,
+        "default": "all",
+        "description": "Platforms to install (e.g. arm64,riscv64,arm)"
+      },
+      {
+        "id": "reset",
+        "required": false,
+        "default": "false",
+        "description": "Uninstall current emulators before installation"
+      },
+      {
+        "id": "cache-image",
+        "required": false,
+        "default": "true",
+        "description": "Cache binfmt image to GitHub Actions cache backend"
+      }
+    ],
+    "outputs": [
+      "platforms"
+    ],
+    "license": "Apache-2.0"
+  },
+  {
+    "uses": "ruby/setup-ruby",
+    "ref": "v1",
+    "sha": "824c0e29fdfc7d689c191c27acc969d2d04b7dd8",
+    "name": "Setup Ruby, JRuby and TruffleRuby",
+    "description": "Download a prebuilt Ruby and add it to the PATH in 5 seconds",
+    "inputs": [
+      {
+        "id": "ruby-version",
+        "required": false,
+        "default": "default",
+        "description": "Engine and version to use, see the syntax in the README. Reads from .ruby-version, .tool-versions or mise.toml if unset."
+      },
+      {
+        "id": "rubygems",
+        "required": false,
+        "description": "The version of RubyGems to use. Either 'default' (the default), 'latest', or a version number (e.g., 3.3.5)."
+      },
+      {
+        "id": "bundler",
+        "required": false,
+        "description": "The version of Bundler to install. Either 'Gemfile.lock' (the default), 'default', 'latest', 'none', or a version number (e.g., 1, 2, 2.1,…"
+      },
+      {
+        "id": "bundler-cache",
+        "required": false,
+        "default": "false",
+        "description": "Run \"bundle install\", and cache the result automatically. Either true or false."
+      },
+      {
+        "id": "working-directory",
+        "required": false,
+        "description": "The working directory to use for resolving paths for .ruby-version, .tool-versions, mise.toml and Gemfile.lock."
+      },
+      {
+        "id": "cache-version",
+        "required": false,
+        "description": "Arbitrary string that will be added to the cache key of the bundler cache. Set or change it if you need"
+      },
+      {
+        "id": "self-hosted",
+        "required": false,
+        "description": "Consider the runner as a self-hosted runner, which means not using prebuilt Ruby binaries which only work"
+      },
+      {
+        "id": "windows-toolchain",
+        "required": false,
+        "description": "This input allows to override the default toolchain setup on Windows."
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}",
+        "description": "Used to authenticate with GitHub when downloading Ruby release assets."
+      }
+    ],
+    "outputs": [
+      "ruby-prefix"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "softprops/action-gh-release",
+    "ref": "v3",
+    "sha": "efb35369e0ad2afab669f228072c1b0d510eae64",
+    "name": "GH Release",
+    "description": "Github Action for creating Github Releases",
+    "inputs": [
+      {
+        "id": "body",
+        "required": false,
+        "description": "Note-worthy description of changes in release"
+      },
+      {
+        "id": "body_path",
+        "required": false,
+        "description": "Path to load note-worthy description of changes in release from"
+      },
+      {
+        "id": "name",
+        "required": false,
+        "description": "Gives the release a custom name. Defaults to tag name"
+      },
+      {
+        "id": "tag_name",
+        "required": false,
+        "description": "Gives a tag name. Defaults to github.ref_name. refs/tags/<name> values are normalized to <name>."
+      },
+      {
+        "id": "draft",
+        "required": false,
+        "description": "Keeps the release as a draft. Defaults to false. When reusing an existing draft release, set this to true to keep it draft; omit it to publ…"
+      },
+      {
+        "id": "prerelease",
+        "required": false,
+        "description": "Identify the release as a prerelease. Defaults to false"
+      },
+      {
+        "id": "preserve_order",
+        "required": false,
+        "description": "Upload artifacts sequentially in the provided order. This does not control the final display order GitHub uses for release assets."
+      },
+      {
+        "id": "files",
+        "required": false,
+        "description": "Newline-delimited list of path globs for asset files to upload. Escape glob metacharacters when matching literal filenames that contain the…"
+      },
+      {
+        "id": "working_directory",
+        "required": false,
+        "description": "Base directory to resolve 'files' globs against. Defaults to the workspace root used by the action step."
+      },
+      {
+        "id": "overwrite_files",
+        "required": false,
+        "default": "true",
+        "description": "Overwrite existing files with the same name. Defaults to true"
+      },
+      {
+        "id": "fail_on_unmatched_files",
+        "required": false,
+        "description": "Fails if any of the `files` globs match nothing. Defaults to false"
+      },
+      {
+        "id": "repository",
+        "required": false,
+        "description": "Repository to make releases against, in <owner>/<repo> format"
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "Authorized GitHub token or PAT. Defaults to github.token when omitted. A non-empty explicit token overrides GITHUB_TOKEN. Passing an empty…"
+      },
+      {
+        "id": "target_commitish",
+        "required": false,
+        "description": "Commitish value that determines where the Git tag is created from. Can be any branch or commit SHA. When creating a new tag for an older co…"
+      },
+      {
+        "id": "discussion_category_name",
+        "required": false,
+        "description": "If specified, a discussion of the specified category is created and linked to the release. The value must be a category that already exists…"
+      },
+      {
+        "id": "generate_release_notes",
+        "required": false,
+        "description": "Whether to automatically generate the name and body for this release. If name is specified, the specified name will be used; otherwise, a n…"
+      },
+      {
+        "id": "previous_tag",
+        "required": false,
+        "default": "",
+        "description": "Optional. When generate_release_notes is enabled, use this tag as GitHub's previous_tag_name comparison base. If omitted, GitHub chooses th…"
+      },
+      {
+        "id": "append_body",
+        "required": false,
+        "description": "Append to existing body instead of overwriting it. Default is false."
+      },
+      {
+        "id": "make_latest",
+        "required": false,
+        "description": "Specifies whether this release should be set as the latest release for the repository. Drafts and prereleases cannot be set as latest. Can…"
+      }
+    ],
+    "outputs": [
+      "url",
+      "id",
+      "upload_url",
+      "assets"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/github-script",
+    "ref": "v9",
+    "sha": "3a2844b7e9c422d3c10d287c895573f7108da1b3",
+    "name": "GitHub Script",
+    "description": "Run simple scripts using the GitHub client",
+    "inputs": [
+      {
+        "id": "script",
+        "required": true,
+        "description": "The script to run"
+      },
+      {
+        "id": "github-token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "The GitHub token used to create an authenticated client"
+      },
+      {
+        "id": "debug",
+        "required": false,
+        "default": "${{ runner.debug == '1' }}",
+        "description": "Whether to tell the GitHub client to log details of its requests. true or false. Default is to run in debug mode when the GitHub Actions st…"
+      },
+      {
+        "id": "user-agent",
+        "required": false,
+        "default": "actions/github-script",
+        "description": "An optional user-agent string"
+      },
+      {
+        "id": "previews",
+        "required": false,
+        "description": "A comma-separated list of GraphQL API previews to accept"
+      },
+      {
+        "id": "result-encoding",
+        "required": false,
+        "default": "json",
+        "description": "Either \"string\" or \"json\" (default \"json\")—how the result will be encoded"
+      },
+      {
+        "id": "retries",
+        "required": false,
+        "default": "0",
+        "description": "The number of times to retry a request"
+      },
+      {
+        "id": "retry-exempt-status-codes",
+        "required": false,
+        "default": "400,401,403,404,422",
+        "description": "A comma separated list of status codes that will NOT be retried e.g. \"400,500\". No effect unless `retries` is set"
+      },
+      {
+        "id": "base-url",
+        "required": false,
+        "description": "An optional GitHub REST API URL to connect to a different GitHub instance. For example, https://my.github-enterprise-server.com/api/v3"
+      }
+    ],
+    "outputs": [
+      "result"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/stale",
+    "ref": "v11",
+    "sha": "4391f3da665fdf50b6810c1a66712fb9ba21aa93",
+    "name": "Close Stale Issues",
+    "description": "Close issues and pull requests with no recent activity",
+    "inputs": [
+      {
+        "id": "repo-token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "Token for the repository. Can be passed in using `{{ secrets.GITHUB_TOKEN }}`."
+      },
+      {
+        "id": "stale-issue-message",
+        "required": false,
+        "description": "The message to post on the issue when tagging it. If none provided, will not mark issues stale."
+      },
+      {
+        "id": "stale-pr-message",
+        "required": false,
+        "description": "The message to post on the pull request when tagging it. If none provided, will not mark pull requests stale."
+      },
+      {
+        "id": "close-issue-message",
+        "required": false,
+        "description": "The message to post on the issue when closing it. If none provided, will not comment when closing an issue."
+      },
+      {
+        "id": "close-pr-message",
+        "required": false,
+        "description": "The message to post on the pull request when closing it. If none provided, will not comment when closing a pull requests."
+      },
+      {
+        "id": "days-before-stale",
+        "required": false,
+        "default": "60",
+        "description": "The number of days old an issue or a pull request can be before marking it stale. Set to -1 to never mark issues or pull requests as stale…"
+      },
+      {
+        "id": "days-before-issue-stale",
+        "required": false,
+        "description": "The number of days old an issue can be before marking it stale. Set to -1 to never mark issues as stale automatically. Override \"days-befor…"
+      },
+      {
+        "id": "days-before-pr-stale",
+        "required": false,
+        "description": "The number of days old a pull request can be before marking it stale. Set to -1 to never mark pull requests as stale automatically. Overrid…"
+      },
+      {
+        "id": "days-before-close",
+        "required": false,
+        "default": "7",
+        "description": "The number of days to wait to close an issue or a pull request after it being marked stale. Set to -1 to never close stale issues or pull r…"
+      },
+      {
+        "id": "days-before-issue-close",
+        "required": false,
+        "description": "The number of days to wait to close an issue after it being marked stale. Set to -1 to never close stale issues. Override \"days-before-clos…"
+      },
+      {
+        "id": "days-before-pr-close",
+        "required": false,
+        "description": "The number of days to wait to close a pull request after it being marked stale. Set to -1 to never close stale pull requests. Override \"day…"
+      },
+      {
+        "id": "stale-issue-label",
+        "required": false,
+        "default": "Stale",
+        "description": "The label to apply when an issue is stale."
+      },
+      {
+        "id": "close-issue-label",
+        "required": false,
+        "description": "The label to apply when an issue is closed."
+      },
+      {
+        "id": "exempt-issue-labels",
+        "required": false,
+        "default": "",
+        "description": "The labels that mean an issue is exempt from being marked stale. Separate multiple labels with commas (eg. \"label1,label2\")."
+      },
+      {
+        "id": "close-issue-reason",
+        "required": false,
+        "default": "not_planned",
+        "description": "The reason to use when closing an issue."
+      },
+      {
+        "id": "stale-pr-label",
+        "required": false,
+        "default": "Stale",
+        "description": "The label to apply when a pull request is stale."
+      },
+      {
+        "id": "close-pr-label",
+        "required": false,
+        "description": "The label to apply when a pull request is closed."
+      },
+      {
+        "id": "exempt-pr-labels",
+        "required": false,
+        "default": "",
+        "description": "The labels that mean a pull request is exempt from being marked as stale. Separate multiple labels with commas (eg. \"label1,label2\")."
+      },
+      {
+        "id": "exempt-milestones",
+        "required": false,
+        "default": "",
+        "description": "The milestones that mean an issue or a pull request is exempt from being marked as stale. Separate multiple milestones with commas (eg. \"mi…"
+      },
+      {
+        "id": "exempt-issue-milestones",
+        "required": false,
+        "default": "",
+        "description": "The milestones that mean an issue is exempt from being marked as stale. Separate multiple milestones with commas (eg. \"milestone1,milestone…"
+      },
+      {
+        "id": "exempt-pr-milestones",
+        "required": false,
+        "default": "",
+        "description": "The milestones that mean a pull request is exempt from being marked as stale. Separate multiple milestones with commas (eg. \"milestone1,mil…"
+      },
+      {
+        "id": "exempt-all-milestones",
+        "required": false,
+        "default": "false",
+        "description": "Exempt all issues and pull requests with milestones from being marked as stale. Default to false."
+      },
+      {
+        "id": "exempt-all-issue-milestones",
+        "required": false,
+        "default": "",
+        "description": "Exempt all issues with milestones from being marked as stale. Override \"exempt-all-milestones\" option regarding only the issues."
+      },
+      {
+        "id": "exempt-all-pr-milestones",
+        "required": false,
+        "default": "",
+        "description": "Exempt all pull requests with milestones from being marked as stale. Override \"exempt-all-milestones\" option regarding only the pull reques…"
+      },
+      {
+        "id": "only-labels",
+        "required": false,
+        "default": "",
+        "description": "Only issues or pull requests with all of these labels are checked if stale. Defaults to `` (disabled) and can be a comma-separated list of…"
+      },
+      {
+        "id": "any-of-labels",
+        "required": false,
+        "default": "",
+        "description": "Only issues or pull requests with at least one of these labels are checked if stale. Defaults to `` (disabled) and can be a comma-separated…"
+      },
+      {
+        "id": "any-of-issue-labels",
+        "required": false,
+        "default": "",
+        "description": "Only issues with at least one of these labels are checked if stale. Defaults to `` (disabled) and can be a comma-separated list of labels.…"
+      },
+      {
+        "id": "any-of-pr-labels",
+        "required": false,
+        "default": "",
+        "description": "Only pull requests with at least one of these labels are checked if stale. Defaults to `` (disabled) and can be a comma-separated list of l…"
+      },
+      {
+        "id": "only-issue-labels",
+        "required": false,
+        "default": "",
+        "description": "Only issues with all of these labels are checked if stale. Defaults to `[]` (disabled) and can be a comma-separated list of labels. Overrid…"
+      },
+      {
+        "id": "only-pr-labels",
+        "required": false,
+        "default": "",
+        "description": "Only pull requests with all of these labels are checked if stale. Defaults to `[]` (disabled) and can be a comma-separated list of labels.…"
+      },
+      {
+        "id": "operations-per-run",
+        "required": false,
+        "default": "30",
+        "description": "The maximum number of operations per run, used to control rate limiting (GitHub API CRUD related)."
+      },
+      {
+        "id": "remove-stale-when-updated",
+        "required": false,
+        "default": "true",
+        "description": "Remove stale labels from issues and pull requests when they are updated or commented on."
+      },
+      {
+        "id": "remove-issue-stale-when-updated",
+        "required": false,
+        "default": "",
+        "description": "Remove stale labels from issues when they are updated or commented on. Override \"remove-stale-when-updated\" option regarding only the issue…"
+      },
+      {
+        "id": "remove-pr-stale-when-updated",
+        "required": false,
+        "default": "",
+        "description": "Remove stale labels from pull requests when they are updated or commented on. Override \"remove-stale-when-updated\" option regarding only th…"
+      },
+      {
+        "id": "debug-only",
+        "required": false,
+        "default": "false",
+        "description": "Run the processor in debug mode without actually performing any operations on live issues."
+      },
+      {
+        "id": "ascending",
+        "required": false,
+        "default": "false",
+        "description": "The order to get issues or pull requests. Defaults to false, which is descending."
+      },
+      {
+        "id": "sort-by",
+        "required": false,
+        "default": "created",
+        "description": "What to sort results by. Valid options are `created`, `updated`, and `comments`. Defaults to `created`."
+      },
+      {
+        "id": "delete-branch",
+        "required": false,
+        "default": "false",
+        "description": "Delete the git branch after closing a stale pull request."
+      },
+      {
+        "id": "start-date",
+        "required": false,
+        "default": "",
+        "description": "The date used to skip the stale action on issue/pull request created before it (ISO 8601 or RFC 2822)."
+      },
+      {
+        "id": "exempt-assignees",
+        "required": false,
+        "default": "",
+        "description": "The assignees which exempt an issue or a pull request from being marked as stale. Separate multiple assignees with commas (eg. \"user1,user2…"
+      },
+      {
+        "id": "exempt-issue-assignees",
+        "required": false,
+        "default": "",
+        "description": "The assignees which exempt an issue from being marked as stale. Separate multiple assignees with commas (eg. \"user1,user2\"). Override \"exem…"
+      },
+      {
+        "id": "exempt-pr-assignees",
+        "required": false,
+        "default": "",
+        "description": "The assignees which exempt a pull request from being marked as stale. Separate multiple assignees with commas (eg. \"user1,user2\"). Override…"
+      },
+      {
+        "id": "exempt-all-assignees",
+        "required": false,
+        "default": "false",
+        "description": "Exempt all issues and pull requests with assignees from being marked as stale. Default to false."
+      },
+      {
+        "id": "exempt-all-issue-assignees",
+        "required": false,
+        "default": "",
+        "description": "Exempt all issues with assignees from being marked as stale. Override \"exempt-all-assignees\" option regarding only the issues."
+      },
+      {
+        "id": "exempt-all-pr-assignees",
+        "required": false,
+        "default": "",
+        "description": "Exempt all pull requests with assignees from being marked as stale. Override \"exempt-all-assignees\" option regarding only the pull requests."
+      },
+      {
+        "id": "exempt-draft-pr",
+        "required": false,
+        "default": "false",
+        "description": "Exempt draft pull requests from being marked as stale. Default to false."
+      },
+      {
+        "id": "enable-statistics",
+        "required": false,
+        "default": "true",
+        "description": "Display some statistics at the end regarding the stale workflow (only when the logs are enabled)."
+      },
+      {
+        "id": "labels-to-add-when-unstale",
+        "required": false,
+        "default": "",
+        "description": "A comma delimited list of labels to add when an issue or pull request becomes unstale."
+      },
+      {
+        "id": "labels-to-remove-when-stale",
+        "required": false,
+        "default": "",
+        "description": "A comma delimited list of labels to remove when an issue or pull request becomes stale."
+      },
+      {
+        "id": "labels-to-remove-when-unstale",
+        "required": false,
+        "default": "",
+        "description": "A comma delimited list of labels to remove when an issue or pull request becomes unstale."
+      },
+      {
+        "id": "ignore-updates",
+        "required": false,
+        "default": "false",
+        "description": "Any update (update/comment) can reset the stale idle time on the issues and pull requests."
+      },
+      {
+        "id": "ignore-issue-updates",
+        "required": false,
+        "default": "",
+        "description": "Any update (update/comment) can reset the stale idle time on the issues. Override \"ignore-updates\" option regarding only the issues."
+      },
+      {
+        "id": "ignore-pr-updates",
+        "required": false,
+        "default": "",
+        "description": "Any update (update/comment) can reset the stale idle time on the pull requests. Override \"ignore-updates\" option regarding only the pull re…"
+      },
+      {
+        "id": "include-only-assigned",
+        "required": false,
+        "default": "false",
+        "description": "Only the issues or the pull requests with an assignee will be marked as stale automatically."
+      },
+      {
+        "id": "only-issue-types",
+        "required": false,
+        "default": "",
+        "description": "Only issues with a matching type are processed as stale/closed. Defaults to `[]` (disabled) and can be a comma-separated list of issue type…"
+      }
+    ],
+    "outputs": [
+      "closed-issues-prs",
+      "staled-issues-prs"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/setup-dotnet",
+    "ref": "v6",
+    "sha": "a98b56852c35b8e3190ac28c8c2271da59106c68",
+    "name": "Setup .NET Core SDK",
+    "description": "Used to build and publish .NET source. Set up a specific version of the .NET and authentication to private NuGet repository",
+    "inputs": [
+      {
+        "id": "dotnet-version",
+        "required": false,
+        "description": "Optional SDK version(s) to use. If not provided, will install global.json version when available. Examples: 2.2.104, 3.1, 3.1.x, 3.x, 6.0.2…"
+      },
+      {
+        "id": "dotnet-quality",
+        "required": false,
+        "description": "Optional quality of the build. The possible values are: daily, preview, ga."
+      },
+      {
+        "id": "dotnet-channel",
+        "required": false,
+        "description": "Optional channel for the installation. The possible values are: STS, LTS, A.B (e.g. 8.0), A.B.Cxx (e.g. 8.0.1xx, available since 5.0). To b…"
+      },
+      {
+        "id": "global-json-file",
+        "required": false,
+        "description": "Optional global.json location, if your global.json isn't located in the root of the repo."
+      },
+      {
+        "id": "source-url",
+        "required": false,
+        "description": "Optional package source for which to set up authentication. Will consult any existing NuGet.config in the root of the repo and provide a te…"
+      },
+      {
+        "id": "owner",
+        "required": false,
+        "description": "Optional OWNER for using packages from GitHub Package Registry organizations/users other than the current repository's owner. Only used if…"
+      },
+      {
+        "id": "config-file",
+        "required": false,
+        "description": "Optional NuGet.config location, if your NuGet.config isn't located in the root of the repo."
+      },
+      {
+        "id": "cache",
+        "required": false,
+        "default": "false",
+        "description": "Optional input to enable caching of the NuGet global-packages folder"
+      },
+      {
+        "id": "cache-dependency-path",
+        "required": false,
+        "description": "Used to specify the path to a dependency file: packages.lock.json. Supports wildcards or a list of file names for caching multiple dependen…"
+      },
+      {
+        "id": "workloads",
+        "required": false,
+        "description": "Optional SDK workloads to install for additional platform support. Examples: wasm-tools, maui, aspire."
+      },
+      {
+        "id": "architecture",
+        "required": false,
+        "description": "Optional architecture for the .NET install. Supported values: x64, x86, arm64, amd64, arm, s390x, ppc64le, riscv64. If not set, the install…"
+      }
+    ],
+    "outputs": [
+      "cache-hit",
+      "dotnet-version"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "peter-evans/create-pull-request",
+    "ref": "v8",
+    "sha": "5f6978faf089d4d20b00c7766989d076bb2fc7f1",
+    "name": "Create Pull Request",
+    "description": "Creates a pull request for changes to your repository in the actions workspace",
+    "inputs": [
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "The token that the action will use to create and update the pull request."
+      },
+      {
+        "id": "branch-token",
+        "required": false,
+        "description": "The token that the action will use to create and update the branch. Defaults to the value of `token`."
+      },
+      {
+        "id": "path",
+        "required": false,
+        "description": "Relative path under $GITHUB_WORKSPACE to the repository. Defaults to $GITHUB_WORKSPACE."
+      },
+      {
+        "id": "add-paths",
+        "required": false,
+        "description": "A comma or newline-separated list of file paths to commit. Paths should follow git's pathspec syntax. Defaults to adding all new and modifi…"
+      },
+      {
+        "id": "commit-message",
+        "required": false,
+        "default": "[create-pull-request] automated change",
+        "description": "The message to use when committing changes."
+      },
+      {
+        "id": "committer",
+        "required": false,
+        "default": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>",
+        "description": "The committer name and email address in the format `Display Name <email@address.com>`. Defaults to the GitHub Actions bot user."
+      },
+      {
+        "id": "author",
+        "required": false,
+        "default": "${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>",
+        "description": "The author name and email address in the format `Display Name <email@address.com>`. Defaults to the user who triggered the workflow run."
+      },
+      {
+        "id": "signoff",
+        "required": false,
+        "default": "false",
+        "description": "Add `Signed-off-by` line by the committer at the end of the commit log message."
+      },
+      {
+        "id": "branch",
+        "required": false,
+        "default": "create-pull-request/patch",
+        "description": "The pull request branch name."
+      },
+      {
+        "id": "delete-branch",
+        "required": false,
+        "default": "false",
+        "description": "Delete the `branch` if it doesn't have an active pull request associated with it."
+      },
+      {
+        "id": "branch-suffix",
+        "required": false,
+        "description": "The branch suffix type when using the alternative branching strategy."
+      },
+      {
+        "id": "base",
+        "required": false,
+        "description": "The pull request base branch. Defaults to the branch checked out in the workflow."
+      },
+      {
+        "id": "push-to-fork",
+        "required": false,
+        "description": "A fork of the checked out parent repository to which the pull request branch will be pushed. e.g. `owner/repo-fork`. The pull request will…"
+      },
+      {
+        "id": "sign-commits",
+        "required": false,
+        "default": "false",
+        "description": "Sign commits as `github-actions[bot]` when using `GITHUB_TOKEN`, or your own bot when using GitHub App tokens."
+      },
+      {
+        "id": "title",
+        "required": false,
+        "default": "Changes by create-pull-request action",
+        "description": "The title of the pull request."
+      },
+      {
+        "id": "body",
+        "required": false,
+        "default": "Automated changes by [create-pull-request](https://github.com/peter-evans/create-pull-request) GitHub action",
+        "description": "The body of the pull request."
+      },
+      {
+        "id": "body-path",
+        "required": false,
+        "description": "The path to a file containing the pull request body. Takes precedence over `body`."
+      },
+      {
+        "id": "labels",
+        "required": false,
+        "description": "A comma or newline separated list of labels."
+      },
+      {
+        "id": "assignees",
+        "required": false,
+        "description": "A comma or newline separated list of assignees (GitHub usernames)."
+      },
+      {
+        "id": "reviewers",
+        "required": false,
+        "description": "A comma or newline separated list of reviewers (GitHub usernames) to request a review from."
+      },
+      {
+        "id": "team-reviewers",
+        "required": false,
+        "description": "A comma or newline separated list of GitHub teams to request a review from. Note that a `repo` scoped Personal Access Token (PAT) may be re…"
+      },
+      {
+        "id": "milestone",
+        "required": false,
+        "description": "The number of the milestone to associate the pull request with."
+      },
+      {
+        "id": "draft",
+        "required": false,
+        "default": "false",
+        "description": "Create a draft pull request. Valid values are `true` (only on create), `always-true` (on create and update), and `false`."
+      },
+      {
+        "id": "maintainer-can-modify",
+        "required": false,
+        "default": "true",
+        "description": "Indicates whether maintainers can modify the pull request."
+      }
+    ],
+    "outputs": [
+      "pull-request-number",
+      "pull-request-url",
+      "pull-request-operation",
+      "pull-request-head-sha",
+      "pull-request-branch"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/configure-pages",
+    "ref": "v6",
+    "sha": "45bfe0192ca1faeb007ade9deae92b16b8254a0d",
+    "name": "Configure GitHub Pages",
+    "description": "A GitHub Action to enable Pages, extract various metadata about a site, and configure some supported static site generators.",
+    "inputs": [
+      {
+        "id": "static_site_generator",
+        "required": false,
+        "description": "Optional static site generator to attempt to configure: \"nuxt\", \"next\", \"gatsby\", or \"sveltekit\""
+      },
+      {
+        "id": "generator_config_file",
+        "required": false,
+        "description": "Optional file path to static site generator configuration file"
+      },
+      {
+        "id": "token",
+        "required": true,
+        "default": "${{ github.token }}",
+        "description": "GitHub token"
+      },
+      {
+        "id": "enablement",
+        "required": false,
+        "default": "false",
+        "description": "Try to enable Pages for the repository if it is not already enabled. This option requires a token other than `GITHUB_TOKEN` to be provided.…"
+      }
+    ],
+    "outputs": [
+      "base_url",
+      "origin",
+      "host",
+      "base_path"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "docker/metadata-action",
+    "ref": "v6",
+    "sha": "dc802804100637a589fabce1cb79ff13a1411302",
+    "name": "Docker Metadata action",
+    "description": "GitHub Action to extract metadata (tags, labels) for Docker",
+    "inputs": [
+      {
+        "id": "context",
+        "required": true,
+        "default": "workflow",
+        "description": "Where to get context data. Allowed options are \"workflow\"  (default), \"git\"."
+      },
+      {
+        "id": "images",
+        "required": false,
+        "description": "List of Docker images to use as base name for tags"
+      },
+      {
+        "id": "tags",
+        "required": false,
+        "description": "List of tags as key-value pair attributes"
+      },
+      {
+        "id": "flavor",
+        "required": false,
+        "description": "Flavors to apply"
+      },
+      {
+        "id": "labels",
+        "required": false,
+        "description": "List of custom labels"
+      },
+      {
+        "id": "annotations",
+        "required": false,
+        "description": "List of custom annotations"
+      },
+      {
+        "id": "sep-tags",
+        "required": false,
+        "description": "Separator to use for tags output (default \\n)"
+      },
+      {
+        "id": "sep-labels",
+        "required": false,
+        "description": "Separator to use for labels output (default \\n)"
+      },
+      {
+        "id": "sep-annotations",
+        "required": false,
+        "description": "Separator to use for annotations output (default \\n)"
+      },
+      {
+        "id": "bake-target",
+        "required": false,
+        "description": "Bake target name (default docker-metadata-action)"
+      },
+      {
+        "id": "github-token",
+        "required": true,
+        "default": "${{ github.token }}",
+        "description": "GitHub Token as provided by secrets"
+      }
+    ],
+    "outputs": [
+      "version",
+      "tags",
+      "tag-names",
+      "labels",
+      "annotations",
+      "json",
+      "bake-file-tags",
+      "bake-file-labels",
+      "bake-file-annotations",
+      "bake-file"
+    ],
+    "license": "Apache-2.0"
+  },
+  {
+    "uses": "actions/labeler",
+    "ref": "v7",
+    "sha": "bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13",
+    "name": "Labeler",
+    "description": "Automatically label new pull requests based on the paths of files being changed",
+    "inputs": [
+      {
+        "id": "repo-token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "The GitHub token used to manage labels"
+      },
+      {
+        "id": "configuration-path",
+        "required": false,
+        "default": ".github/labeler.yml",
+        "description": "The path for the label configurations"
+      },
+      {
+        "id": "sync-labels",
+        "required": false,
+        "default": "false",
+        "description": "Whether or not to remove labels when matching files are reverted"
+      },
+      {
+        "id": "dot",
+        "required": false,
+        "default": "true",
+        "description": "Whether or not to auto-include paths starting with dot (e.g. `.github`)"
+      },
+      {
+        "id": "pr-number",
+        "required": false,
+        "description": "The pull request number(s)"
+      }
+    ],
+    "outputs": [
+      "new-labels",
+      "all-labels"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "stefanzweifel/git-auto-commit-action",
+    "ref": "v7",
+    "sha": "4a55954c782fc1ea30b9056cd3e7a2b40ca8887d",
+    "name": "Git Auto Commit",
+    "description": "Automatically commits files which have been changed during the workflow run and push changes back to remote repository.",
+    "inputs": [
+      {
+        "id": "commit_message",
+        "required": false,
+        "default": "Apply automatic changes",
+        "description": "Commit message"
+      },
+      {
+        "id": "branch",
+        "required": false,
+        "default": "${{ github.head_ref }}",
+        "description": "Git branch name, where changes should be pushed too. Required if Action is used on the `pull_request` event"
+      },
+      {
+        "id": "commit_options",
+        "required": false,
+        "default": "",
+        "description": "Commit options (eg. --no-verify)"
+      },
+      {
+        "id": "add_options",
+        "required": false,
+        "default": "",
+        "description": "Add options (eg. -u)"
+      },
+      {
+        "id": "status_options",
+        "required": false,
+        "default": "",
+        "description": "Status options (eg. --untracked-files=no)"
+      },
+      {
+        "id": "file_pattern",
+        "required": false,
+        "default": ".",
+        "description": "File pattern used for `git add` and the dirty-check (`git status`). Supports multiple space-separated patterns. For example `src/*.js`"
+      },
+      {
+        "id": "repository",
+        "required": false,
+        "default": ".",
+        "description": "Relative file path under $GITHUB_WORKSPACE to the git repository. Defaults to the current directory (`.`)"
+      },
+      {
+        "id": "commit_user_name",
+        "required": false,
+        "default": "github-actions[bot]",
+        "description": "Name used for the commit user"
+      },
+      {
+        "id": "commit_user_email",
+        "required": false,
+        "default": "41898282+github-actions[bot]@users.noreply.github.com",
+        "description": "Email address used for the commit user"
+      },
+      {
+        "id": "commit_author",
+        "required": false,
+        "default": "${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>",
+        "description": "Value used for the commit author. Defaults to the username of whoever triggered this workflow run."
+      },
+      {
+        "id": "tag_name",
+        "required": false,
+        "default": "",
+        "description": "Tag name used for creating a new git tag with the commit. Keep this empty, if no tag should be created."
+      },
+      {
+        "id": "tagging_message",
+        "required": false,
+        "default": "",
+        "description": "Tagging message used for creating a new git tag with the commit. Keep this empty, if no tag should be created."
+      },
+      {
+        "id": "push_options",
+        "required": false,
+        "default": "",
+        "description": "Push options (eg. --force)"
+      },
+      {
+        "id": "skip_dirty_check",
+        "required": false,
+        "default": "false",
+        "description": "Skip the check if the git repository is dirty and always try to create a commit."
+      },
+      {
+        "id": "skip_fetch",
+        "required": false,
+        "default": "false",
+        "description": "Skip the call to git-fetch."
+      },
+      {
+        "id": "skip_checkout",
+        "required": false,
+        "default": "false",
+        "description": "Skip the call to git-checkout."
+      },
+      {
+        "id": "skip_push",
+        "required": false,
+        "default": "false",
+        "description": "Skip the call to git-push."
+      },
+      {
+        "id": "disable_globbing",
+        "required": false,
+        "default": "false",
+        "description": "Stop the shell from expanding filenames (https://www.gnu.org/software/bash/manual/html_node/Filename-Expansion.html)"
+      },
+      {
+        "id": "create_branch",
+        "required": false,
+        "default": "false",
+        "description": "Create new branch with the name of `branch`-input in local and remote repository, if it doesn't exist yet."
+      },
+      {
+        "id": "create_git_tag_only",
+        "required": false,
+        "default": "false",
+        "description": "Perform a clean git tag and push, without commiting anything"
+      },
+      {
+        "id": "before_add_hook",
+        "required": false,
+        "default": "",
+        "description": "Shell snippet to run before `git add`."
+      },
+      {
+        "id": "after_add_hook",
+        "required": false,
+        "default": "",
+        "description": "Shell snippet to run after `git add`."
+      },
+      {
+        "id": "before_commit_hook",
+        "required": false,
+        "default": "",
+        "description": "Shell snippet to run before `git commit`."
+      },
+      {
+        "id": "after_commit_hook",
+        "required": false,
+        "default": "",
+        "description": "Shell snippet to run after `git commit`."
+      },
+      {
+        "id": "before_tag_hook",
+        "required": false,
+        "default": "",
+        "description": "Shell snippet to run before `git tag` is created."
+      },
+      {
+        "id": "after_tag_hook",
+        "required": false,
+        "default": "",
+        "description": "Shell snippet to run after `git tag` is created."
+      },
+      {
+        "id": "before_push_hook",
+        "required": false,
+        "default": "",
+        "description": "Shell snippet to run before `git push`."
+      },
+      {
+        "id": "after_push_hook",
+        "required": false,
+        "default": "",
+        "description": "Shell snippet to run after `git push`."
+      },
+      {
+        "id": "disable_pull_request_target_trigger_warning",
+        "required": false,
+        "default": "false",
+        "description": "Suppress the security warning emitted when the action runs on a `pull_request_target` event."
+      },
+      {
+        "id": "internal_git_binary",
+        "required": false,
+        "default": "git",
+        "description": "Internal use only! Path to git binary used to check if git is available. (Don't change this!)"
+      }
+    ],
+    "outputs": [
+      "changes_detected",
+      "commit_hash",
+      "create_git_tag_only"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "aws-actions/configure-aws-credentials",
+    "ref": "v6",
+    "sha": "e1253824e5c10ff9df46874f81ed3ec929e19cfd",
+    "name": "\"Configure AWS Credentials\" Action for GitHub Actions",
+    "description": "Configures AWS credentials for use in subsequent steps in a GitHub Action workflow",
+    "inputs": [
+      {
+        "id": "aws-region",
+        "required": true,
+        "description": "AWS Region, e.g. us-east-2"
+      },
+      {
+        "id": "aws-profile",
+        "required": false,
+        "description": "Name of the AWS profile to configure. When provided, credentials are written to ~/.aws/credentials and ~/.aws/config files instead of env v…"
+      },
+      {
+        "id": "overwrite-aws-profile",
+        "required": false,
+        "description": "Overwrite the given AWS profile if it already exists. Requires aws-profile. When set to false or not set, an error will be thrown if the pr…"
+      },
+      {
+        "id": "role-to-assume",
+        "required": false,
+        "description": "The Amazon Resource Name (ARN) of the role to assume. Use the provided credentials to assume an IAM role and configure the Actions environm…"
+      },
+      {
+        "id": "aws-access-key-id",
+        "required": false,
+        "description": "AWS Access Key ID. Provide this key if you want to assume a role using access keys rather than a web identity token."
+      },
+      {
+        "id": "aws-secret-access-key",
+        "required": false,
+        "description": "AWS Secret Access Key. Required if aws-access-key-id is provided."
+      },
+      {
+        "id": "aws-session-token",
+        "required": false,
+        "description": "AWS Session Token."
+      },
+      {
+        "id": "web-identity-token-file",
+        "required": false,
+        "description": "Use the web identity token file from the provided file system path in order to assume an IAM role using a web identity, e.g. from within an…"
+      },
+      {
+        "id": "role-chaining",
+        "required": false,
+        "description": "Use existing credentials from the environment to assume a new role, rather than providing credentials as input."
+      },
+      {
+        "id": "audience",
+        "required": false,
+        "default": "sts.amazonaws.com",
+        "description": "The audience to use for the OIDC provider"
+      },
+      {
+        "id": "http-proxy",
+        "required": false,
+        "description": "Proxy to use for the AWS SDK agent"
+      },
+      {
+        "id": "no-proxy",
+        "required": false,
+        "description": "Hosts to skip for the proxy configuration"
+      },
+      {
+        "id": "mask-aws-account-id",
+        "required": false,
+        "description": "Whether to mask the AWS account ID for these credentials as a secret value. By default the account ID will not be masked"
+      },
+      {
+        "id": "role-duration-seconds",
+        "required": false,
+        "description": "Role duration in seconds. Default is one hour."
+      },
+      {
+        "id": "role-external-id",
+        "required": false,
+        "description": "The external ID of the role to assume."
+      },
+      {
+        "id": "role-session-name",
+        "required": false,
+        "description": "Role session name (default: GitHubActions)"
+      },
+      {
+        "id": "role-skip-session-tagging",
+        "required": false,
+        "description": "Skip session tagging during role assumption"
+      },
+      {
+        "id": "transitive-tag-keys",
+        "required": false,
+        "description": "Define a list of transitive tag keys to pass when assuming a role"
+      },
+      {
+        "id": "inline-session-policy",
+        "required": false,
+        "description": "Define an inline session policy to use when assuming a role"
+      },
+      {
+        "id": "managed-session-policies",
+        "required": false,
+        "description": "Define a list of managed session policies to use when assuming a role"
+      },
+      {
+        "id": "output-credentials",
+        "required": false,
+        "description": "Whether to set credentials as step output"
+      },
+      {
+        "id": "output-env-credentials",
+        "required": false,
+        "description": "Whether to export credentials as environment variables. If you set this to false, you probably want to use output-credentials."
+      },
+      {
+        "id": "unset-current-credentials",
+        "required": false,
+        "description": "Whether to unset the existing credentials in your runner. May be useful if you run this action multiple times in the same job"
+      },
+      {
+        "id": "disable-retry",
+        "required": false,
+        "description": "Whether to disable the retry and backoff mechanism when the assume role call fails. By default the retry mechanism is enabled"
+      },
+      {
+        "id": "retry-max-attempts",
+        "required": false,
+        "description": "The maximum number of attempts it will attempt to retry the assume role call. By default it will retry 12 times"
+      },
+      {
+        "id": "special-characters-workaround",
+        "required": false,
+        "description": "Some environments do not support special characters in AWS_SECRET_ACCESS_KEY. This option will retry fetching credentials until the secret…"
+      },
+      {
+        "id": "use-existing-credentials",
+        "required": false,
+        "description": "When enabled, this option will check if there are already valid credentials in the environment. If there are, new credentials will not be f…"
+      },
+      {
+        "id": "allowed-account-ids",
+        "required": false,
+        "description": "An option comma-delimited list of expected AWS account IDs. The action will fail if we receive credentials for the wrong account."
+      },
+      {
+        "id": "force-skip-oidc",
+        "required": false,
+        "description": "When enabled, this option will skip using GitHub OIDC provider even if the id-token permission is set. This is sometimes useful when using…"
+      },
+      {
+        "id": "action-timeout-s",
+        "required": false,
+        "description": "A global timeout in seconds for the action. When the timeout is reached, the action immediately exits. The default is to run without a time…"
+      },
+      {
+        "id": "custom-tags",
+        "required": false,
+        "description": "Additional tags to apply to the assumed role session. Must be a JSON object provided as a string."
+      },
+      {
+        "id": "sts-endpoint",
+        "required": false,
+        "description": "Custom STS endpoint URL. Use this to point to an STS-compatible API instead of the default AWS STS endpoint for the region."
+      },
+      {
+        "id": "translate-env-variables",
+        "required": false,
+        "description": "Whether to translate AWS environment variables to action inputs. Defaults to true. Translating environment variables automatically may caus…"
+      }
+    ],
+    "outputs": [
+      "aws-account-id",
+      "aws-access-key-id",
+      "aws-secret-access-key",
+      "aws-session-token",
+      "aws-expiration"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "golangci/golangci-lint-action",
+    "ref": "v9",
+    "sha": "ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a",
+    "name": "Golangci-lint",
+    "description": "Official golangci-lint action with line-attached annotations for found issues, caching, and parallel execution.",
+    "inputs": [
+      {
+        "id": "version",
+        "required": false,
+        "description": "The version of golangci-lint to use."
+      },
+      {
+        "id": "version-file",
+        "required": false,
+        "description": "Gets the version of golangci-lint to use from a file."
+      },
+      {
+        "id": "install-mode",
+        "required": false,
+        "default": "binary",
+        "description": "The mode to install golangci-lint. It can be 'binary', 'goinstall', or 'none'."
+      },
+      {
+        "id": "install-only",
+        "required": false,
+        "default": "false",
+        "description": "Only install golangci-lint. It does not run golangci-lint."
+      },
+      {
+        "id": "working-directory",
+        "required": false,
+        "description": "golangci-lint working directory. The default is the project root."
+      },
+      {
+        "id": "github-token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "The token is used for fetching the patch of a pull request to show only new issues."
+      },
+      {
+        "id": "verify",
+        "required": false,
+        "default": "true",
+        "description": "If set to true, the action verifies the configuration file against the JSONSchema."
+      },
+      {
+        "id": "only-new-issues",
+        "required": false,
+        "default": "false",
+        "description": "If set to true and the action runs on a pull request, the action outputs only newly found issues."
+      },
+      {
+        "id": "args",
+        "required": false,
+        "default": "",
+        "description": "golangci-lint command line arguments."
+      },
+      {
+        "id": "skip-cache",
+        "required": false,
+        "default": "false",
+        "description": "If set to true, all caching functionality will be completely disabled."
+      },
+      {
+        "id": "skip-save-cache",
+        "required": false,
+        "default": "false",
+        "description": "If set to true, the action will not save any caches,"
+      },
+      {
+        "id": "cache-invalidation-interval",
+        "required": false,
+        "default": "7",
+        "description": "Periodically invalidate a cache when new code is added (number of days)."
+      },
+      {
+        "id": "problem-matchers",
+        "required": false,
+        "default": "false",
+        "description": "Force the usage of the embedded problem matchers."
+      },
+      {
+        "id": "debug",
+        "required": false,
+        "default": "",
+        "description": "Debug options for the action."
+      },
+      {
+        "id": "experimental",
+        "required": false,
+        "default": "",
+        "description": "Experimental options for the action."
+      }
+    ],
+    "outputs": [],
+    "license": "MIT"
+  },
+  {
+    "uses": "pypa/gh-action-pypi-publish",
+    "ref": "release/v1",
+    "sha": "7245906fb61fa33a13554f9d5fb856fe61758086",
+    "name": "pypi-publish",
+    "description": "Upload Python distribution packages to PyPI",
+    "inputs": [
+      {
+        "id": "user",
+        "required": false,
+        "default": "__token__",
+        "description": "PyPI user"
+      },
+      {
+        "id": "password",
+        "required": false,
+        "description": "Password for your PyPI user or an access token"
+      },
+      {
+        "id": "repository-url",
+        "required": false,
+        "description": "The repository URL to use"
+      },
+      {
+        "id": "repository_url",
+        "required": false,
+        "default": "https://upload.pypi.org/legacy/",
+        "deprecated": true,
+        "description": "[DEPRECATED] The repository URL to use"
+      },
+      {
+        "id": "packages-dir",
+        "required": false,
+        "description": "The target directory for distribution"
+      },
+      {
+        "id": "packages_dir",
+        "required": false,
+        "default": "dist",
+        "deprecated": true,
+        "description": "[DEPRECATED] The target directory for distribution"
+      },
+      {
+        "id": "verify-metadata",
+        "required": false,
+        "description": "Check metadata before uploading"
+      },
+      {
+        "id": "verify_metadata",
+        "required": false,
+        "default": "true",
+        "deprecated": true,
+        "description": "[DEPRECATED] Check metadata before uploading"
+      },
+      {
+        "id": "skip-existing",
+        "required": false,
+        "description": "Do not fail if a Python package distribution exists in the target package index"
+      },
+      {
+        "id": "skip_existing",
+        "required": false,
+        "default": "false",
+        "deprecated": true,
+        "description": "[DEPRECATED] Do not fail if a Python package distribution exists in the target package index"
+      },
+      {
+        "id": "verbose",
+        "required": false,
+        "default": "true",
+        "description": "Show verbose output."
+      },
+      {
+        "id": "print-hash",
+        "required": false,
+        "description": "Show hash values of files to be uploaded"
+      },
+      {
+        "id": "print_hash",
+        "required": false,
+        "default": "true",
+        "deprecated": true,
+        "description": "[DEPRECATED] Show hash values of files to be uploaded"
+      },
+      {
+        "id": "attestations",
+        "required": false,
+        "default": "true",
+        "description": "Enable support for PEP 740 attestations. Only works with PyPI and TestPyPI via Trusted Publishing."
+      }
+    ],
+    "outputs": [],
+    "license": "BSD-3-Clause"
+  },
+  {
+    "uses": "Swatinem/rust-cache",
+    "ref": "v2",
+    "sha": "d1527c8f67ef9af357290475d4af4b0fab8f12e0",
+    "name": "Rust Cache",
+    "inputs": [
+      {
+        "id": "prefix-key",
+        "required": false,
+        "default": "v0-rust"
+      },
+      {
+        "id": "shared-key",
+        "required": false
+      },
+      {
+        "id": "key",
+        "required": false
+      },
+      {
+        "id": "add-job-id-key",
+        "required": false,
+        "default": "true"
+      },
+      {
+        "id": "add-rust-environment-hash-key",
+        "required": false,
+        "default": "true"
+      },
+      {
+        "id": "env-vars",
+        "required": false
+      },
+      {
+        "id": "workspaces",
+        "required": false
+      },
+      {
+        "id": "cache-directories",
+        "required": false
+      },
+      {
+        "id": "cache-targets",
+        "required": false,
+        "default": "true"
+      },
+      {
+        "id": "cache-on-failure",
+        "required": false
+      },
+      {
+        "id": "cache-all-crates",
+        "required": false,
+        "default": "false"
+      },
+      {
+        "id": "cache-workspace-crates",
+        "required": false,
+        "default": "false"
+      },
+      {
+        "id": "save-if",
+        "required": false,
+        "default": "true"
+      },
+      {
+        "id": "cache-provider",
+        "required": false,
+        "default": "github"
+      },
+      {
+        "id": "cache-bin",
+        "required": false,
+        "default": "true"
+      },
+      {
+        "id": "lookup-only",
+        "required": false,
+        "default": "false"
+      },
+      {
+        "id": "cmd-format",
+        "required": false,
+        "default": "{0}"
+      }
+    ],
+    "outputs": [
+      "cache-hit"
+    ],
+    "license": "LGPL-3.0"
+  },
+  {
+    "uses": "pnpm/action-setup",
+    "ref": "v6",
+    "sha": "0977fd99725f1db4007ccb2928dbb4e90d06cc86",
+    "name": "Setup pnpm",
+    "description": "Install pnpm package manager",
+    "inputs": [
+      {
+        "id": "version",
+        "required": false,
+        "description": "Version of pnpm to install"
+      },
+      {
+        "id": "dest",
+        "required": false,
+        "default": "~/setup-pnpm",
+        "description": "Where to store pnpm files"
+      },
+      {
+        "id": "run_install",
+        "required": false,
+        "default": "null",
+        "description": "If specified, run `pnpm install`"
+      },
+      {
+        "id": "cache",
+        "required": false,
+        "default": "false",
+        "description": "Whether to cache the pnpm store directory"
+      },
+      {
+        "id": "cache_dependency_path",
+        "required": false,
+        "default": "pnpm-lock.yaml",
+        "description": "File path to the pnpm lockfile, whose contents hash will be used as a cache key. Accepts multiple paths delimited by newlines."
+      },
+      {
+        "id": "package_json_file",
+        "required": false,
+        "default": "package.json",
+        "description": "File path to the package.json to read \"packageManager\" configuration. This path must be relative to the repository root (GITHUB_WORKSPACE)."
+      },
+      {
+        "id": "standalone",
+        "required": false,
+        "default": "false",
+        "description": "When set to true, @pnpm/exe, which is a Node.js bundled package, will be installed, enabling using pnpm without Node.js."
+      }
+    ],
+    "outputs": [
+      "dest",
+      "bin_dest"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "goreleaser/goreleaser-action",
+    "ref": "v7",
+    "sha": "a4f02ab5355a589de60d917a659ce617ed19b3de",
+    "name": "GoReleaser Action",
+    "description": "GitHub Action for GoReleaser, a release automation tool for Go projects",
+    "inputs": [
+      {
+        "id": "distribution",
+        "required": false,
+        "default": "goreleaser",
+        "description": "GoReleaser Distribution (goreleaser or goreleaser-pro)"
+      },
+      {
+        "id": "version",
+        "required": false,
+        "default": "~> v2",
+        "description": "GoReleaser version"
+      },
+      {
+        "id": "version-file",
+        "required": false,
+        "description": "Read the GoReleaser version from a file. Path is resolved relative to"
+      },
+      {
+        "id": "args",
+        "required": false,
+        "description": "Arguments to pass to GoReleaser"
+      },
+      {
+        "id": "workdir",
+        "required": false,
+        "default": ".",
+        "description": "Working directory (below repository root)"
+      },
+      {
+        "id": "install-only",
+        "required": false,
+        "default": "false",
+        "description": "Just install GoReleaser"
+      }
+    ],
+    "outputs": [
+      "artifacts",
+      "metadata"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "peter-evans/create-or-update-comment",
+    "ref": "v5",
+    "sha": "e8674b075228eee787fea43ef493e45ece1004c9",
+    "name": "Create or Update Comment",
+    "description": "Create or update an issue or pull request comment",
+    "inputs": [
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "GITHUB_TOKEN or a repo scoped PAT."
+      },
+      {
+        "id": "repository",
+        "required": false,
+        "default": "${{ github.repository }}",
+        "description": "The full name of the repository in which to create or update a comment."
+      },
+      {
+        "id": "issue-number",
+        "required": false,
+        "description": "The number of the issue or pull request in which to create a comment."
+      },
+      {
+        "id": "comment-id",
+        "required": false,
+        "description": "The id of the comment to update."
+      },
+      {
+        "id": "body",
+        "required": false,
+        "description": "The comment body. Cannot be used in conjunction with `body-path`."
+      },
+      {
+        "id": "body-path",
+        "required": false,
+        "description": "The path to a file containing the comment body. Cannot be used in conjunction with `body`."
+      },
+      {
+        "id": "body-file",
+        "required": false,
+        "description": "Deprecated in favour of `body-path`."
+      },
+      {
+        "id": "edit-mode",
+        "required": false,
+        "default": "append",
+        "description": "The mode when updating a comment, \"replace\" or \"append\"."
+      },
+      {
+        "id": "append-separator",
+        "required": false,
+        "default": "newline",
+        "description": "The separator to use when appending to an existing comment. (`newline`, `space`, `none`)"
+      },
+      {
+        "id": "reactions",
+        "required": false,
+        "description": "A comma or newline separated list of reactions to add to the comment."
+      },
+      {
+        "id": "reactions-edit-mode",
+        "required": false,
+        "default": "append",
+        "description": "The mode when updating comment reactions, \"replace\" or \"append\"."
+      }
+    ],
+    "outputs": [
+      "comment-id"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "pre-commit/action",
+    "ref": "v3.0.1",
+    "sha": "2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd",
+    "name": "pre-commit",
+    "description": "run pre-commit",
+    "inputs": [
+      {
+        "id": "extra_args",
+        "required": false,
+        "default": "--all-files",
+        "description": "options to pass to pre-commit run"
+      }
+    ],
+    "outputs": [],
+    "license": "MIT"
+  },
+  {
+    "uses": "dtolnay/rust-toolchain",
+    "ref": "stable",
+    "sha": "b725eda525362e7cf34af9a7243cac1e3f01a7ec",
+    "name": "rustup toolchain install",
+    "description": "Install the Rust toolchain",
+    "inputs": [
+      {
+        "id": "toolchain",
+        "required": false,
+        "default": "stable",
+        "description": "Rust toolchain specification -- see https://rust-lang.github.io/rustup/concepts/toolchains.html#toolchain-specification"
+      },
+      {
+        "id": "targets",
+        "required": false,
+        "description": "Comma-separated list of target triples to install for this toolchain"
+      },
+      {
+        "id": "target",
+        "required": false,
+        "description": "Alias for `targets`"
+      },
+      {
+        "id": "components",
+        "required": false,
+        "description": "Comma-separated list of components to be additionally installed"
+      }
+    ],
+    "outputs": [
+      "cachekey",
+      "name"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "hashicorp/setup-terraform",
+    "ref": "v4",
+    "sha": "dfe3c3f87815947d99a8997f908cb6525fc44e9e",
+    "name": "HashiCorp - Setup Terraform",
+    "inputs": [
+      {
+        "id": "cli_config_credentials_hostname",
+        "required": false,
+        "default": "app.terraform.io"
+      },
+      {
+        "id": "cli_config_credentials_token",
+        "required": false
+      },
+      {
+        "id": "terraform_version",
+        "required": false,
+        "default": "latest"
+      },
+      {
+        "id": "terraform_wrapper",
+        "required": false,
+        "default": "true"
+      }
+    ],
+    "outputs": [],
+    "license": "MPL-2.0"
+  },
+  {
+    "uses": "tj-actions/changed-files",
+    "ref": "v47",
+    "sha": "24d32ffd492484c1d75e0c0b894501ddb9d30d62",
+    "name": "Changed Files",
+    "description": "Get all Added, Copied, Modified, Deleted, Renamed, Type changed, Unmerged, and Unknown files.",
+    "inputs": [
+      {
+        "id": "separator",
+        "required": false,
+        "default": "",
+        "description": "Split character for output strings."
+      },
+      {
+        "id": "include_all_old_new_renamed_files",
+        "required": false,
+        "default": "false",
+        "description": "Include `all_old_new_renamed_files` output. Note this can generate a large output See: #501."
+      },
+      {
+        "id": "old_new_separator",
+        "required": false,
+        "default": ",",
+        "description": "Split character for old and new filename pairs."
+      },
+      {
+        "id": "old_new_files_separator",
+        "required": false,
+        "default": "",
+        "description": "Split character for old and new renamed filename pairs."
+      },
+      {
+        "id": "files_from_source_file",
+        "required": false,
+        "default": "",
+        "description": "Source file(s) used to populate the `files` input."
+      },
+      {
+        "id": "files_from_source_file_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `files_from_source_file` input."
+      },
+      {
+        "id": "files",
+        "required": false,
+        "default": "",
+        "description": "File and directory patterns used to detect changes (Defaults to the entire repo if unset)."
+      },
+      {
+        "id": "files_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `files` input"
+      },
+      {
+        "id": "files_yaml",
+        "required": false,
+        "default": "",
+        "description": "YAML used to define a set of file patterns to detect changes"
+      },
+      {
+        "id": "files_yaml_from_source_file",
+        "required": false,
+        "default": "",
+        "description": "Source file(s) used to populate the `files_yaml` input. Example: https://github.com/tj-actions/changed-files/blob/main/test/changed-files.y…"
+      },
+      {
+        "id": "files_yaml_from_source_file_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `files_yaml_from_source_file` input"
+      },
+      {
+        "id": "files_ignore_yaml",
+        "required": false,
+        "default": "",
+        "description": "YAML used to define a set of file patterns to ignore changes"
+      },
+      {
+        "id": "files_ignore_yaml_from_source_file",
+        "required": false,
+        "default": "",
+        "description": "Source file(s) used to populate the `files_ignore_yaml` input. Example: https://github.com/tj-actions/changed-files/blob/main/test/changed-…"
+      },
+      {
+        "id": "files_ignore_yaml_from_source_file_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `files_ignore_yaml_from_source_file` input"
+      },
+      {
+        "id": "files_ignore",
+        "required": false,
+        "default": "",
+        "description": "Ignore changes to these file(s). NOTE: Multiline file/directory patterns should not include quotes."
+      },
+      {
+        "id": "files_ignore_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `files_ignore` input"
+      },
+      {
+        "id": "files_ignore_from_source_file",
+        "required": false,
+        "default": "",
+        "description": "Source file(s) used to populate the `files_ignore` input"
+      },
+      {
+        "id": "files_ignore_from_source_file_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `files_ignore_from_source_file` input"
+      },
+      {
+        "id": "sha",
+        "required": false,
+        "description": "Specify a different commit SHA or branch used for comparing changes"
+      },
+      {
+        "id": "base_sha",
+        "required": false,
+        "description": "Specify a different base commit SHA or branch used for comparing changes"
+      },
+      {
+        "id": "since",
+        "required": false,
+        "default": "",
+        "description": "Get changed files for commits whose timestamp is older than the given time."
+      },
+      {
+        "id": "until",
+        "required": false,
+        "default": "",
+        "description": "Get changed files for commits whose timestamp is earlier than the given time."
+      },
+      {
+        "id": "path",
+        "required": false,
+        "default": ".",
+        "description": "Specify a relative path under `$GITHUB_WORKSPACE` to locate the repository."
+      },
+      {
+        "id": "quotepath",
+        "required": false,
+        "default": "true",
+        "description": "Use non-ASCII characters to match files and output the filenames completely verbatim by setting this to `false`"
+      },
+      {
+        "id": "diff_relative",
+        "required": false,
+        "default": "true",
+        "description": "Exclude changes outside the current directory and show path names relative to it. NOTE: This requires you to specify the top-level director…"
+      },
+      {
+        "id": "dir_names",
+        "required": false,
+        "default": "false",
+        "description": "Output unique changed directories instead of filenames. NOTE: This returns `.` for changed files located in the current working directory w…"
+      },
+      {
+        "id": "dir_names_max_depth",
+        "required": false,
+        "description": "Limit the directory output to a maximum depth e.g `test/test1/test2` with max depth of `2` returns `test/test1`."
+      },
+      {
+        "id": "dir_names_exclude_current_dir",
+        "required": false,
+        "default": "false",
+        "description": "Exclude the current directory represented by `.` from the output when `dir_names` is set to `true`."
+      },
+      {
+        "id": "dir_names_include_files",
+        "required": false,
+        "default": "",
+        "description": "File and directory patterns to include in the output when `dir_names` is set to `true`. NOTE: This returns only the matching files and also…"
+      },
+      {
+        "id": "dir_names_include_files_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `dir_names_include_files` input"
+      },
+      {
+        "id": "dir_names_deleted_files_include_only_deleted_dirs",
+        "required": false,
+        "default": "false",
+        "description": "Include only directories that have been deleted as opposed to directory names of files that have been deleted in the `deleted_files` output…"
+      },
+      {
+        "id": "json",
+        "required": false,
+        "default": "false",
+        "description": "Output list of changed files in a JSON formatted string which can be used for matrix jobs. Example: https://github.com/tj-actions/changed-f…"
+      },
+      {
+        "id": "escape_json",
+        "required": false,
+        "default": "true",
+        "description": "Escape JSON output."
+      },
+      {
+        "id": "safe_output",
+        "required": false,
+        "default": "true",
+        "description": "Apply sanitization to output filenames before being set as output."
+      },
+      {
+        "id": "fetch_depth",
+        "required": false,
+        "default": "25",
+        "description": "Depth of additional branch history fetched. NOTE: This can be adjusted to resolve errors with insufficient history."
+      },
+      {
+        "id": "skip_initial_fetch",
+        "required": false,
+        "default": "false",
+        "description": "Skip initially fetching additional history to improve performance for shallow repositories."
+      },
+      {
+        "id": "fetch_additional_submodule_history",
+        "required": false,
+        "default": "false",
+        "description": "Fetch additional history for submodules."
+      },
+      {
+        "id": "since_last_remote_commit",
+        "required": false,
+        "default": "false",
+        "description": "Use the last commit on the remote branch as the `base_sha`. Defaults to the last non-merge commit on the target branch for pull request eve…"
+      },
+      {
+        "id": "write_output_files",
+        "required": false,
+        "default": "false",
+        "description": "Write outputs to the `output_dir` defaults to `.github/outputs` folder. NOTE: This creates a `.txt` file by default and a `.json` file if `…"
+      },
+      {
+        "id": "output_dir",
+        "required": false,
+        "default": ".github/outputs",
+        "description": "Directory to store output files."
+      },
+      {
+        "id": "output_renamed_files_as_deleted_and_added",
+        "required": false,
+        "default": "false",
+        "description": "Output renamed files as deleted and added files."
+      },
+      {
+        "id": "recover_deleted_files",
+        "required": false,
+        "default": "false",
+        "description": "Recover deleted files."
+      },
+      {
+        "id": "recover_deleted_files_to_destination",
+        "required": false,
+        "default": "",
+        "description": "Recover deleted files to a new destination directory, defaults to the original location."
+      },
+      {
+        "id": "recover_files",
+        "required": false,
+        "default": "",
+        "description": "File and directory patterns used to recover deleted files,"
+      },
+      {
+        "id": "recover_files_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `recover_files` input"
+      },
+      {
+        "id": "recover_files_ignore",
+        "required": false,
+        "default": "",
+        "description": "File and directory patterns to ignore when recovering deleted files."
+      },
+      {
+        "id": "recover_files_ignore_separator",
+        "required": false,
+        "default": "",
+        "description": "Separator used to split the `recover_files_ignore` input"
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "GitHub token used to fetch changed files from Github's API."
+      },
+      {
+        "id": "api_url",
+        "required": false,
+        "default": "${{ github.api_url }}",
+        "description": "Github API URL."
+      },
+      {
+        "id": "use_rest_api",
+        "required": false,
+        "default": "false",
+        "description": "Force the use of Github's REST API even when a local copy of the repository exists"
+      },
+      {
+        "id": "fail_on_initial_diff_error",
+        "required": false,
+        "default": "false",
+        "description": "Fail when the initial diff fails."
+      },
+      {
+        "id": "fail_on_submodule_diff_error",
+        "required": false,
+        "default": "false",
+        "description": "Fail when the submodule diff fails."
+      },
+      {
+        "id": "negation_patterns_first",
+        "required": false,
+        "default": "false",
+        "description": "Apply the negation patterns first. NOTE: This affects how changed files are matched."
+      },
+      {
+        "id": "matrix",
+        "required": false,
+        "default": "false",
+        "description": "Output changed files in a format that can be used for matrix jobs. Alias for setting inputs `json` to `true` and `escape_json` to `false`."
+      },
+      {
+        "id": "exclude_submodules",
+        "required": false,
+        "default": "false",
+        "description": "Exclude changes to submodules."
+      },
+      {
+        "id": "fetch_missing_history_max_retries",
+        "required": false,
+        "default": "20",
+        "description": "Maximum number of retries to fetch missing history."
+      },
+      {
+        "id": "use_posix_path_separator",
+        "required": false,
+        "default": "false",
+        "description": "Use POSIX path separator `/` for output file paths on Windows."
+      },
+      {
+        "id": "tags_pattern",
+        "required": false,
+        "default": "*",
+        "description": "Tags pattern to include."
+      },
+      {
+        "id": "tags_ignore_pattern",
+        "required": false,
+        "default": "",
+        "description": "Tags pattern to ignore."
+      }
+    ],
+    "outputs": [
+      "added_files",
+      "added_files_count",
+      "any_added",
+      "copied_files",
+      "copied_files_count",
+      "deleted_files",
+      "deleted_files_count",
+      "modified_files",
+      "modified_files_count",
+      "renamed_files",
+      "renamed_files_count",
+      "all_old_new_renamed_files",
+      "all_old_new_renamed_files_count",
+      "type_changed_files",
+      "type_changed_files_count",
+      "unmerged_files",
+      "unmerged_files_count",
+      "unknown_files",
+      "unknown_files_count",
+      "all_changed_and_modified_files",
+      "all_changed_and_modified_files_count",
+      "all_changed_files",
+      "all_changed_files_count",
+      "any_changed",
+      "only_changed",
+      "other_changed_files",
+      "other_changed_files_count",
+      "all_modified_files",
+      "all_modified_files_count",
+      "any_modified",
+      "only_modified",
+      "other_modified_files",
+      "other_modified_files_count",
+      "any_deleted",
+      "only_deleted",
+      "other_deleted_files",
+      "other_deleted_files_count",
+      "modified_keys",
+      "changed_keys"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "dorny/paths-filter",
+    "ref": "v4",
+    "sha": "ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d",
+    "name": "Paths Changes Filter",
+    "description": "Execute your workflow steps only if relevant files are modified.",
+    "inputs": [
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "GitHub Access Token"
+      },
+      {
+        "id": "working-directory",
+        "required": false,
+        "description": "Relative path under $GITHUB_WORKSPACE where the repository was checked out."
+      },
+      {
+        "id": "ref",
+        "required": false,
+        "description": "Git reference (e.g. branch name) from which the changes will be detected."
+      },
+      {
+        "id": "base",
+        "required": false,
+        "description": "Git reference (e.g. branch name) against which the changes will be detected. Defaults to repository default branch (e.g. master)."
+      },
+      {
+        "id": "filters",
+        "required": true,
+        "description": "Path to the configuration file or YAML string with filters definition"
+      },
+      {
+        "id": "list-files",
+        "required": false,
+        "default": "none",
+        "description": "Enables listing of files matching the filter:"
+      },
+      {
+        "id": "initial-fetch-depth",
+        "required": false,
+        "default": "100",
+        "description": "How many commits are initially fetched from base branch."
+      },
+      {
+        "id": "predicate-quantifier",
+        "required": false,
+        "default": "some",
+        "description": "allows to override the \"at least one pattern\" behavior:"
+      }
+    ],
+    "outputs": [
+      "changes"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "ossf/scorecard-action",
+    "ref": "v2.5.0",
+    "sha": "fa7117db83c52d787ae5a89f350999701505d78e",
+    "name": "OSSF Scorecard action",
+    "description": "Run OSSF Scorecard checks and output results in SARIF, JSON, or in-toto format",
+    "inputs": [
+      {
+        "id": "results_file",
+        "required": true,
+        "description": "OUTPUT: Path to file to store results"
+      },
+      {
+        "id": "results_format",
+        "required": true,
+        "description": "OUTPUT: format of the results [json, sarif, intoto]"
+      },
+      {
+        "id": "repo_token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "INPUT: GitHub token with read access"
+      },
+      {
+        "id": "publish_results",
+        "required": false,
+        "default": "false",
+        "description": "INPUT: Publish results"
+      },
+      {
+        "id": "file_mode",
+        "required": false,
+        "default": "archive",
+        "description": "INPUT: Method to fetch files from GitHub"
+      },
+      {
+        "id": "internal_publish_base_url",
+        "required": false,
+        "default": "https://api.scorecard.dev",
+        "description": "INPUT: Base URL for publishing results. Used for testing."
+      },
+      {
+        "id": "internal_default_token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "INPUT: Default GitHub token. (Internal purpose only, not intended for developers to set. Used for pull requests configured with a PAT)."
+      }
+    ],
+    "outputs": [],
+    "license": "Apache-2.0"
+  },
+  {
+    "uses": "astral-sh/setup-uv",
+    "ref": "v10.3.0",
+    "sha": "1c37ad07a6a961277cf70c0d37d6f313000f5884",
+    "name": "astral-sh/setup-uv",
+    "description": "Set up your GitHub Actions workflow with a specific version of uv.",
+    "inputs": [
+      {
+        "id": "version",
+        "required": false,
+        "default": "",
+        "description": "The version of uv to install, e.g., `0.5.0`, `latest`, or `latest-known`. Defaults to the version in pyproject.toml or `latest`."
+      },
+      {
+        "id": "version-file",
+        "required": false,
+        "default": "",
+        "description": "Path to a file containing the version of uv to install, e.g., uv.toml, pyproject.toml, .tool-versions, requirements.txt or uv.lock. A selec…"
+      },
+      {
+        "id": "python-version",
+        "required": false,
+        "description": "The version of Python to set UV_PYTHON to. Overrides the Python version from .tool-versions."
+      },
+      {
+        "id": "python-arch",
+        "required": false,
+        "description": "The Python architecture to set UV_PYTHON_ARCH to, e.g., x86_64 or aarch64. Overrides UV_PYTHON_ARCH."
+      },
+      {
+        "id": "activate-environment",
+        "required": false,
+        "default": "false",
+        "description": "Use uv venv to activate a venv ready to be used by later steps."
+      },
+      {
+        "id": "venv-path",
+        "required": false,
+        "default": "",
+        "description": "Custom path for the virtual environment when using activate-environment. Defaults to '.venv' in the working directory."
+      },
+      {
+        "id": "no-project",
+        "required": false,
+        "default": "false",
+        "description": "Pass --no-project when creating the venv with activate-environment."
+      },
+      {
+        "id": "working-directory",
+        "required": false,
+        "default": "${{ github.workspace }}",
+        "description": "The directory to execute all commands in and look for files such as pyproject.toml"
+      },
+      {
+        "id": "checksum",
+        "required": false,
+        "description": "The checksum of the uv version to install"
+      },
+      {
+        "id": "github-token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "Used when downloading uv from GitHub releases."
+      },
+      {
+        "id": "enable-cache",
+        "required": false,
+        "default": "auto",
+        "description": "Enable the GitHub Actions cache for uv. 'auto' enables caching on GitHub-hosted runners except for release, tag push, pull_request_target,…"
+      },
+      {
+        "id": "cache-dependency-glob",
+        "required": false,
+        "default": "**/*requirements*.txt",
+        "description": "Glob pattern to match files relative to the working directory to control the cache."
+      },
+      {
+        "id": "restore-cache",
+        "required": false,
+        "default": "true",
+        "description": "Whether to restore the cache if found."
+      },
+      {
+        "id": "save-cache",
+        "required": false,
+        "default": "auto",
+        "description": "Whether to save the cache after the run. 'auto' disables saving for merge_group events."
+      },
+      {
+        "id": "cache-suffix",
+        "required": false,
+        "description": "Suffix for the cache key"
+      },
+      {
+        "id": "cache-local-path",
+        "required": false,
+        "default": "",
+        "description": "Local path to store the cache."
+      },
+      {
+        "id": "prune-cache",
+        "required": false,
+        "default": "false",
+        "description": "Prune cache before saving."
+      },
+      {
+        "id": "cache-python",
+        "required": false,
+        "default": "false",
+        "description": "Upload managed Python installations to the Github Actions cache."
+      },
+      {
+        "id": "ignore-nothing-to-cache",
+        "required": false,
+        "default": "false",
+        "description": "Ignore when nothing is found to cache."
+      },
+      {
+        "id": "ignore-empty-workdir",
+        "required": false,
+        "default": "false",
+        "description": "Ignore when the working directory is empty."
+      },
+      {
+        "id": "tool-dir",
+        "required": false,
+        "description": "Custom path to set UV_TOOL_DIR to."
+      },
+      {
+        "id": "tool-bin-dir",
+        "required": false,
+        "description": "Custom path to set UV_TOOL_BIN_DIR to."
+      },
+      {
+        "id": "manifest-file",
+        "required": false,
+        "description": "URL to a custom manifest file in the astral-sh/versions format."
+      },
+      {
+        "id": "download-from-astral-mirror",
+        "required": false,
+        "default": "true",
+        "description": "Download uv from the Astral mirror instead of directly from GitHub Releases."
+      },
+      {
+        "id": "add-problem-matchers",
+        "required": false,
+        "default": "true",
+        "description": "Add problem matchers."
+      },
+      {
+        "id": "quiet",
+        "required": false,
+        "default": "false",
+        "description": "Suppress info-level log output. Only warnings and errors are shown."
+      },
+      {
+        "id": "resolution-strategy",
+        "required": false,
+        "default": "highest",
+        "description": "Resolution strategy to use when resolving version ranges. 'highest' uses the latest compatible version, 'lowest' uses the oldest compatible…"
+      }
+    ],
+    "outputs": [
+      "uv-version",
+      "uv-path",
+      "uvx-path",
+      "cache-hit",
+      "cache-key",
+      "venv",
+      "python-version",
+      "python-runtime-id",
+      "python-cache-hit"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "oven-sh/setup-bun",
+    "ref": "v2",
+    "sha": "0c5077e51419868618aeaa5fe8019c62421857d6",
+    "name": "Setup Bun",
+    "description": "Download, install, and setup Bun to your path.",
+    "inputs": [
+      {
+        "id": "bun-version",
+        "required": false,
+        "description": "The version of Bun to install. (e.g. \"latest\", \"canary\", \"1.0.0\", \"1.0.x\", <sha>)"
+      },
+      {
+        "id": "bun-version-file",
+        "required": false,
+        "description": "The version of Bun to install from file. (e.g. \"package.json\", \".bun-version\", \".tool-versions\")"
+      },
+      {
+        "id": "bun-download-url",
+        "required": false,
+        "description": "Override the URL to download Bun from. This skips version resolution and verifying AVX2 support."
+      },
+      {
+        "id": "registries",
+        "required": false,
+        "description": "List of package registries with authentication support. Format:"
+      },
+      {
+        "id": "registry-url",
+        "required": false,
+        "deprecated": true,
+        "description": "The URL of the package registry to use for installing Bun. Set the $BUN_AUTH_TOKEN environment variable to authenticate with the registry."
+      },
+      {
+        "id": "scope",
+        "required": false,
+        "deprecated": true,
+        "description": "The scope for authenticating with the package registry."
+      },
+      {
+        "id": "no-cache",
+        "required": false,
+        "default": "false",
+        "description": "Disable caching of bun executable."
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}",
+        "description": "Personal access token (PAT) used to fetch tags from oven-sh/bun repository. Recommended for resolving wildcard/range versions to avoid GitH…"
+      }
+    ],
+    "outputs": [
+      "bun-version",
+      "bun-revision",
+      "bun-path",
+      "bun-download-url",
+      "cache-hit"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "github/codeql-action/init",
+    "ref": "v4",
+    "sha": "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
+    "name": "CodeQL: Init",
+    "description": "Set up CodeQL",
+    "inputs": [
+      {
+        "id": "tools",
+        "required": false,
+        "description": "By default, the Action will use the recommended version of the CodeQL Bundle to analyze your project. You can override this choice using th…"
+      },
+      {
+        "id": "languages",
+        "required": false,
+        "description": "A comma-separated list of CodeQL languages to analyze."
+      },
+      {
+        "id": "build-mode",
+        "required": false,
+        "description": "The build mode that will be used to analyze the language. This input is only available when analyzing a single CodeQL language per job, for…"
+      },
+      {
+        "id": "analysis-kinds",
+        "required": true,
+        "default": "code-scanning",
+        "description": "[Internal] A comma-separated list of analysis kinds to enable. This input is intended for internal-use only at this time and the behaviour…"
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "GitHub token to use for authenticating with this instance of GitHub. To download custom packs from multiple registries, use the registries…"
+      },
+      {
+        "id": "registries",
+        "required": false,
+        "description": "Use this input only when you need to download CodeQL packages from another instance of GitHub. If you only need to download packages from t…"
+      },
+      {
+        "id": "matrix",
+        "required": false,
+        "default": "${{ toJson(matrix) }}"
+      },
+      {
+        "id": "config-file",
+        "required": false,
+        "description": "Path of the config file to use"
+      },
+      {
+        "id": "db-location",
+        "required": false,
+        "description": "Path where CodeQL databases should be created. If not specified, a temporary directory will be used."
+      },
+      {
+        "id": "config",
+        "required": false,
+        "description": "Configuration passed as a YAML string in the same format as the config-file input. This takes precedence over the config-file input."
+      },
+      {
+        "id": "queries",
+        "required": false,
+        "description": "Comma-separated list of additional queries to run. By default, this overrides the same setting in a configuration file; prefix with \"+\" to…"
+      },
+      {
+        "id": "quality-queries",
+        "required": false,
+        "description": "[Internal] DEPRECATED. Comma-separated list of code quality queries to run."
+      },
+      {
+        "id": "packs",
+        "required": false,
+        "description": "Comma-separated list of packs to run. Reference a pack in the format `scope/name[@version]`. If `version` is not specified, then the latest…"
+      },
+      {
+        "id": "external-repository-token",
+        "required": false,
+        "description": "A token for fetching external config files and queries if they reside in a private repository in the same GitHub instance that is running t…"
+      },
+      {
+        "id": "setup-python-dependencies",
+        "required": false,
+        "description": "DEPRECATED. This option is ignored since CodeQL Action no longer installs Python dependencies as of versions 3.25.0 and 2.25.0."
+      },
+      {
+        "id": "source-root",
+        "required": false,
+        "description": "Path of the root source code directory, relative to $GITHUB_WORKSPACE."
+      },
+      {
+        "id": "ram",
+        "required": false,
+        "description": "The amount of memory in MB that can be used by CodeQL extractors. By default, CodeQL extractors will use most of the memory available in th…"
+      },
+      {
+        "id": "threads",
+        "required": false,
+        "description": "The number of threads that can be used by CodeQL extractors. By default, CodeQL extractors will use all the hardware threads available in t…"
+      },
+      {
+        "id": "debug",
+        "required": false,
+        "default": "false",
+        "description": "Enable debugging mode. This will result in more output being produced which may be useful when debugging certain issues. Debugging mode is…"
+      },
+      {
+        "id": "debug-artifact-name",
+        "required": false,
+        "description": "The name of the artifact to store debugging information in. This is only used when debug mode is enabled."
+      },
+      {
+        "id": "debug-database-name",
+        "required": false,
+        "description": "The name of the database uploaded to the debugging artifact. This is only used when debug mode is enabled."
+      },
+      {
+        "id": "trap-caching",
+        "required": false,
+        "description": "Explicitly enable or disable TRAP caching rather than respecting the feature flag for it."
+      },
+      {
+        "id": "dependency-caching",
+        "required": false,
+        "description": "Explicitly enable or disable caching of project build dependencies."
+      },
+      {
+        "id": "check-run-id",
+        "required": false,
+        "default": "${{ job.check_run_id }}",
+        "description": "[Internal] The ID of the check run, as provided by the Actions runtime environment. Do not set this value manually."
+      },
+      {
+        "id": "job-status",
+        "required": false,
+        "default": "${{ job.status }}",
+        "description": "[Internal] The status of the job, as provided by the Actions runtime environment. This is how the post step learns whether the job as a who…"
+      }
+    ],
+    "outputs": [
+      "codeql-path",
+      "codeql-version"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "github/codeql-action/analyze",
+    "ref": "v4",
+    "sha": "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
+    "name": "CodeQL: Finish",
+    "description": "Finalize CodeQL database",
+    "inputs": [
+      {
+        "id": "check_name",
+        "required": false,
+        "description": "The name of the check run to add text to."
+      },
+      {
+        "id": "output",
+        "required": false,
+        "default": "../results",
+        "description": "The path of the directory in which to save the SARIF results from the CodeQL CLI."
+      },
+      {
+        "id": "upload",
+        "required": false,
+        "default": "always",
+        "description": "Upload the SARIF file to Code Scanning. Defaults to 'always' which uploads the SARIF file to Code Scanning for successful and failed runs.…"
+      },
+      {
+        "id": "cleanup-level",
+        "required": false,
+        "description": "DEPRECATED. This option is ignored since, for performance reasons, the CodeQL Action automatically manages cleanup of intermediate results."
+      },
+      {
+        "id": "ram",
+        "required": false,
+        "description": "The amount of memory in MB that can be used by CodeQL for database finalization and query execution. By default, this action will use the s…"
+      },
+      {
+        "id": "add-snippets",
+        "required": false,
+        "deprecated": true,
+        "description": "Does not have any effect."
+      },
+      {
+        "id": "skip-queries",
+        "required": false,
+        "default": "false",
+        "description": "If this option is set, the CodeQL database will be built but no queries will be run on it. Thus, no results will be produced."
+      },
+      {
+        "id": "threads",
+        "required": false,
+        "description": "The number of threads that can be used by CodeQL for database finalization and query execution. By default, this action will use the same n…"
+      },
+      {
+        "id": "checkout_path",
+        "required": false,
+        "default": "${{ github.workspace }}",
+        "description": "The path at which the analyzed repository was checked out. Used to relativize any absolute paths in the uploaded SARIF file."
+      },
+      {
+        "id": "ref",
+        "required": false,
+        "description": "The ref where results will be uploaded. If not provided, the Action will use the GITHUB_REF environment variable. If provided, the sha inpu…"
+      },
+      {
+        "id": "sha",
+        "required": false,
+        "description": "The sha of the HEAD of the ref where results will be uploaded. If not provided, the Action will use the GITHUB_SHA environment variable. If…"
+      },
+      {
+        "id": "category",
+        "required": false,
+        "description": "String used by Code Scanning for matching the analyses"
+      },
+      {
+        "id": "upload-database",
+        "required": false,
+        "default": "true",
+        "description": "Whether to upload the resulting CodeQL database"
+      },
+      {
+        "id": "post-processed-sarif-path",
+        "required": false,
+        "description": "Before uploading the SARIF files produced by the CodeQL CLI, the CodeQL Action may perform some post-processing on them. Ordinarily, these…"
+      },
+      {
+        "id": "wait-for-processing",
+        "required": true,
+        "default": "true",
+        "description": "If true, the Action will wait for the uploaded SARIF to be processed before completing."
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "GitHub token to use for authenticating with this instance of GitHub. The token must be the built-in GitHub Actions token, and the workflow…"
+      },
+      {
+        "id": "matrix",
+        "required": false,
+        "default": "${{ toJson(matrix) }}"
+      },
+      {
+        "id": "expect-error",
+        "required": false,
+        "default": "false",
+        "description": "[Internal] It is an error to use this input outside of integration testing of the codeql-action."
+      }
+    ],
+    "outputs": [
+      "db-locations",
+      "sarif-output",
+      "sarif-id"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "actions/attest-build-provenance",
+    "ref": "v4",
+    "sha": "4d101475d8b20a2381f78447822ac1eab6504dd8",
+    "name": "Attest Build Provenance",
+    "description": "Generate provenance attestations for build artifacts",
+    "inputs": [
+      {
+        "id": "subject-path",
+        "required": false,
+        "description": "Path to the artifact serving as the subject of the attestation. Must specify exactly one of \"subject-path\", \"subject-digest\", or \"subject-c…"
+      },
+      {
+        "id": "subject-digest",
+        "required": false,
+        "description": "Digest of the subject for which provenance will be generated. Must be in the form \"algorithm:hex_digest\" (e.g. \"sha256:abc123...\"). Must sp…"
+      },
+      {
+        "id": "subject-name",
+        "required": false,
+        "description": "Subject name as it should appear in the attestation. Required when identifying the subject with the \"subject-digest\" input."
+      },
+      {
+        "id": "subject-checksums",
+        "required": false,
+        "description": "Path to checksums file containing digest and name of subjects for attestation. Must specify exactly one of \"subject-path\", \"subject-digest\"…"
+      },
+      {
+        "id": "predicate-type",
+        "required": false,
+        "description": "URI identifying the type of the predicate. Required when using \"predicate\" or \"predicate-path\" for custom attestations."
+      },
+      {
+        "id": "predicate",
+        "required": false,
+        "description": "String containing the value for the attestation predicate. String length cannot exceed 16MB. Must supply exactly one of \"predicate-path\" or…"
+      },
+      {
+        "id": "predicate-path",
+        "required": false,
+        "description": "Path to the file which contains the content for the attestation predicate. File size cannot exceed 16MB. Must supply exactly one of \"predic…"
+      },
+      {
+        "id": "push-to-registry",
+        "required": false,
+        "default": "false",
+        "description": "Whether to push the provenance statement to the image registry. Requires that the \"subject-name\" parameter specify the fully-qualified imag…"
+      },
+      {
+        "id": "create-storage-record",
+        "required": false,
+        "default": "true",
+        "description": "Whether to create a storage record for the artifact. Requires that push-to-registry is set to true. Defaults to true."
+      },
+      {
+        "id": "show-summary",
+        "required": false,
+        "default": "true",
+        "description": "Whether to attach a list of generated attestations to the workflow run summary page. Defaults to true."
+      },
+      {
+        "id": "github-token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "The GitHub token used to make authenticated API requests."
+      }
+    ],
+    "outputs": [
+      "bundle-path",
+      "attestation-id",
+      "attestation-url",
+      "storage-record-ids"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "cypress-io/github-action",
+    "ref": "v7",
+    "sha": "c541a95ea92d9239347a2355f2e895cd4b3f8060",
+    "name": "Cypress.io",
+    "description": "GitHub Action for running Cypress end-to-end and component tests",
+    "inputs": [
+      {
+        "id": "auto-cancel-after-failures",
+        "required": false,
+        "description": "Overrides the global Cloud configuration to set the failed test threshold for auto cancellation or to disable auto cancellation when record…"
+      },
+      {
+        "id": "browser",
+        "required": false,
+        "description": "Name of the browser to use"
+      },
+      {
+        "id": "ci-build-id",
+        "required": false,
+        "description": "ID associates multiple CI machines to one test run"
+      },
+      {
+        "id": "component",
+        "required": false,
+        "default": "false",
+        "description": "Lets the action know that Cypress is running component tests and not e2e tests"
+      },
+      {
+        "id": "config",
+        "required": false,
+        "description": "Set configuration values. Separate multiple values with a comma. The values set here override any values set in your configuration file."
+      },
+      {
+        "id": "config-file",
+        "required": false,
+        "default": "",
+        "description": "Path to the cypress config file where configuration values are set"
+      },
+      {
+        "id": "env",
+        "required": false,
+        "description": "Sets Cypress environment variables"
+      },
+      {
+        "id": "expose",
+        "required": false,
+        "description": "Sets Cypress expose variables for non-sensitive, public config values (requires Cypress 15.10.0 or later)"
+      },
+      {
+        "id": "group",
+        "required": false,
+        "description": "Group setting for recording tests"
+      },
+      {
+        "id": "headed",
+        "required": false,
+        "description": "Whether or not to use headed mode"
+      },
+      {
+        "id": "parallel",
+        "required": false,
+        "description": "Whether or not to load balance recorded tests using multiple containers"
+      },
+      {
+        "id": "project",
+        "required": false,
+        "description": "Path of project to run"
+      },
+      {
+        "id": "quiet",
+        "required": false,
+        "description": "Whether or not to silence any Cypress specific output from stdout"
+      },
+      {
+        "id": "record",
+        "required": false,
+        "default": "false",
+        "description": "Sends test results to Cypress Cloud"
+      },
+      {
+        "id": "spec",
+        "required": false,
+        "description": "Provide specific specs to run"
+      },
+      {
+        "id": "tag",
+        "required": false,
+        "description": "Tag setting for tests"
+      },
+      {
+        "id": "build",
+        "required": false,
+        "description": "Command to run build step before starting tests"
+      },
+      {
+        "id": "cache-key",
+        "required": false,
+        "description": "Custom cache key"
+      },
+      {
+        "id": "command",
+        "required": false,
+        "description": "Command that overrides cypress run"
+      },
+      {
+        "id": "command-prefix",
+        "required": false,
+        "description": "You can prefix the default test command using the command-prefix option."
+      },
+      {
+        "id": "install",
+        "required": false,
+        "description": "Whether or not to run install"
+      },
+      {
+        "id": "install-command",
+        "required": false,
+        "description": "Custom install command to use"
+      },
+      {
+        "id": "package-manager-cache",
+        "required": false,
+        "default": "true",
+        "description": "Set to false to disable automatic package manager caching. By default, package manager caching is enabled."
+      },
+      {
+        "id": "publish-summary",
+        "required": false,
+        "default": "true",
+        "description": "Whether or not to publish a job summary"
+      },
+      {
+        "id": "runTests",
+        "required": false,
+        "description": "Whether or not to run tests"
+      },
+      {
+        "id": "start",
+        "required": false,
+        "description": "Command for starting local server in the background"
+      },
+      {
+        "id": "start-windows",
+        "required": false,
+        "description": "A different start command on Windows"
+      },
+      {
+        "id": "summary-title",
+        "required": false,
+        "description": "Title for job summary"
+      },
+      {
+        "id": "wait-on",
+        "required": false,
+        "description": "Local server URL to wait for"
+      },
+      {
+        "id": "wait-on-timeout",
+        "required": false,
+        "description": "Amount of time to wait for wait-on URL to be available"
+      },
+      {
+        "id": "working-directory",
+        "required": false,
+        "description": "Working directory containing Cypress folder"
+      }
+    ],
+    "outputs": [
+      "dashboardUrl",
+      "resultsUrl"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "azure/login",
+    "ref": "v3",
+    "sha": "a641126d1b8aa4d1fa005f4f92df94a3a4c4c906",
+    "name": "Azure Login",
+    "description": "Authenticate to Azure and run your Azure CLI or Azure PowerShell based actions or scripts.",
+    "inputs": [
+      {
+        "id": "creds",
+        "required": false,
+        "description": "Paste output of `az ad sp create-for-rbac` as value of secret variable: AZURE_CREDENTIALS"
+      },
+      {
+        "id": "client-id",
+        "required": false,
+        "description": "ClientId of the Azure Service principal created."
+      },
+      {
+        "id": "tenant-id",
+        "required": false,
+        "description": "TenantId of the Azure Service principal created."
+      },
+      {
+        "id": "subscription-id",
+        "required": false,
+        "description": "Azure subscriptionId"
+      },
+      {
+        "id": "enable-AzPSSession",
+        "required": false,
+        "default": "false",
+        "description": "Set this value to true to enable Azure PowerShell Login in addition to Azure CLI login"
+      },
+      {
+        "id": "environment",
+        "required": false,
+        "default": "azurecloud",
+        "description": "Name of the environment. Supported values are azurecloud, azurestack, azureusgovernment, azurechinacloud, azuregermancloud. Default being a…"
+      },
+      {
+        "id": "allow-no-subscriptions",
+        "required": false,
+        "default": "false",
+        "description": "Set this value to true to enable support for accessing tenants without subscriptions"
+      },
+      {
+        "id": "audience",
+        "required": false,
+        "default": "api://AzureADTokenExchange",
+        "description": "Provide audience field for access-token. Default value is api://AzureADTokenExchange"
+      },
+      {
+        "id": "auth-type",
+        "required": false,
+        "default": "SERVICE_PRINCIPAL",
+        "description": "The type of authentication. Supported values are SERVICE_PRINCIPAL, IDENTITY. Default value is SERVICE_PRINCIPAL"
+      },
+      {
+        "id": "max-context-population",
+        "required": false,
+        "description": "Only used when enable-AzPSSession is true. Overrides the Azure PowerShell MaxContextPopulation used by Connect-AzAccount (the number of sub…"
+      },
+      {
+        "id": "mask-client-id",
+        "required": false,
+        "default": "true",
+        "description": "Set this value to false to stop registering the client-id as a secret, so it is not masked in workflow logs"
+      }
+    ],
+    "outputs": [],
+    "license": "MIT"
+  },
+  {
+    "uses": "google-github-actions/auth",
+    "ref": "v3",
+    "sha": "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093",
+    "name": "Authenticate to Google Cloud",
+    "description": "Authenticate to Google Cloud from GitHub Actions via Workload Identity",
+    "inputs": [
+      {
+        "id": "project_id",
+        "required": false,
+        "description": "ID of the default project to use for future API calls and invocations. If"
+      },
+      {
+        "id": "workload_identity_provider",
+        "required": false,
+        "description": "The full identifier of the Workload Identity Provider, including the"
+      },
+      {
+        "id": "service_account",
+        "required": false,
+        "description": "Email address or unique identifier of the Google Cloud service account for"
+      },
+      {
+        "id": "audience",
+        "required": false,
+        "default": "",
+        "description": "The value for the audience (aud) parameter in GitHub's generated OIDC"
+      },
+      {
+        "id": "credentials_json",
+        "required": false,
+        "description": "The Google Cloud JSON service account key to use for authentication. This"
+      },
+      {
+        "id": "create_credentials_file",
+        "required": false,
+        "default": "true",
+        "description": "If true, the action will securely generate a credentials file which can be"
+      },
+      {
+        "id": "export_environment_variables",
+        "required": false,
+        "default": "true",
+        "description": "If true, the action will export common environment variables which are"
+      },
+      {
+        "id": "token_format",
+        "required": false,
+        "default": "",
+        "description": "Output format for the generated authentication token. For OAuth 2.0 access"
+      },
+      {
+        "id": "delegates",
+        "required": false,
+        "default": "",
+        "description": "List of additional service account emails or unique identities to use for"
+      },
+      {
+        "id": "universe",
+        "required": false,
+        "default": "googleapis.com",
+        "description": "The Google Cloud universe to use for constructing API endpoints. The"
+      },
+      {
+        "id": "request_reason",
+        "required": false,
+        "description": "An optional Reason Request System Parameter for each API call made by the"
+      },
+      {
+        "id": "cleanup_credentials",
+        "required": false,
+        "default": "true",
+        "description": "If true, the action will remove any created credentials from the"
+      },
+      {
+        "id": "access_token_lifetime",
+        "required": false,
+        "default": "3600s",
+        "description": "Desired lifetime duration of the access token, in seconds. This must be"
+      },
+      {
+        "id": "access_token_scopes",
+        "required": false,
+        "default": "https://www.googleapis.com/auth/cloud-platform",
+        "description": "List of OAuth 2.0 access scopes to be included in the generated token."
+      },
+      {
+        "id": "access_token_subject",
+        "required": false,
+        "default": "",
+        "description": "Email address of a user to impersonate for Domain-Wide Delegation Access"
+      },
+      {
+        "id": "id_token_audience",
+        "required": false,
+        "default": "",
+        "description": "The audience (aud) for the generated Google Cloud ID Token. This is only"
+      },
+      {
+        "id": "id_token_include_email",
+        "required": false,
+        "default": "false",
+        "description": "Optional parameter of whether to include the service account email in the"
+      }
+    ],
+    "outputs": [
+      "project_id",
+      "credentials_file_path",
+      "auth_token",
+      "access_token",
+      "id_token"
+    ],
+    "license": "Apache-2.0"
+  },
+  {
+    "uses": "dependabot/fetch-metadata",
+    "ref": "v3",
+    "sha": "25dd0e34f4fe68f24cc83900b1fe3fe149efef98",
+    "name": "Fetch Metadata from Dependabot PRs",
+    "description": "Extract information from about the dependency being updated by a Dependabot-generated PR",
+    "inputs": [
+      {
+        "id": "alert-lookup",
+        "required": false,
+        "description": "If true, then populate the `alert-state`, `ghsa-id` and `cvss` outputs"
+      },
+      {
+        "id": "compat-lookup",
+        "required": false,
+        "description": "If true, then populate the `compatibility-score` output"
+      },
+      {
+        "id": "github-token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "The GITHUB_TOKEN secret"
+      },
+      {
+        "id": "skip-commit-verification",
+        "required": false,
+        "default": "false",
+        "description": "If true, the action will not expect Dependabot commits to be verified. This should be set as `true` in GHES environments"
+      },
+      {
+        "id": "skip-verification",
+        "required": false,
+        "default": "false",
+        "description": "If true, the action will not validate the user or the commit verification status"
+      }
+    ],
+    "outputs": [
+      "dependency-names",
+      "dependency-type",
+      "update-type",
+      "updated-dependencies-json",
+      "directory",
+      "package-ecosystem",
+      "target-branch",
+      "previous-version",
+      "new-version",
+      "alert-state",
+      "ghsa-id",
+      "cvss",
+      "compatibility-score",
+      "maintainer-changes",
+      "dependency-group"
+    ],
+    "license": "MIT"
+  },
+  {
+    "uses": "amannn/action-semantic-pull-request",
+    "ref": "v6",
+    "sha": "48f256284bd46cdaab1048c3721360e808335d50",
+    "name": "semantic-pull-request",
+    "description": "Ensure your PR title matches the Conventional Commits spec (https://www.conventionalcommits.org/).",
+    "inputs": [
+      {
+        "id": "types",
+        "required": false,
+        "description": "Provide custom types (newline delimited) if you don't want the default ones from https://www.conventionalcommits.org. These are regex patte…"
+      },
+      {
+        "id": "scopes",
+        "required": false,
+        "description": "Configure which scopes are allowed (newline delimited). These are regex patterns auto-wrapped in `^ $`."
+      },
+      {
+        "id": "requireScope",
+        "required": false,
+        "description": "Configure that a scope must always be provided."
+      },
+      {
+        "id": "disallowScopes",
+        "required": false,
+        "description": "Configure which scopes are disallowed in PR titles (newline delimited). These are regex patterns auto-wrapped in ` ^$`."
+      },
+      {
+        "id": "subjectPattern",
+        "required": false,
+        "description": "Configure additional validation for the subject based on a regex. E.g. '^(?![A-Z]).+$' ensures the subject doesn't start with an uppercase…"
+      },
+      {
+        "id": "subjectPatternError",
+        "required": false,
+        "description": "If `subjectPattern` is configured, you can use this property to override the default error message that is shown when the pattern doesn't m…"
+      },
+      {
+        "id": "validateSingleCommit",
+        "required": false,
+        "description": "When using \"Squash and merge\" on a PR with only one commit, GitHub will suggest using that commit message instead of the PR title for the m…"
+      },
+      {
+        "id": "validateSingleCommitMatchesPrTitle",
+        "required": false,
+        "description": "Related to `validateSingleCommit` you can opt-in to validate that the PR title matches a single commit to avoid confusion."
+      },
+      {
+        "id": "githubBaseUrl",
+        "required": false,
+        "default": "${{ github.api_url }}",
+        "description": "The GitHub base URL will be automatically set to the correct value from the GitHub context variable. If you want to override this, you can…"
+      },
+      {
+        "id": "ignoreLabels",
+        "required": false,
+        "description": "If the PR contains one of these labels (newline delimited), the validation is skipped. If you want to rerun the validation when labels chan…"
+      },
+      {
+        "id": "headerPattern",
+        "required": false,
+        "description": "If you're using a format for the PR title that differs from the traditional Conventional Commits spec, you can use this to customize the pa…"
+      },
+      {
+        "id": "headerPatternCorrespondence",
+        "required": false,
+        "description": "If `headerPattern` is configured, you can use this to define which capturing groups correspond to the type, scope and subject."
+      },
+      {
+        "id": "wip",
+        "required": false,
+        "description": "For work-in-progress PRs you can typically use draft pull requests from Github. However, private repositories on the free plan don't have t…"
+      }
+    ],
+    "outputs": [],
+    "license": "MIT"
+  },
+  {
+    "uses": "release-drafter/release-drafter",
+    "ref": "v7",
+    "sha": "978bb0b30c5ee8cdd332ced253758157150d43f0",
+    "name": "Release Drafter",
+    "description": "Draft release notes when pull requests merge into a branch.",
+    "inputs": [
+      {
+        "id": "config-name",
+        "required": false,
+        "default": "release-drafter.yml",
+        "description": "Release Drafter configuration target."
+      },
+      {
+        "id": "token",
+        "required": false,
+        "default": "${{ github.token }}",
+        "description": "Access token for GitHub API requests. Default: github.token."
+      },
+      {
+        "id": "name",
+        "required": false,
+        "description": "Release name. This value overrides `name-template`."
+      },
+      {
+        "id": "tag",
+        "required": false,
+        "description": "Release tag. This value overrides `tag-template`."
+      },
+      {
+        "id": "version",
+        "required": false,
+        "description": "Release version. This value overrides the calculated version."
+      },
+      {
+        "id": "from",
+        "required": false,
+        "description": "Ref, tag, branch, or commit SHA to use as the change comparison baseline."
+      },
+      {
+        "id": "publish",
+        "required": false,
+        "default": "",
+        "description": "Publishes the created or updated release immediately."
+      },
+      {
+        "id": "latest",
+        "required": false,
+        "default": "",
+        "description": "Marks the created or updated release as latest."
+      },
+      {
+        "id": "prerelease",
+        "required": false,
+        "default": "",
+        "description": "Creates a prerelease and includes changes since the previous prerelease when one exists. Default: `false`."
+      },
+      {
+        "id": "prerelease-identifier",
+        "required": false,
+        "default": "",
+        "description": "Prerelease identifier, such as `alpha`, `beta`, or `rc`."
+      },
+      {
+        "id": "include-pre-releases",
+        "required": false,
+        "default": "",
+        "description": "Includes prereleases when Release Drafter selects the last published release."
+      },
+      {
+        "id": "commitish",
+        "required": false,
+        "default": "",
+        "description": "Release target. Use a branch, commit SHA, fully qualified tag, or pull request ref."
+      },
+      {
+        "id": "header",
+        "required": false,
+        "default": "",
+        "description": "Text to add before the template body."
+      },
+      {
+        "id": "footer",
+        "required": false,
+        "default": "",
+        "description": "Text to add after the template body."
+      },
+      {
+        "id": "dry-run",
+        "required": false,
+        "default": "",
+        "description": "Prevents write operations. The action logs the proposed release operation."
+      },
+      {
+        "id": "filter-by-range",
+        "required": false,
+        "default": "",
+        "description": "Filter releases whose tag names satisfy this SemVer range."
+      }
+    ],
+    "outputs": [
+      "id",
+      "name",
+      "tag_name",
+      "body",
+      "labels",
+      "html_url",
+      "upload_url",
+      "major_version",
+      "minor_version",
+      "patch_version",
+      "resolved_version"
+    ],
+    "license": "ISC"
+  },
+  {
+    "uses": "actions/create-github-app-token",
+    "ref": "v3",
+    "sha": "64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
+    "name": "Create GitHub App Token",
+    "description": "GitHub Action for creating a GitHub App installation access token",
+    "inputs": [
+      {
+        "id": "client-id",
+        "required": false,
+        "description": "GitHub App Client ID"
+      },
+      {
+        "id": "app-id",
+        "required": false,
+        "deprecated": true,
+        "description": "GitHub App ID"
+      },
+      {
+        "id": "private-key",
+        "required": true,
+        "description": "GitHub App private key"
+      },
+      {
+        "id": "owner",
+        "required": false,
+        "description": "The owner of the GitHub App installation (defaults to current repository owner)"
+      },
+      {
+        "id": "repositories",
+        "required": false,
+        "description": "Comma or newline-separated list of repositories to grant the token access to (defaults to current repository if owner is unset)"
+      },
+      {
+        "id": "enterprise",
+        "required": false,
+        "description": "The slug of the enterprise account where the GitHub App is installed (cannot be used with 'owner' or 'repositories')"
+      },
+      {
+        "id": "skip-token-revoke",
+        "required": false,
+        "default": "false",
+        "description": "If true, the token will not be revoked when the current job is complete"
+      },
+      {
+        "id": "github-api-url",
+        "required": false,
+        "default": "${{ github.api_url }}",
+        "description": "The URL of the GitHub REST API."
+      },
+      {
+        "id": "permission-actions",
+        "required": false,
+        "description": "The level of permission to grant the access token for GitHub Actions workflows, workflow runs, and artifacts. Can be set to 'read' or 'writ…"
+      },
+      {
+        "id": "permission-administration",
+        "required": false,
+        "description": "The level of permission to grant the access token for repository creation, deletion, settings, teams, and collaborators creation. Can be se…"
+      },
+      {
+        "id": "permission-artifact-metadata",
+        "required": false,
+        "description": "The level of permission to grant the access token to create and retrieve build artifact metadata records. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-attestations",
+        "required": false,
+        "description": "The level of permission to create and retrieve the access token for repository attestations. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-checks",
+        "required": false,
+        "description": "The level of permission to grant the access token for checks on code. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-code-quality",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage code quality data. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-codespaces",
+        "required": false,
+        "description": "The level of permission to grant the access token to create, edit, delete, and list Codespaces. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-contents",
+        "required": false,
+        "description": "The level of permission to grant the access token for repository contents, commits, branches, downloads, releases, and merges. Can be set t…"
+      },
+      {
+        "id": "permission-custom-properties-for-organizations",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and edit custom properties for an organization, when allowed by the property. Can…"
+      },
+      {
+        "id": "permission-dependabot-secrets",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage Dependabot secrets. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-deployments",
+        "required": false,
+        "description": "The level of permission to grant the access token for deployments and deployment statuses. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-discussions",
+        "required": false,
+        "description": "The level of permission to grant the access token for discussions and related comments and labels. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-email-addresses",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage the email addresses belonging to a user. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-enterprise-custom-properties-for-organizations",
+        "required": false,
+        "description": "The level of permission to grant the access token for organization custom properties management at the enterprise level. Can be set to 'rea…"
+      },
+      {
+        "id": "permission-environments",
+        "required": false,
+        "description": "The level of permission to grant the access token for managing repository environments. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-followers",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage the followers belonging to a user. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-git-ssh-keys",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage git SSH keys. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-gpg-keys",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage GPG keys belonging to a user. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-interaction-limits",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage interaction limits on a repository. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-issues",
+        "required": false,
+        "description": "The level of permission to grant the access token for issues and related comments, assignees, labels, and milestones. Can be set to 'read'…"
+      },
+      {
+        "id": "permission-members",
+        "required": false,
+        "description": "The level of permission to grant the access token for organization teams and members. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-merge-queues",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage the merge queues for a repository. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-metadata",
+        "required": false,
+        "description": "The level of permission to grant the access token to search repositories, list collaborators, and access repository metadata. Can be set to…"
+      },
+      {
+        "id": "permission-organization-administration",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage access to an organization. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-organization-announcement-banners",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage announcement banners for an organization. Can be set to 'read' or 'wri…"
+      },
+      {
+        "id": "permission-organization-copilot-agent-settings",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage Copilot cloud agent settings for an organization. Can be set to 'read'…"
+      },
+      {
+        "id": "permission-organization-copilot-seat-management",
+        "required": false,
+        "description": "The level of permission to grant the access token for managing access to GitHub Copilot for members of an organization with a Copilot Busin…"
+      },
+      {
+        "id": "permission-organization-custom-org-roles",
+        "required": false,
+        "description": "The level of permission to grant the access token for custom organization roles management. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-organization-custom-properties",
+        "required": false,
+        "description": "The level of permission to grant the access token for repository custom properties management at the organization level. Can be set to 'rea…"
+      },
+      {
+        "id": "permission-organization-custom-roles",
+        "required": false,
+        "description": "The level of permission to grant the access token for custom repository roles management. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-organization-events",
+        "required": false,
+        "description": "The level of permission to grant the access token to view events triggered by an activity in an organization. Can be set to 'read'."
+      },
+      {
+        "id": "permission-organization-external-properties-for-repos",
+        "required": false,
+        "description": "The level of permission to grant the access token for managing external custom properties for repositories in an organization. Can be set t…"
+      },
+      {
+        "id": "permission-organization-hooks",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage the post-receive hooks for an organization. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-organization-packages",
+        "required": false,
+        "description": "The level of permission to grant the access token for organization packages published to GitHub Packages. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-organization-personal-access-token-requests",
+        "required": false,
+        "description": "The level of permission to grant the access token for viewing and managing fine-grained personal access tokens that have been approved by a…"
+      },
+      {
+        "id": "permission-organization-personal-access-tokens",
+        "required": false,
+        "description": "The level of permission to grant the access token for viewing and managing fine-grained personal access token requests to an organization.…"
+      },
+      {
+        "id": "permission-organization-plan",
+        "required": false,
+        "description": "The level of permission to grant the access token for viewing an organization's plan. Can be set to 'read'."
+      },
+      {
+        "id": "permission-organization-projects",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage organization projects and projects public preview (where available). Can be set…"
+      },
+      {
+        "id": "permission-organization-secrets",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage organization secrets. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-organization-self-hosted-runners",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage GitHub Actions self-hosted runners available to an organization. Can b…"
+      },
+      {
+        "id": "permission-organization-user-blocking",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage users blocked by the organization. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-packages",
+        "required": false,
+        "description": "The level of permission to grant the access token for packages published to GitHub Packages. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-pages",
+        "required": false,
+        "description": "The level of permission to grant the access token to retrieve Pages statuses, configuration, and builds, as well as create new builds. Can…"
+      },
+      {
+        "id": "permission-profile",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage the profile settings belonging to a user. Can be set to 'write'."
+      },
+      {
+        "id": "permission-pull-requests",
+        "required": false,
+        "description": "The level of permission to grant the access token for pull requests and related comments, assignees, labels, milestones, and merges. Can be…"
+      },
+      {
+        "id": "permission-repository-custom-properties",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and edit custom properties for a repository, when allowed by the property. Can be…"
+      },
+      {
+        "id": "permission-repository-hooks",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage the post-receive hooks for a repository. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-repository-projects",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage repository projects, columns, and cards. Can be set to 'read', 'write', or 'adm…"
+      },
+      {
+        "id": "permission-secret-scanning-alerts",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage secret scanning alerts. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-secrets",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage repository secrets. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-security-events",
+        "required": false,
+        "description": "The level of permission to grant the access token to view and manage security events like code scanning alerts. Can be set to 'read' or 'wr…"
+      },
+      {
+        "id": "permission-single-file",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage just a single file. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-starring",
+        "required": false,
+        "description": "The level of permission to grant the access token to list and manage repositories a user is starring. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-statuses",
+        "required": false,
+        "description": "The level of permission to grant the access token for commit statuses. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-vulnerability-alerts",
+        "required": false,
+        "description": "The level of permission to grant the access token to manage Dependabot alerts. Can be set to 'read' or 'write'."
+      },
+      {
+        "id": "permission-workflows",
+        "required": false,
+        "description": "The level of permission to grant the access token to update GitHub Actions workflow files. Can be set to 'write'."
+      }
+    ],
+    "outputs": [
+      "token",
+      "installation-id",
+      "app-slug"
+    ],
+    "license": "MIT"
+  }
+]
