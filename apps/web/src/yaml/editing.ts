@@ -38,12 +38,16 @@ export function aloneOf(tr: Transaction): Alone | undefined {
   return undefined;
 }
 
-/** The extensions of a writable file: editable, keyed, indented, and listened to. */
+/**
+ * The extensions of a writable file: editable, keyed, indented, and listened to. Its content is a tab stop by its
+ * attribute, as a read-only file's is: the browser tabs into an editing host anyway, but axe counts the scroller as
+ * reachable by the keyboard only through a `tabindex`.
+ */
 export function writableExtensions(path: string, indent: number, on: EditHandlers): Extension[] {
   return [
     EditorState.readOnly.of(false),
     EditorView.editable.of(true),
-    EditorView.contentAttributes.of({ 'aria-label': path }),
+    EditorView.contentAttributes.of({ 'aria-label': path, tabindex: '0' }),
     indentUnit.of(' '.repeat(indent)),
     keymap.of([...defaultKeymap, indentWithTab]),
     EditorView.domEventHandlers({
