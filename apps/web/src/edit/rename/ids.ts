@@ -3,6 +3,7 @@ import type { NodeId, RunPlan, WorkflowPlan } from '@simulci/engine';
 import type { SelectionRef } from '../../state/history';
 import { type Renames, renamedUnit } from '../../state/renames';
 import type { SessionState } from '../../state/store';
+import type { PlannedOp } from '../types';
 
 /**
  * A rename's ids as the page keeps them (synthesis § 4.10, § 7.4): the plan's NodeIds it changes, read from the plan
@@ -44,14 +45,25 @@ function workflowsOf(plan: RunPlan): WorkflowPlan[] {
   return out;
 }
 
-/** The selection in the terms after the renames: a leg or a step of a job renamed keeps its place under the new id. */
+/**
+ * The selection in the terms after the renames: a leg or a step of a job renamed keeps its place under the new id, and
+ * so does a step selected by its position (`build[os=b].#1`) that is given its first id.
+ */
 export function renamedSelection(
   s: Pick<SessionState, 'focus' | 'sel'>,
   renames: readonly Rename[],
+  ops: readonly PlannedOp[] = [],
 ): SelectionRef {
+  const all = [...renames, ...ops.flatMap(({ op }) => firstId(op))];
   const sel =
     s.sel === undefined
       ? undefined
-      : renames.reduce((path, r) => (r.file === s.focus ? renamedUnit(path, r) : path), s.sel);
+      : all.reduce((path, r) => (r.file === s.focus ? renamedUnit(path, r) : path), s.sel);
   return { ...(s.focus === undefined ? {} : { focus: s.focus }), ...(sel === undefined ? {} : { sel }) };
 }
+
+/** A step given its first id, as a rename of its position: no plan node or reference names that position. */
+const firstId = (op: PlannedOp['op']): Rename[] =>
+  op.op === 'renameStepId' && op.fp.id === undefined
+    ? [{ kind: 'step', file: op.file, job: op.job, from: `#${op.index + 1}`, to: op.to }]
+    : [];

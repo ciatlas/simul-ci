@@ -9,93 +9,34 @@ import { fileURLToPath } from 'node:url';
 import { fingerprint } from '@simulci/document';
 import type { ReferenceTarget } from '@simulci/engine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSession, type Session } from '../src/engine/session';
+import { renameProblem, startingId, summaryOf, takenIds } from '../src/edit/rename/form';
 import {
-  renameBroken,
   dispatchRename,
   findRefs,
   preview,
   type RenameTarget,
+  renameBroken,
   watchRename,
 } from '../src/edit/rename/run';
-import { renameProblem, startingId, summaryOf, takenIds } from '../src/edit/rename/form';
 import { testsNaming } from '../src/edit/rename/tests';
 import { documents } from '../src/edit/documents';
 import { createSessionStore, type SessionStore } from '../src/state/store';
-import type { EngineClient } from '../src/worker/client';
-import { handle, initialState, type WorkerState } from '../src/worker/handle';
-import type { EngineRequest, EngineResponse, Outline, RefsResponse } from '../src/worker/protocol';
+import { handle, initialState } from '../src/worker/handle';
+import type { EngineResponse, Outline, RefsResponse } from '../src/worker/protocol';
+import { CI, disposeSessions, FOLDER, jobTarget, opened, planned, text as textOf } from './rename-harness';
 
 const RELEASE = '.github/workflows/release.yml';
-const CI = '.github/workflows/ci.yml';
-const FOLDER = { kind: 'folder', name: 'repo', readAt: 0 } as const;
 const FLOWPACT = readFileSync(
   fileURLToPath(new URL('../e2e/fixtures/flowpact/release.yml', import.meta.url)),
   'utf8',
 );
 
-/** The worker in this thread: each request answered by `handle` a microtask later, as a worker would. */
-function inlineClient(): EngineClient & { sent: EngineRequest[] } {
-  let state: WorkerState = initialState();
-  let id = 0;
-  const sent: EngineRequest[] = [];
-  const ask = <R>(body: Omit<EngineRequest, 'id'>): Promise<R> =>
-    new Promise((resolve) =>
-      queueMicrotask(() => {
-        const request = { ...body, id: ++id } as EngineRequest;
-        sent.push(request);
-        const out = handle(state, request);
-        state = out.state;
-        resolve(out.response as R);
-      }),
-    );
-  return {
-    sent,
-    ready: Promise.resolve({
-      type: 'ready',
-      protocol: 1,
-      engine: { version: 'test', runPlan: 1 },
-      models: [],
-    }),
-    load: (body) => ask({ ...body, type: 'load' }),
-    simulate: (body) => ask({ ...body, type: 'simulate' }),
-    case: (body) => ask({ ...body, type: 'case' }),
-    refs: (body) => ask({ ...body, type: 'refs' }),
-    onRestart: () => undefined,
-    onFailure: () => undefined,
-    restarts: () => 0,
-    terminate: () => undefined,
-  };
-}
-
-const sessions: Session[] = [];
 afterEach(() => {
-  for (const s of sessions.splice(0)) s.dispose();
+  disposeSessions();
   vi.restoreAllMocks();
 });
 
-/** A store and a session over the inline worker, with a plan of the files on screen. */
-async function opened(byPath: Record<string, string>) {
-  const store = createSessionStore();
-  const client = inlineClient();
-  const session = createSession({ store, client });
-  sessions.push(session);
-  store.getState().setFiles(byPath, FOLDER);
-  await vi.waitFor(() => expect(store.getState().plan?.for.files).toBe(store.getState().files.version));
-  return { store, session, client };
-}
-
-const text = (store: SessionStore, path = RELEASE): string => store.getState().files.byPath[path]!;
-
-const jobTarget = (store: SessionStore, file: string, job: string): RenameTarget => ({
-  file,
-  rev: store.getState().files.revs[file]!,
-  job,
-});
-
-/** The plan of the newest texts is on screen. */
-const planned = (store: SessionStore) =>
-  vi.waitFor(() => expect(store.getState().plan?.for.files).toBe(store.getState().files.version));
+const text = (store: SessionStore, path = RELEASE): string => textOf(store, path);
 
 describe('the worker’s refs', () => {
   const refs = (files: Record<string, string>, target: ReferenceTarget): EngineResponse => {
@@ -465,9 +406,8 @@ describe('the post-condition on the next Outline', () => {
     const { store, tx, files } = renamed();
     watchRename(store, tx, [job], files);
     store.getState().typed(CI, [{ from: 0, to: 0, insert: '#\n' }], 'paste');
-    store
-      .getState()
-      .projectReady(2, outline([{ id: 'compile' }, { id: 'test', needs: ['build'] }]), files + 1);
+    // The Outline of the renamed text, arriving after the edit that followed it.
+    store.getState().projectReady(2, outline([{ id: 'compile' }, { id: 'test', needs: ['build'] }]), files);
     await vi.waitFor(() => expect(store.getState().notices).toHaveLength(1));
     expect(store.getState().edit.past).toHaveLength(2);
     expect(store.getState().notices[0]?.text).toMatch(
@@ -478,6 +418,25 @@ describe('the post-condition on the next Outline', () => {
       .projectReady(3, outline([{ id: 'compile' }, { id: 'test', needs: ['build'] }]), files + 1);
     await Promise.resolve();
     expect(store.getState().notices).toHaveLength(1);
+  });
+
+  it('says nothing of an Outline of later edits, nor of a rename undone', async () => {
+    const later = renamed();
+    watchRename(later.store, later.tx, [job], later.files);
+    later.store.getState().typed(CI, [{ from: 0, to: 0, insert: '#\n' }], 'paste');
+    later.store
+      .getState()
+      .projectReady(2, outline([{ id: 'compile' }, { id: 'test', needs: ['build'] }]), later.files + 1);
+    const undone = renamed();
+    watchRename(undone.store, undone.tx, [job], undone.files);
+    undone.store.getState().undo();
+    undone.store
+      .getState()
+      .projectReady(2, outline([{ id: 'build' }, { id: 'test', needs: ['build'] }]), undone.files + 1);
+    await Promise.resolve();
+    expect(later.store.getState().notices).toEqual([]);
+    expect(later.store.getState().edit.past).toHaveLength(2);
+    expect(undone.store.getState().notices).toEqual([]);
   });
 
   it('waits for an Outline of its text, and lets a rename that held be', async () => {

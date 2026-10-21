@@ -8,6 +8,7 @@ import {
   yamlPathOf,
 } from '@simulci/document';
 import type { SelectionRef } from '../state/history';
+import { callsOut } from '../lib/unit-path';
 import type { SessionState, SessionStore } from '../state/store';
 import { documents } from './documents';
 
@@ -58,7 +59,7 @@ export function targetOf(
   const rev = s.files.revs[focus];
   if (!doc || rev === undefined) return undefined;
   if (!sel) return { file: focus, rev, path: [] };
-  if (sel.includes('/') || (options.planned && sel.includes('#') && behind(s, focus))) return undefined;
+  if (callsOut(sel) || (options.planned && sel.includes('#') && behind(s, focus))) return undefined;
   const path = yamlPathOf(doc, sel);
   if (!path || path[1] !== jobOf(sel)) return undefined;
   const job = jobOf(sel);

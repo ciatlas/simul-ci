@@ -215,7 +215,7 @@ function commit(
     actions.refused(undefined);
     return { ...done, changed: false };
   }
-  const input = inputOf(s, plan, files, done.label, meta);
+  const input = inputOf(s, plan, ops, files, done.label, meta);
   const outcome = meta.group ? actions.grouped(meta.group, input) : actions.transact(input);
   if (!outcome.ok) return unchanged(store, outcome, done, ops, meta);
   const now = store.getState();
@@ -225,8 +225,15 @@ function commit(
 }
 
 /** What the store commits: the files' edits, the selection the plan leaves, and the ids it renames. */
-function inputOf(s: SessionState, plan: Plan, files: TxFile[], label: string, meta: OpMeta): TxInput {
-  const after = meta.keepSelection ? undefined : leftSelection(s, plan);
+function inputOf(
+  s: SessionState,
+  plan: Plan,
+  ops: readonly PlannedOp[],
+  files: TxFile[],
+  label: string,
+  meta: OpMeta,
+): TxInput {
+  const after = meta.keepSelection ? undefined : leftSelection(s, plan, ops);
   const renames = renamesOf(s, plan.renames);
   return {
     label,
@@ -269,10 +276,10 @@ function txFiles(s: SessionState, plan: Plan): TxFile[] {
  * Where the plan leaves the selection: the place its last op selects, in the text it wrote. A leg selected of a job
  * renamed is the same leg of it under its new id.
  */
-function leftSelection(s: SessionState, plan: Plan): SelectionRef | undefined {
+function leftSelection(s: SessionState, plan: Plan, ops: readonly PlannedOp[]): SelectionRef | undefined {
   const at = plan.select && plan.after.get(plan.select.file);
   return at && plan.select
-    ? selectionAfter(renamedSelection(s, plan.renames), plan.select, at.doc)
+    ? selectionAfter(renamedSelection(s, plan.renames, ops), plan.select, at.doc)
     : undefined;
 }
 
@@ -297,11 +304,23 @@ function refuse(
   const kept = Object.fromEntries(
     [...touched].flatMap((path) => (revs[path] === undefined ? [] : [[path, revs[path]]])),
   );
-  const fixes =
-    at < ops.length - 1 ? refusal.fixes.filter((f) => f.kind !== 'ops' || f.retry) : refusal.fixes;
+  const fixes = (
+    at < ops.length - 1 ? refusal.fixes.filter((f) => f.kind !== 'ops' || f.retry) : refusal.fixes
+  ).filter((f) => !meta.refs || renameKeeps(f, ops[at]!.op));
   const stored = { refusal: { ...refusal, fixes }, ops, at, meta: { ...meta, revs: kept } };
   const seq = store.getState().refused(stored);
   return { ok: false, refused: { ...stored, seq } };
+}
+
+/**
+ * The fixes a rename refused with the worker's references may offer. The references are places in the text they were
+ * found in, so a fix that writes before the rename runs again (a copy taking an anchor out of its way) would leave
+ * them pointing at the wrong bytes; "Change all" fits a job's id, which every alias reads alike, and never a step's,
+ * which each job reads as its own.
+ */
+function renameKeeps(fix: Fix, op: WorkflowOp): boolean {
+  if (fix.kind === 'ops') return false;
+  return fix.kind !== 'shared-all' || (op.op === 'renameJob' && !fix.ops?.length);
 }
 
 /** The first file whose text moved since the gesture read it. */

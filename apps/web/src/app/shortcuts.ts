@@ -6,6 +6,7 @@ import { planIndex, resolveSelection } from '../plan/index';
 import type { PanelTab } from '../state/prefs';
 import { dirtyPaths, type SessionActions, type SessionState, type SessionStore } from '../state/store';
 import { historyCommand, letterOf } from '../lib/history-keys';
+import { callsOut } from '../lib/unit-path';
 import { caseAvailability } from '../testcase/case';
 import { type Pane, togglePaneKeepingFocus } from './panes';
 import { canSave } from './saver';
@@ -196,7 +197,7 @@ function dialogAround(target: EventTarget | null): boolean {
 /** Mod+K in edit mode, outside a dialog: the palette, when a job or a step of the focused workflow is selected. */
 function paletteKey(event: HistoryKey, s: SessionState, store: SessionStore): boolean {
   if (!s.edit.on || !modKey(event, 'k') || dialogAround(event.target)) return false;
-  return Boolean(s.sel) && !s.sel?.includes('/') && gestures.ask(store, (g) => g.palette());
+  return Boolean(s.sel) && !callsOut(s.sel) && gestures.ask(store, (g) => g.palette());
 }
 
 /**
@@ -206,7 +207,7 @@ function paletteKey(event: HistoryKey, s: SessionState, store: SessionStore): bo
 export function renameKey(event: HistoryKey, s: SessionState, store: SessionStore): boolean {
   if (!s.edit.on || !aloneF2(event) || ownedElsewhere(event.target) || dialogAround(event.target))
     return false;
-  return Boolean(s.sel) && !s.sel?.includes('/') && gestures.ask(store, (g) => g.rename());
+  return Boolean(s.sel) && !callsOut(s.sel) && gestures.ask(store, (g) => g.rename());
 }
 
 /** F2 with no modifier, that nothing handled yet. */
@@ -271,7 +272,7 @@ function runEdit(command: PageCommand, s: SessionState & SessionActions, store?:
   if (!s.edit.on) return false;
   if (!store) return false;
   if (command === 'addJob') return gestures.ask(store, (g) => g.addJob());
-  if (!s.sel || s.sel.includes('/')) return false;
+  if (!s.sel || callsOut(s.sel)) return false;
   if (command === 'runIf') {
     s.focusProperty('if');
     return true;

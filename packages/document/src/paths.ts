@@ -213,11 +213,10 @@ export function unitPathIn(jobs: readonly JobInfo[], path: YamlPath): string | u
  * text); a step of a called workflow or of a composite action names the calling job or step, the nearest node here.
  */
 export function yamlPathIn(jobs: readonly JobInfo[], unitPath: string): YamlPath | undefined {
-  const head = withoutQualifier(unitPath).split('/')[0]!;
-  const m = /^([^[.]+)(?:\[[^\]]*\])?(?:\.(.+))?$/.exec(head.trim());
-  if (!m) return undefined;
-  const [, id, stepName] = m;
-  const job = jobs.find((j) => j.id === id) ?? jobs.find((j) => j.id.toLowerCase() === id!.toLowerCase());
+  const head = headOf(withoutQualifier(unitPath).trim());
+  if (!head) return undefined;
+  const { id, stepName } = head;
+  const job = jobs.find((j) => j.id === id) ?? jobs.find((j) => j.id.toLowerCase() === id.toLowerCase());
   if (!job) return undefined;
   if (stepName === undefined) return ['jobs', job.id];
   const index = stepIndex(job, stepName);
@@ -231,6 +230,38 @@ function stepIndex(job: JobInfo, name: string): number | undefined {
     return index >= 0 && index < job.steps.length ? index : undefined;
   }
   return job.steps.find((step) => step.id === name)?.index;
+}
+
+/**
+ * A unit path's job and step, up to a `/` that leaves the file (a called workflow's job, a composite's inner step). A
+ * leg selector's brackets nest and hide what they hold, so a matrix value may hold `/`, `.` or brackets
+ * (`build[dir=packages/a].x`, `build[install=.[dev]]`).
+ */
+function headOf(path: string): { id: string; stepName?: string } | undefined {
+  const idEnd = scanTo(path, 0, '[./');
+  const legEnd = path[idEnd] === '[' ? closingOf(path, idEnd) : idEnd;
+  if (idEnd === 0 || legEnd < 0 || (legEnd < path.length && !'./'.includes(path[legEnd]!))) return undefined;
+  const id = path.slice(0, idEnd);
+  if (path[legEnd] !== '.') return { id };
+  const end = path.indexOf('/', legEnd);
+  return { id, stepName: path.slice(legEnd + 1, end === -1 ? undefined : end) };
+}
+
+/** The first index from `from` holding one of `stops`, else the end. */
+function scanTo(text: string, from: number, stops: string): number {
+  let at = from;
+  while (at < text.length && !stops.includes(text[at]!)) at++;
+  return at;
+}
+
+/** Just past the `]` that closes the `[` at `open`; -1 when none does. */
+function closingOf(text: string, open: number): number {
+  let depth = 0;
+  for (let at = open; at < text.length; at++) {
+    if (text[at] === '[') depth++;
+    else if (text[at] === ']' && --depth === 0) return at + 1;
+  }
+  return -1;
 }
 
 /** `ci.yml:build.test` → `build.test`: the colon outside a leg selector ends the workflow qualifier. */

@@ -13,6 +13,7 @@ import {
   renamedUi,
   renamedUnit,
   type Renames,
+  type World,
 } from '../src/state/renames';
 import { createSessionStore } from '../src/state/store';
 
@@ -74,9 +75,10 @@ describe('renamedUi', () => {
 });
 
 describe('renamedUnit', () => {
-  it('follows a job renamed in every unit path that starts with it, ignoring case', () => {
+  it('follows a job renamed in every unit path that starts with it, as the engine matches ids: exactly', () => {
     expect(renamedUnit('build', job)).toBe('compile');
-    expect(renamedUnit('Build[os=a].#2', job)).toBe('compile[os=a].#2');
+    expect(renamedUnit('build[os=a].#2', job)).toBe('compile[os=a].#2');
+    expect(renamedUnit('Build', job)).toBe('Build');
     expect(renamedUnit('build.detect/inner', job)).toBe('compile.detect/inner');
     expect(renamedUnit('ci.yml:build.detect', job)).toBe('ci.yml:compile.detect');
     expect(renamedUnit('builder', job)).toBe('builder');
@@ -85,14 +87,20 @@ describe('renamedUnit', () => {
 
   it('follows a step id renamed in its job, whatever leg', () => {
     expect(renamedUnit('build.detect', step)).toBe('build.probe');
-    expect(renamedUnit('build[os=a,node=22.x].Detect/inner', step)).toBe('build[os=a,node=22.x].probe/inner');
+    expect(renamedUnit('build[os=a,node=22.x].detect/inner', step)).toBe('build[os=a,node=22.x].probe/inner');
+    expect(renamedUnit('build.Detect', step)).toBe('build.Detect');
     expect(renamedUnit('build.#1', step)).toBe('build.#1');
     expect(renamedUnit('test.detect', step)).toBe('test.detect');
   });
 });
 
 describe('renamedAssume', () => {
-  const none = (): boolean => false;
+  const world = (others: World['others'] = () => false): World => ({
+    others,
+    fileOf: () => undefined,
+    callee: () => undefined,
+  });
+  const none = world();
   it('renames the job and step paths of the file’s entries, qualified or not', () => {
     const assume: AssumeEntry[] = [
       { job: 'build', outcome: 'failure' },
@@ -113,9 +121,16 @@ describe('renamedAssume', () => {
     });
   });
 
-  it('leaves an unqualified entry when another workflow has a job of the old id, and the list when nothing moves', () => {
+  it('keeps what an unqualified entry covers: qualified when another workflow has the new id, copied when the old', () => {
     const assume: AssumeEntry[] = [{ job: 'build', outcome: 'failure' }];
-    expect(renamedAssume(assume, [job], (file, id) => file === CI && id === 'build')).toBe(assume);
+    const has = (id: string) => world((file, other) => file === CI && other === id);
+    expect(renamedAssume(assume, [job], has('compile'))).toEqual([
+      { job: 'compile', outcome: 'failure', workflow: 'ci.yml' },
+    ]);
+    expect(renamedAssume(assume, [job], has('build'))).toEqual([
+      { job: 'build', outcome: 'failure' },
+      { job: 'compile', outcome: 'failure', workflow: 'ci.yml' },
+    ]);
     expect(renamedAssume(assume, [{ ...job, from: 'lint', job: 'lint' }], none)).toBe(assume);
   });
 });
@@ -144,7 +159,13 @@ describe('the store and a rename', () => {
     expect(s.ui.expanded).toEqual([`${CI}#build`, `${CI}#compile`]);
     expect(s.assume).toEqual([{ job: 'compile', outcome: 'failure' }]);
     expect(s.hoveredUnknown).toBeUndefined();
-    expect(s.edit.past.at(-1)?.renames).toEqual(renames);
+    expect(s.edit.past.at(-1)?.renames).toEqual({
+      ...renames,
+      assume: {
+        before: [{ job: 'build', outcome: 'failure' }],
+        after: [{ job: 'compile', outcome: 'failure' }],
+      },
+    });
   });
 
   it('maps back on undo and forth on redo', () => {

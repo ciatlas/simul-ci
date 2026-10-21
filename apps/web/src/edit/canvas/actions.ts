@@ -1,6 +1,7 @@
 import { freeId, ID, type NewJob, sameId, type WorkflowDocument, type WorkflowOp } from '@simulci/document';
 import type { NodeId } from '@simulci/engine';
 import { listed } from '../../lib/words';
+import { callsOut } from '../../lib/unit-path';
 import { planIndex, selectionOf } from '../../plan/index';
 import type { SessionStore } from '../../state/store';
 import type { Outline } from '../../worker/protocol';
@@ -56,7 +57,7 @@ function jobSel(store: SessionStore, node: NodeId): { focus: string; job: string
 /** The selection as a place in the focused workflow's text, read as the canvas shows it. */
 function selected(store: SessionStore): Target | undefined {
   const s = store.getState();
-  if (!s.edit.on || s.focus === undefined || s.sel?.includes('/')) return undefined;
+  if (!s.edit.on || s.focus === undefined || callsOut(s.sel)) return undefined;
   return targetOf(store, s.focus, s.sel, { planned: true });
 }
 
@@ -276,7 +277,7 @@ export function gesturesOf(store: SessionStore, ui: GestureUi): Gestures {
       const target = selected(store);
       return target?.step !== undefined && moveStep(store, ui, target, target.step.index + by);
     },
-    rename: () => openRename(store, ui),
+    rename: (at) => (at ? renameRow(store, ui, at.node, at.anchor) : openRename(store, ui)),
     canConnect: (source, target) => canConnect(store, source, target),
     connect: (source, target) => connect(store, ui, source, target),
     disconnect: (source, target) => disconnect(store, ui, source, target),
@@ -372,15 +373,25 @@ function afterSelection(store: SessionStore): PaletteOpen | undefined {
  * Rename, over the selected job's card title (a leg's job), or for the selected step's id at its job's card; at the
  * outline row with the focus when the card is not drawn.
  */
-function openRename(store: SessionStore, ui: GestureUi): boolean {
+function openRename(store: SessionStore, ui: GestureUi, at?: Element): boolean {
   const target = selected(store);
   if (target?.job === undefined) return false;
   const card = cardElement(jobNode(target.file, target.job));
   const title = target.step ? undefined : card?.querySelector('.sc-card-label');
-  const anchor = title ?? anchorFor(jobNode(target.file, target.job));
+  const anchor = at ?? title ?? anchorFor(jobNode(target.file, target.job));
   const { file, rev, job, step } = target;
   ui.open({ kind: 'rename', target: { file, rev, job, ...(step ? { step } : {}) }, anchor });
   return true;
+}
+
+/** Rename from an outline row: the row's node is selected, as its menu does, and the input opens at the row. */
+function renameRow(store: SessionStore, ui: GestureUi, node: NodeId, anchor: Element): boolean {
+  const s = store.getState();
+  if (!s.plan || !s.edit.on) return false;
+  const { focus, sel } = selectionOf(planIndex(s.plan), node);
+  if (focus !== s.focus || sel === undefined || callsOut(sel)) return false;
+  s.select(focus, sel);
+  return openRename(store, ui, anchor);
 }
 
 /** What it needs, under the selected job's card (a leg's or a step's job). */
@@ -406,7 +417,7 @@ function openMenu(store: SessionStore, ui: GestureUi, node: NodeId, anchor: Elem
   const index = s.plan && s.edit.on ? planIndex(s.plan) : undefined;
   if (!index || !ACTIONABLE.has(index.nodes.get(node)?.kind ?? '')) return false;
   const { focus, sel } = selectionOf(index, node);
-  if (focus !== s.focus || sel?.includes('/')) return false;
+  if (focus !== s.focus || callsOut(sel)) return false;
   s.select(focus, sel);
   ui.open({ kind: 'menu', node, anchor });
   return true;

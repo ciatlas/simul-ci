@@ -11,7 +11,7 @@ import { type ChangeRow, changeRows, changeSentence } from '../plan/change-rows'
 import { diffOf, pinSentence, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline, ReadyResponse } from '../worker/protocol';
 import * as history from './history';
-import { changeRenames, inverse, type Renames, renamedBeside } from './renames';
+import { carried, changeRenames, inverse, type Renames, renamedBeside } from './renames';
 import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
 
 /**
@@ -847,13 +847,21 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           },
         })),
       unknownFocused: (seq) => set((s) => (s.unknownFocus?.seq === seq ? { unknownFocus: undefined } : {})),
-      transact: (input) =>
-        commit(
-          (s) => history.transact(s.edit, s.files.byPath, input, contextOf(s)),
-          () => ({ label: input.label, ...(input.renames ? { renames: input.renames } : {}) }),
+      transact: (input) => {
+        // The step and what it says read one state: the input as it commits is worked out once for it.
+        let memo: { s: SessionState; input: history.TxInput } | undefined;
+        const tx = (s: SessionState): history.TxInput =>
+          memo?.s === s ? memo.input : (memo = { s, input: carried(s, input) }).input;
+        return commit(
+          (s) => history.transact(s.edit, s.files.byPath, tx(s), contextOf(s)),
+          (s) => {
+            const { renames } = tx(s);
+            return { label: input.label, ...(renames ? { renames } : {}) };
+          },
           undefined,
           input.selectionAfter,
-        ),
+        );
+      },
       grouped: (key, input) =>
         commit(
           (s) => history.grouped(s.edit, s.files.byPath, key, input, contextOf(s)),
@@ -1057,9 +1065,12 @@ function besideTexts(
     : { source, change };
 }
 
-/** The renames an undo takes back or a redo makes again: none while typing is open, which is what an undo undoes. */
+/**
+ * The renames an undo takes back or a redo makes again. An undo undoes the newest entry once open typing is closed
+ * into one, which carries none; typing that changed nothing closes into none, and the entry under it is undone.
+ */
 function stepRenames(s: SessionState, verb: 'undo' | 'redo'): { renames?: Renames } {
-  const tx = verb === 'undo' ? (s.edit.group ? undefined : s.edit.past.at(-1)) : s.edit.future.at(-1);
+  const tx = verb === 'undo' ? history.close(s.edit).past.at(-1) : s.edit.future.at(-1);
   if (!tx?.renames) return {};
   return { renames: verb === 'undo' ? inverse(tx.renames) : tx.renames };
 }

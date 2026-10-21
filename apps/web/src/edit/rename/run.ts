@@ -141,39 +141,40 @@ export async function dispatchRename(
 ): Promise<Dispatched> {
   const { store } = app;
   const op = renameOp(target, to);
+  const { epoch } = store.getState().files;
   let found = known;
   let last: Dispatched | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (!found || !fresh(store.getState(), found, target.file)) {
-      const next = await findRefs(app.session, store, target);
-      if (!next.ok) return unavailable(store, op, next.message);
-      found = next;
-    }
-    if (fresh(store.getState(), found, target.file)) {
-      last = dispatch(store, op, {
-        refs: found.refs,
-        revs: { [target.file]: found.revs[target.file]! },
-        label: renameLabel(target, to),
-      });
-      if (last.ok || last.refused.refusal.reason !== 'stale') return committed(store, last);
-    }
+    const usable =
+      found && fresh(store.getState(), found, target.file)
+        ? found
+        : await findRefs(app.session, store, target);
+    // Other files came while it looked: a file of the same path there is not the one the author pointed at.
+    if (store.getState().files.epoch !== epoch)
+      return unavailable(store, op, 'Other files were opened.', false);
+    if (!usable.ok) return unavailable(store, op, usable.message);
+    last = fresh(store.getState(), usable, target.file)
+      ? planned(store, op, usable, renameLabel(target, to))
+      : last;
+    if (last && (last.ok || last.refused.refusal.reason !== 'stale')) return committed(store, last);
     found = undefined;
   }
-  return (
-    last ??
-    unavailable(
-      store,
-      op,
-      `${fileLabel(target.file)} kept changing while the rename looked for its references; try again.`,
-    )
-  );
+  const kept = `${fileLabel(target.file)} kept changing while the rename looked for its references; try again.`;
+  return last ?? unavailable(store, op, kept);
 }
 
-/** A rename that cannot be planned now (the texts do not load, the engine is gone), kept for the status line. */
-function unavailable(store: SessionStore, op: WorkflowOp, message: string): Dispatched {
+/** The rename dispatched with references found in the file's text now. */
+const planned = (store: SessionStore, op: WorkflowOp, found: Found, label: string): Dispatched =>
+  dispatch(store, op, { refs: found.refs, revs: { [op.file]: found.revs[op.file]! }, label });
+
+/**
+ * A rename that cannot be planned now (the texts do not load, the engine is gone), kept for the status line; not
+ * kept when other files replaced the ones it was about, whose status line it is not.
+ */
+function unavailable(store: SessionStore, op: WorkflowOp, message: string, keep = true): Dispatched {
   const refusal: Refusal = { ok: false, reason: 'stale', message, file: op.file, fixes: [] };
   const stored = { refusal, ops: [{ op }], at: 0, meta: {} };
-  const seq = store.getState().refused(stored);
+  const seq = keep ? store.getState().refused(stored) : 0;
   return { ok: false, refused: { ...stored, seq } };
 }
 
@@ -226,13 +227,11 @@ export function watchRename(
   const { epoch } = store.getState().files;
   let done = false;
   const check = (s: SessionState): void => {
-    if (done) return;
-    const at = newestOutlined(s);
-    if (s.files.epoch === epoch && (at === undefined || at < files)) return;
+    const verdict = done ? 'wait' : verdictOf(s, epoch, tx.id, files);
+    if (verdict === 'wait') return;
     done = true;
     stop();
-    if (s.files.epoch !== epoch) return;
-    const broken = renames.map((r) => renameBroken(newestOutline(s), r)).find((b) => b !== undefined);
+    const broken = verdict === 'check' ? brokenOf(newestOutline(s), renames) : undefined;
     if (broken !== undefined) queueMicrotask(() => undoBroken(store, tx, broken));
   };
   const stop = store.subscribe(check);
@@ -240,9 +239,26 @@ export function watchRename(
   return stop;
 }
 
+/**
+ * Where the watch of a rename stands: waiting for an Outline of its text; done with nothing to say (a new source, the
+ * rename undone, or an Outline of edits made after it, which says nothing of the rename alone); or to check.
+ */
+function verdictOf(s: SessionState, epoch: number, id: number, files: number): 'wait' | 'done' | 'check' {
+  if (s.files.epoch !== epoch || !s.edit.past.some((t) => t.id === id)) return 'done';
+  const at = newestOutlined(s);
+  if (at === undefined || at < files) return 'wait';
+  return at > files && !newest(s, id) ? 'done' : 'check';
+}
+
+const brokenOf = (outline: Outline | undefined, renames: readonly Rename[]): string | undefined =>
+  renames.map((r) => renameBroken(outline, r)).find((b) => b !== undefined);
+
+/** Whether an entry is the newest, with no typing open after it: what an undo would undo. */
+const newest = (s: SessionState, id: number): boolean => !s.edit.group && s.edit.past.at(-1)?.id === id;
+
 function undoBroken(store: SessionStore, tx: { id: number; label: string }, broken: string): void {
   const s = store.getState();
-  if (!s.edit.group && s.edit.past.at(-1)?.id === tx.id && s.undo()) {
+  if (newest(s, tx.id) && s.undo()) {
     s.notify(`Undid “${tx.label}”: ${broken}.`);
     return;
   }

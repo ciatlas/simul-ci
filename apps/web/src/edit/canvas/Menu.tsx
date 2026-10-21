@@ -59,6 +59,8 @@ export function RowMenu({ node, anchor, onClose }: { node: NodeId; anchor: Eleme
     all[(to + all.length) % all.length]?.focus();
   };
   const take = (item: MenuItem): void => {
+    // The row has the focus back before the action runs, so what it opens is anchored there, not at this menu.
+    if (anchor instanceof HTMLElement) anchor.focus({ preventScroll: true });
     onClose();
     const g = gestures.of(store);
     if (g) item.run(g);
