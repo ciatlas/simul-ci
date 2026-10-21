@@ -3,7 +3,8 @@ import { useApp, useSession } from '../../app/providers';
 import { newestOutline } from '../../state/store';
 import { documents } from '../documents';
 import { RefusalNote } from '../Refusal';
-import { addJob, checkoutOf, type GestureUi, idProblem, offeredId, type Open, runsOnFor } from './actions';
+import { addJob, checkoutOf, idProblem, offeredId, runsOnFor } from './actions';
+import type { GestureUi, Open } from './ui';
 import { AnchoredPopover } from './Popover';
 
 const INPUT = 'w-full rounded border border-border bg-bg px-2 py-1 font-mono text-text text-xs';

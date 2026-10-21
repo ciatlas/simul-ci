@@ -1,24 +1,16 @@
-import {
-  freeId,
-  ID,
-  type NewJob,
-  planOp,
-  sameId,
-  type Warning,
-  type WorkflowDocument,
-  type WorkflowOp,
-} from '@simulci/document';
+import { freeId, ID, type NewJob, sameId, type WorkflowDocument, type WorkflowOp } from '@simulci/document';
 import type { NodeId } from '@simulci/engine';
 import { listed } from '../../lib/words';
 import { planIndex, selectionOf } from '../../plan/index';
 import type { SessionStore } from '../../state/store';
 import type { Outline } from '../../worker/protocol';
-import { type Dispatched, dispatch, storeLock } from '../dispatch';
+import { type Dispatched, dispatch } from '../dispatch';
 import { documents } from '../documents';
 import { type Gestures, pendingEdges } from '../gestures';
 import { dependentsOf, needsOf, needsTransitively } from '../needs';
 import { type Target, targetOf } from '../selection';
-import type { OpMeta } from '../types';
+import { moveStep, removeStep, stepTarget } from '../steps/actions';
+import { type GestureUi, type PaletteOpen, removal } from './ui';
 
 /**
  * The structural gestures of the canvas and the outline tree (synthesis § 4.2, § 4.5), as ops through the one dispatch
@@ -28,29 +20,6 @@ import type { OpMeta } from '../types';
  * status line's sentence (C1). A removal that warns, or that takes needs with it, asks first; a removal that commits
  * offers Undo in a notice.
  */
-
-/** What the edit host shows for a gesture: a popover at a card or a row, a confirmation, a refusal at a card. */
-export interface GestureUi {
-  open(open: Open): void;
-  confirm(ask: Ask): void;
-  /** A refused gesture made on the canvas: its sentence at the card, as well as in the status line. */
-  refused(seq: number, anchor?: Element): void;
-  /** A job was added: its card takes the focus once a picture draws it. */
-  added(card: NodeId, files: number): void;
-}
-
-export type Open =
-  | { kind: 'addJob'; file: string; rev: number; after?: string; anchor?: Element }
-  | { kind: 'needs'; file: string; rev: number; job: string; anchor?: Element }
-  | { kind: 'menu'; node: NodeId; anchor: Element };
-
-/** A question before an op: what it takes with it, and the button that runs it. */
-export interface Ask {
-  title: string;
-  lines: string[];
-  action: string;
-  run: () => void;
-}
 
 /** The card of a node on the canvas, when it is drawn. */
 export function cardElement(node: NodeId): Element | undefined {
@@ -206,53 +175,17 @@ export function removedJobText(job: string, dependents: readonly string[]): stri
   return `Removed ${job} and ${listed(dependents.map((d) => `${d}'s`))} ${needs} on it`;
 }
 
-interface Removal {
-  op: WorkflowOp;
-  meta: OpMeta & { label: string };
-  toast: string;
-  ask: Omit<Ask, 'run'>;
-  anchor?: Element | undefined;
-  /** Ask even without a warning: the removal takes more than the author pointed at. */
-  always?: boolean;
-}
-
 /**
- * A removal: planned once to read its warnings, asked about when it warns (a need its reader loses, a step id still
- * read) or takes more with it, then dispatched with the revision the gesture read, so a text that moved while the
- * question was open refuses `stale`. The notice it leaves offers Undo while its entry is the newest.
+ * What Add job writes (synthesis § 4.2): its id, runner, needs and, when asked, a first step that checks out; or, from
+ * the palette, the reusable workflow it calls.
  */
-function removal(store: SessionStore, ui: GestureUi, r: Removal): void {
-  const run = (): void => {
-    const result = dispatch(store, r.op, r.meta);
-    if (!result.ok) {
-      ui.refused(result.refused.seq, r.anchor);
-      return;
-    }
-    if (!result.changed) return;
-    const s = store.getState();
-    s.notify(r.toast, s.edit.past.at(-1));
-  };
-  const warnings = warningsOf(store, r.op).filter((w) => w.code !== 'callers');
-  if (warnings.length === 0 && !r.always) return run();
-  ui.confirm({ ...r.ask, lines: [...r.ask.lines, ...warnings.map((w) => w.message)], run });
-}
-
-/** What an op would warn of on the text now, planned and not committed; none when it would be refused. */
-function warningsOf(store: SessionStore, op: WorkflowOp): Warning[] {
-  const s = store.getState();
-  if (storeLock(s, op.file)) return [];
-  const docs = documents(store);
-  const plan = planOp(op, { doc: (path) => docs.of(s, path) });
-  return plan.ok ? plan.warnings : [];
-}
-
-/** What Add job writes (synthesis § 4.2): its id, runner, needs and, when asked, a first step that checks out. */
 export interface NewJobForm {
   id: string;
   after?: string;
   runsOn: string;
   needs: string[];
   checkout?: string;
+  uses?: string;
 }
 
 export function addJobOp(file: string, form: NewJobForm): Extract<WorkflowOp, { op: 'addJob' }> {
@@ -260,8 +193,9 @@ export function addJobOp(file: string, form: NewJobForm): Extract<WorkflowOp, { 
     .split(',')
     .map((l) => l.trim())
     .filter((l) => l !== '');
-  const job: NewJob = {};
-  if (labels.length > 0) job['runs-on'] = labels.length === 1 ? labels[0]! : labels;
+  const job: NewJob = form.uses === undefined ? {} : { uses: form.uses };
+  if (labels.length > 0 && form.uses === undefined)
+    job['runs-on'] = labels.length === 1 ? labels[0]! : labels;
   if (form.needs.length > 0) job.needs = form.needs;
   if (form.checkout) job.steps = [{ uses: form.checkout }];
   return { op: 'addJob', file, id: form.id, ...(form.after === undefined ? {} : { after: form.after }), job };
@@ -274,7 +208,8 @@ export function addJob(
   at: { file: string; rev: number },
   form: NewJobForm,
 ): Dispatched {
-  const label = `Added job ${form.id}${form.after === undefined ? '' : ` after ${form.after}`}`;
+  const calls = form.uses === undefined ? '' : ` calling ${form.uses}`;
+  const label = `Added job ${form.id}${form.after === undefined ? '' : ` after ${form.after}`}${calls}`;
   const result = dispatch(store, addJobOp(at.file, form), { revs: { [at.file]: at.rev }, label });
   if (result.ok && result.changed) ui.added(jobNode(at.file, form.id), store.getState().files.version);
   return result;
@@ -330,9 +265,16 @@ export function gesturesOf(store: SessionStore, ui: GestureUi): Gestures {
   return {
     addJob: (after) => openAddJob(store, ui, after),
     needs: () => openNeeds(store, ui),
+    palette: (at) => openPalette(store, ui, at),
     remove: () => {
       const target = selected(store);
+      if (target?.step)
+        return removeStep(store, ui, target, { anchor: anchorFor(stepCard(target.file, target.job)) });
       return target !== undefined && removeSelectedJob(store, ui, target);
+    },
+    move: (by) => {
+      const target = selected(store);
+      return target?.step !== undefined && moveStep(store, ui, target, target.step.index + by);
     },
     canConnect: (source, target) => canConnect(store, source, target),
     connect: (source, target) => connect(store, ui, source, target),
@@ -374,6 +316,57 @@ const jobOf = (store: SessionStore, file: string, job: string | undefined): stri
         ?.jobs()
         .find((j) => j.id === job)?.id;
 
+const stepCard = (file: string, job: string | undefined): NodeId | undefined =>
+  job === undefined ? undefined : jobNode(file, job);
+
+/**
+ * The palette: at the place given (+ between steps, + Add step) or for the step given (Change…), else after the
+ * selected step or last in the selected job.
+ */
+function openPalette(
+  store: SessionStore,
+  ui: GestureUi,
+  at?: { job: string; index: number; change?: boolean },
+): boolean {
+  const open = at?.change ? changeAt(store, at) : at ? insertAt(store, at) : afterSelection(store);
+  if (open) ui.open(open);
+  return open !== undefined;
+}
+
+/** The palette for another action of the step at a place: its fingerprint read now. */
+function changeAt(store: SessionStore, at: { job: string; index: number }): PaletteOpen | undefined {
+  const file = workflowAt(store)?.file;
+  const step = file === undefined ? undefined : stepTarget(store, file, at.job, at.index);
+  return (
+    step && {
+      kind: 'palette',
+      file: step.file,
+      rev: step.rev,
+      job: at.job,
+      index: at.index,
+      change: step.step.fp,
+    }
+  );
+}
+
+/** The palette for a step at a place in a job of the focused workflow. */
+function insertAt(store: SessionStore, at: { job: string; index: number }): PaletteOpen | undefined {
+  const wf = workflowAt(store);
+  return wf && { kind: 'palette', file: wf.file, rev: wf.rev, job: at.job, index: at.index };
+}
+
+/** The palette for a step after the selected one, else last in the selected job. */
+function afterSelection(store: SessionStore): PaletteOpen | undefined {
+  const target = selected(store);
+  if (target?.job === undefined) return undefined;
+  const count =
+    docOf(store, target.file)
+      ?.jobs()
+      .find((j) => j.id === target.job)?.steps.length ?? 0;
+  const index = target.step ? target.step.index + 1 : count;
+  return { kind: 'palette', file: target.file, rev: target.rev, job: target.job, index };
+}
+
 /** What it needs, under the selected job's card (a leg's or a step's job). */
 function openNeeds(store: SessionStore, ui: GestureUi): boolean {
   const target = selected(store);
@@ -388,8 +381,8 @@ function openNeeds(store: SessionStore, ui: GestureUi): boolean {
   return true;
 }
 
-/** The outline rows that have actions: the workflow's and its jobs'. */
-const ACTIONABLE: ReadonlySet<string> = new Set(['workflow', 'job']);
+/** The outline rows that have actions: the workflow's, its jobs' and their steps'. */
+const ACTIONABLE: ReadonlySet<string> = new Set(['workflow', 'job', 'step']);
 
 /** An outline row's actions: the row is selected, so each acts on it as its key would. */
 function openMenu(store: SessionStore, ui: GestureUi, node: NodeId, anchor: Element): boolean {

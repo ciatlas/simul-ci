@@ -543,6 +543,15 @@ describe('the workflow being edited', () => {
     expect(key('Delete', { tagName: 'INPUT' })).toBeUndefined();
     expect(key('Delete', cardElement(j('test')), { shiftKey: true })).toBeUndefined();
     expect(key('x', cardElement(j('test')))).toBeUndefined();
+    // Alt+↑ and Alt+↓ move the selected step; Alt with anything else is the navigation's.
+    expect(key('ArrowUp', cardElement(j('build')), { altKey: true }, `${j('build')}/steps.compile`)).toBe(
+      'up',
+    );
+    expect(key('ArrowDown', cardElement(j('build')), { altKey: true }, `${j('build')}/steps.compile`)).toBe(
+      'down',
+    );
+    expect(key('ArrowRight', cardElement(j('build')), { altKey: true })).toBeUndefined();
+    expect(key('ArrowDown', edgeEl, { altKey: true })).toBeUndefined();
     // A card that does not hold the selection removes nothing: the key is about the card the focus is on.
     expect(key('Delete', cardElement(j('lint')))).toBeUndefined();
     expect(key('Delete', cardElement(j('build')), {}, `${j('build')}/steps.compile`)).toBe('remove');

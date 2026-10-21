@@ -3,9 +3,10 @@ import { useApp, useSession } from '../../app/providers';
 import { documents } from '../documents';
 import { needCandidates, needsOf } from '../needs';
 import { RefusalNote } from '../Refusal';
-import { addNeed, type GestureUi, type Open, removeNeed } from './actions';
+import { addNeed, removeNeed } from './actions';
 import { Combobox } from './Combobox';
 import { AnchoredPopover } from './Popover';
+import type { GestureUi, Open } from './ui';
 
 /**
  * What it needs (synthesis § 4.2, `n`), under the job's card: its needs as chips, each a button that takes it away,

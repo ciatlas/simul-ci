@@ -12,7 +12,7 @@ import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
 import { AddJobPopover } from '../src/edit/canvas/AddJob';
 import { NeedsPopover } from '../src/edit/canvas/Needs';
-import type { Ask, GestureUi } from '../src/edit/canvas/actions';
+import type { Ask, GestureUi } from '../src/edit/canvas/ui';
 import { createSessionStore, type SessionStore } from '../src/state/store';
 import { handle, initialState } from '../src/worker/handle';
 

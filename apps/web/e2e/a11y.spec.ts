@@ -575,7 +575,7 @@ test('Show … in Unknowns in a reason puts the focus on that unknown’s row, i
   await expect(row).toBeInViewport();
 });
 
-test('by the keys alone, edit mode adds a job and sets what it needs, and axe finds nothing in what opens', async ({
+test('by the keys alone, edit mode adds a job, sets what it needs and deletes a step, and axe finds nothing in what opens', async ({
   page,
 }) => {
   await openStarter(page);
@@ -614,4 +614,25 @@ test('by the keys alone, edit mode adds a job and sets what it needs, and axe fi
   await page.keyboard.press('Escape');
   await expect(ask).toHaveCount(0);
   await expect(jobNode(page, 'build')).toBeVisible();
+
+  // A step: Space opens build's list, Enter goes to its first step; s opens the palette there, Delete removes it.
+  await expect(jobNode(page, 'build')).toBeFocused();
+  await page.keyboard.press(' ');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/sel=build\.%231/);
+  await page.keyboard.press('s');
+  const palette = page.getByRole('dialog', { name: 'Add a step to build' });
+  await expect(palette.getByRole('combobox', { name: 'Steps to add' })).toBeFocused();
+  await expectAxeClean(page, 'the palette');
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  const labels = jobNode(page, 'build').locator('.sc-list-label');
+  await expect(labels).toHaveText(['actions/checkout@v4', 'detect', '~npm-run-build']);
+  await page.keyboard.press('Delete');
+  await expect(labels).toHaveText(['detect', '~npm-run-build'], { timeout: 3000 });
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Removed step 1 of build (actions/checkout@v4)' }),
+  ).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(labels).toHaveText(['actions/checkout@v4', 'detect', '~npm-run-build'], { timeout: 3000 });
 });
