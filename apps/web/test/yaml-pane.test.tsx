@@ -726,9 +726,11 @@ describe('the YAML pane in edit mode', () => {
     const { store, view } = editing();
     expect(view().contentDOM.contentEditable).toBe('true');
     expect(view().contentDOM.getAttribute('aria-label')).toBe(CRLF);
+    expect(view().contentDOM.getAttribute('tabindex')).toBe('0');
     act(() => store.getState().setEdit(false));
     expect(view().contentDOM.contentEditable).toBe('false');
     expect(view().contentDOM.getAttribute('aria-label')).toBe(`${CRLF}, read-only`);
+    expect(view().contentDOM.getAttribute('tabindex')).toBe('0');
     expect(screen.getByRole('button', { name: 'Edit (E)' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Edit (E)' }));
     expect(view().contentDOM.contentEditable).toBe('true');

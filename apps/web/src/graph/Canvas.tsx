@@ -152,6 +152,7 @@ function Flow() {
   useViewportCommands(rf, graphRef);
   usePaintedMark(graph?.for.files);
   useFitWhenRootsChange(graph);
+  useFitWhenPaneToggles(rf);
   // A new source is a new picture: it mounts afresh and is fitted. Neither an edit of its texts nor the project a
   // restart numbers anew is one: the picture stays mounted, where the author left it.
   return graph ? <Picture key={graph.for.epoch} graph={graph} graphRef={graphRef} /> : <Waiting />;
@@ -326,6 +327,22 @@ function useFitWhenRootsChange(graph: GraphState | undefined): void {
     const frame = requestAnimationFrame(() => viewport.fit());
     return () => cancelAnimationFrame(frame);
   }, [roots, epoch]);
+}
+
+/**
+ * Fits the picture when the YAML pane opens or closes under it (`\`, its bar, a `file:line` link, entering edit mode),
+ * without animation, as the pane itself appears: the viewport keeps its transform, so a picture fitted to the taller
+ * canvas would run on under the pane, and one fitted to the shorter canvas would sit small in the room it gave back.
+ */
+function useFitWhenPaneToggles(rf: ReactFlowInstance<FlowNode, NeedsFlowEdge>): void {
+  const closed = useSession((s) => s.ui.prefs.collapsed.yaml);
+  const last = useRef(closed);
+  useEffect(() => {
+    if (last.current === closed) return undefined;
+    last.current = closed;
+    const frame = requestAnimationFrame(() => void rf.fitView(FIT));
+    return () => cancelAnimationFrame(frame);
+  }, [rf, closed]);
 }
 
 /** Marks the frame after a picture of new texts is drawn (`lib/marks.ts`), for the latency gate. */
