@@ -69,7 +69,7 @@
     "indent": 2,
     "indentSeq": true,
     "quote": "'",
-    "flowPadding": true,
+    "flowPadding": false,
     "flow": {
       "needs": null,
       "filters": null,
