@@ -21,6 +21,8 @@ export interface Gestures {
   remove(): boolean;
   /** Moves the selected step up or down within its job. */
   move(by: -1 | 1): boolean;
+  /** Renames the selected job, or the selected step's id, with every reference to it (F2, a card title's double-click). */
+  rename(): boolean;
   /** Whether a drag from one job's handle may end on another's: the second would then need the first. */
   canConnect(source: NodeId, target: NodeId): boolean;
   /** The second job needs the first; a refused drag says why. */

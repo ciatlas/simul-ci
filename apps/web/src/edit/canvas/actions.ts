@@ -276,6 +276,7 @@ export function gesturesOf(store: SessionStore, ui: GestureUi): Gestures {
       const target = selected(store);
       return target?.step !== undefined && moveStep(store, ui, target, target.step.index + by);
     },
+    rename: () => openRename(store, ui),
     canConnect: (source, target) => canConnect(store, source, target),
     connect: (source, target) => connect(store, ui, source, target),
     disconnect: (source, target) => disconnect(store, ui, source, target),
@@ -365,6 +366,21 @@ function afterSelection(store: SessionStore): PaletteOpen | undefined {
       .find((j) => j.id === target.job)?.steps.length ?? 0;
   const index = target.step ? target.step.index + 1 : count;
   return { kind: 'palette', file: target.file, rev: target.rev, job: target.job, index };
+}
+
+/**
+ * Rename, over the selected job's card title (a leg's job), or for the selected step's id at its job's card; at the
+ * outline row with the focus when the card is not drawn.
+ */
+function openRename(store: SessionStore, ui: GestureUi): boolean {
+  const target = selected(store);
+  if (target?.job === undefined) return false;
+  const card = cardElement(jobNode(target.file, target.job));
+  const title = target.step ? undefined : card?.querySelector('.sc-card-label');
+  const anchor = title ?? anchorFor(jobNode(target.file, target.job));
+  const { file, rev, job, step } = target;
+  ui.open({ kind: 'rename', target: { file, rev, job, ...(step ? { step } : {}) }, anchor });
+  return true;
 }
 
 /** What it needs, under the selected job's card (a leg's or a step's job). */

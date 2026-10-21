@@ -9,7 +9,8 @@ import { type ReactNode, useLayoutEffect, useRef } from 'react';
  * and it gives the focus back to where it was when it closes with the focus inside it.
  */
 
-export type Side = 'right' | 'below';
+/** Beside the anchor, under it, or over it with its text where the anchor's is (an inline input over a title). */
+export type Side = 'right' | 'below' | 'over';
 
 interface Box {
   left: number;
@@ -20,8 +21,13 @@ interface Box {
 
 const GAP = 8;
 const MARGIN = 8;
+/** From a box's edge to its input's text: the box's border and padding, the input's border and padding. */
+const INSET = 14;
 
-/** Where a box of `size` goes beside (`right`, else left of) or under (`below`, else above) its anchor, in the window. */
+/**
+ * Where a box of `size` goes beside (`right`, else left of), under (`below`, else above) or over its anchor, in the
+ * window.
+ */
 function placeAt(
   anchor: Box | undefined,
   size: { width: number; height: number },
@@ -31,6 +37,11 @@ function placeAt(
   const clamp = (at: number, length: number, room: number): number =>
     Math.max(MARGIN, Math.min(at, room - length - MARGIN));
   if (!anchor) return { left: clamp((view.width - size.width) / 2, size.width, view.width), top: 80 };
+  if (side === 'over')
+    return {
+      left: clamp(anchor.left - INSET, size.width, view.width),
+      top: clamp(anchor.top + anchor.height / 2 - INSET, size.height, view.height),
+    };
   if (side === 'right') {
     const right = anchor.left + anchor.width + GAP;
     const left = right + size.width + MARGIN <= view.width ? right : anchor.left - GAP - size.width;

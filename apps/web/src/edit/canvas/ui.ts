@@ -3,6 +3,7 @@ import type { NodeId } from '@simulci/engine';
 import type { SessionStore } from '../../state/store';
 import { dispatch, storeLock } from '../dispatch';
 import { documents } from '../documents';
+import type { RenameTarget } from '../rename/run';
 import type { OpMeta } from '../types';
 
 /**
@@ -38,6 +39,7 @@ export type Open =
   | { kind: 'addJob'; file: string; rev: number; after?: string; anchor?: Element }
   | { kind: 'needs'; file: string; rev: number; job: string; anchor?: Element }
   | { kind: 'menu'; node: NodeId; anchor: Element }
+  | { kind: 'rename'; target: RenameTarget; anchor?: Element }
   | PaletteOpen;
 
 /** The palette (`edit/palette/Palette.tsx`), for a step to add at a place in a job, or for one whose action changes. */

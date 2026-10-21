@@ -10,6 +10,7 @@ import { ConfirmDialog } from './Confirm';
 import { RowMenu } from './Menu';
 import { NeedsPopover } from './Needs';
 import { Palette } from '../palette/Palette';
+import { RenamePopover } from '../rename/Rename';
 import { AnchoredPopover } from './Popover';
 import { type Ask, type GestureUi, hostUi, type Open } from './ui';
 
@@ -65,6 +66,7 @@ function Opened({ open, ui, onClose }: { open: Open; ui: GestureUi; onClose: () 
   if (open.kind === 'addJob') return <AddJobPopover open={open} ui={ui} onClose={onClose} />;
   if (open.kind === 'needs') return <NeedsPopover open={open} ui={ui} onClose={onClose} />;
   if (open.kind === 'palette') return <Palette open={open} ui={ui} onClose={onClose} />;
+  if (open.kind === 'rename') return <RenamePopover open={open} ui={ui} onClose={onClose} />;
   return <RowMenu node={open.node} anchor={open.anchor} onClose={onClose} />;
 }
 

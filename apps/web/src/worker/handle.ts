@@ -22,8 +22,10 @@ import type {
   InvalidResponse,
   LoadRequest,
   Outline,
+  RefsRequest,
   SimulateRequest,
 } from './protocol';
+import { refsOf } from './refs';
 
 /**
  * The worker's state: one loaded project, numbered so a reply can be told from a stale one, and what its files' texts
@@ -55,6 +57,7 @@ export function handle(
         },
       };
     }
+    if (request.type === 'refs') return { state, response: refs(state.project, request) };
     const invalid = validate(request);
     if (invalid) return { state, response: invalid };
     return {
@@ -153,6 +156,15 @@ function plan(project: NonNullable<WorkerState['project']>, request: SimulateReq
     derived,
     text,
     ms: { simulate: simulated - started, derive: performance.now() - simulated },
+  };
+}
+
+function refs(project: NonNullable<WorkerState['project']>, request: RefsRequest): EngineResponse {
+  return {
+    id: request.id,
+    type: 'refs',
+    project: project.version,
+    ...refsOf(project.loaded, request.target),
   };
 }
 

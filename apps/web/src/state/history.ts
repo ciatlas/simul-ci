@@ -1,6 +1,7 @@
 import { applyEdits, regionEdit, type TextEdit, touched } from '@simulci/document/edits';
 import { fileLabel } from '../lib/file-label';
 import { fnv1a } from '../lib/hash';
+import type { Renames } from './renames';
 
 /**
  * The page's one edit history (synthesis § 6), a pure reducer over the texts. Every change the author makes to a
@@ -42,6 +43,8 @@ export interface Transaction {
   /** One per file; several for a multi-file transaction. */
   files: FileChange[];
   selection: { before: SelectionRef; after?: SelectionRef };
+  /** The ids a rename changed: undo maps the page's ids back, redo forth again (C11). */
+  renames?: Renames;
 }
 
 /**
@@ -134,6 +137,8 @@ export interface TxInput {
   files: readonly TxFile[];
   /** Where the selection should go once the plan of the new texts comes (C3). */
   selectionAfter?: SelectionRef;
+  /** The ids a rename changes (C11). */
+  renames?: Renames;
 }
 
 /**
@@ -162,6 +167,7 @@ export function transact(h: History, texts: Texts, input: TxInput, ctx: Context)
     at: ctx.at,
     files,
     selection: { before: ctx.selection, ...(input.selectionAfter ? { after: input.selectionAfter } : {}) },
+    ...(input.renames ? { renames: input.renames } : {}),
   };
   return {
     history: push({ ...closed, future: [], lastOrigin: input.origin, next: closed.next + 1 }, tx),

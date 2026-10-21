@@ -8,6 +8,7 @@ import {
   type EngineClient,
   type LoadResult,
   type SimulateResult,
+  type RefsResult,
   type WorkerLike,
 } from '../src/worker/client';
 import {
@@ -44,6 +45,7 @@ function fakeClient() {
       }),
     simulate: (body) => new Promise<SimulateResult>((resolve) => simulates.push({ body, resolve })),
     case: (body) => new Promise<CaseResult>((resolve) => cases.push({ body, resolve })),
+    refs: () => new Promise<RefsResult>(() => undefined),
     onRestart: (l) => restartListeners.push(l),
     onFailure: (l) => failureListeners.push(l),
     restarts: () => 0,

@@ -10,6 +10,8 @@ import {
   type PlanResponse,
   PROTOCOL,
   type ReadyResponse,
+  type RefsRequest,
+  type RefsResponse,
   type SimulateRequest,
   SUPPORTED_RUN_PLAN,
 } from './protocol';
@@ -26,12 +28,14 @@ export type Superseded = { type: 'superseded' };
 export type LoadResult = LoadedResponse | ErrorResponse | Superseded;
 export type SimulateResult = PlanResponse | InvalidResponse | ErrorResponse | Superseded;
 export type CaseResult = CaseResponse | InvalidResponse | ErrorResponse | Superseded;
+export type RefsResult = RefsResponse | ErrorResponse | Superseded;
 
 export interface EngineClient {
   ready: Promise<ReadyResponse>;
   load(body: Omit<LoadRequest, 'id' | 'type'>): Promise<LoadResult>;
   simulate(body: Omit<SimulateRequest, 'id' | 'type'>): Promise<SimulateResult>;
   case(body: Omit<CaseRequest, 'id' | 'type'>): Promise<CaseResult>;
+  refs(body: Omit<RefsRequest, 'id' | 'type'>): Promise<RefsResult>;
   /** Called after the worker was restarted by the watchdog and the files were loaded again under `project`. */
   onRestart(listener: (restarts: number, project: number | undefined) => void): void;
   /**
@@ -317,6 +321,7 @@ export function createEngineClient(options: ClientOptions): EngineClient {
     load: (body) => request<LoadResult>({ ...body, type: 'load' }),
     simulate: (body) => request<SimulateResult>({ ...body, type: 'simulate' }),
     case: (body) => request<CaseResult>({ ...body, type: 'case' }),
+    refs: (body) => request<RefsResult>({ ...body, type: 'refs' }),
     onRestart: (listener) => {
       listeners.push(listener);
     },
