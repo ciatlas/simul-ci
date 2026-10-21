@@ -148,7 +148,7 @@ function resultLabel(result: Value<Result>, verdict: Tri): string | undefined {
  * The grid: every leg of a job with a matrix that is not skipped; a single unnamed leg is the job itself. A matrix
  * only the run knows is one `∗` cell that carries the matrix reason.
  */
-function legCells(job: JobPlan): LegCell[] | undefined {
+export function legCells(job: JobPlan): LegCell[] | undefined {
   const grid = job.legs.length > 1 || (job.legs[0]?.legKey ?? '') !== '';
   if (!grid || job.runs.verdict === 'no') return undefined;
   return job.legs.map((leg) =>

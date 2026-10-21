@@ -319,9 +319,11 @@ describe('the sources of a session, at their edges', () => {
     files['ci.yml'] = 'on: push';
     await sources.reload();
     expect(notices()).toEqual([]);
+    // The text is the same, so the plan stands: only what reading found, and the base, move.
     expect(store.getState().files).toMatchObject({
-      version: 2,
+      version: 1,
       byPath: { [CI]: 'on: push' },
+      base: { [CI]: 'on: push' },
       meta: { [CI]: { bom: false, eol: 'none', utf8: true } },
     });
     await sources.reload();

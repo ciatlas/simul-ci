@@ -6,6 +6,7 @@ import type { GraphState, GraphUi } from '../graph/types';
 import { isProjectFile } from '../input/filter';
 import { fileLabel } from '../lib/file-label';
 import { classifyEol, type FileMeta, textMeta } from '../input/read';
+import type { DiskConflict, DiskFile, FileOutcome } from '../input/save';
 import { type ChangeRow, changeRows, changeSentence } from '../plan/change-rows';
 import { diffOf, pinSentence, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline } from '../worker/protocol';
@@ -157,6 +158,13 @@ export interface SessionState {
     /** Per file, its text when the epoch began. */
     opened: Record<string, string>;
     /**
+     * Per file whose text was once read from bytes that are not UTF-8 within the epoch, those texts: whenever the
+     * history brings one of them back, the file is not UTF-8 again, and whenever it leaves them, it is. Undoing a reload
+     * or a "Keep the disk version" that changed a file's encoding gives back the encoding too. Whole texts, not hashes:
+     * a text typed that only hashed alike would be taken for one read from other bytes.
+     */
+    lenient?: Record<string, string[]>;
+    /**
      * The edits of the last commit of the history, per file, with each file's rev before it: a view that shows the
      * text of that rev maps the edits instead of comparing texts (`yaml/bridge.ts`).
      */
@@ -242,6 +250,10 @@ export interface SessionState {
   edit: EditState;
   /** A new source asked to replace files with unsaved edits; the replace prompt answers it (`app/replace.ts`). */
   replacing?: Replacing;
+  /** A save to the folder under way, or the last one's report, until new files come (`app/saver.ts`). */
+  saving?: Saving;
+  /** Files the folder and the page both changed, for the author to settle before a save or a reload goes on. */
+  settling?: Settling;
   /**
    * Core's generated marker of each file that has one, from the last Outline committed or held, kept through a load
    * that failed; absent until the epoch's first Outline, when no file is known not to be generated.
@@ -282,6 +294,28 @@ export interface Replacing {
   what: string;
   /** The edited files it would drop; edited buffers a paste leaves standing are not among them. */
   paths: readonly string[];
+}
+
+/** A save under way, or what the last one did to each file (synthesis § 5.3); `open` while its dialog shows. */
+export type Saving =
+  | { status: 'running'; folder: string }
+  | {
+      status: 'done';
+      folder: string;
+      at: number;
+      /** Write access was refused: nothing was written. */
+      denied?: true;
+      files: FileOutcome[];
+      sentence: string;
+      open: boolean;
+    };
+
+/** The conflicts of a save or a reload (§ 5.4, § 5.7), until the author chose for each or cancelled. */
+export interface Settling {
+  seq: number;
+  mode: 'save' | 'reload';
+  folder: string;
+  conflicts: DiskConflict[];
 }
 
 /** What an edit asked of the store came to: applied, or nothing changed (a refusal says why, if there was one). */
@@ -382,6 +416,27 @@ export interface SessionActions {
   settleRestore: (path: string, keep: 'mine' | 'disk') => void;
   /** The replace prompt shows, or goes. */
   setReplacing: (replacing: Replacing | undefined) => void;
+  /**
+   * Files saved to the folder of `epoch`: each one's base becomes the text written (`null`: the folder has no such
+   * file, as here), so it is no longer unsaved unless it changed since. The history and the texts stay; files of
+   * another epoch are not these, and nothing moves.
+   */
+  saved: (epoch: number, texts: Readonly<Record<string, string | null>>) => void;
+  /**
+   * The folder's files, as a save's conflict or a reload read them, become the base of their paths (`null`: not in
+   * the folder), with their BOM; the paths in `take` also take the folder's text, as one undoable `disk` transaction
+   * (§ 5.4, § 5.7), planned over the texts `from` gives (`null`: no file), else over the texts now. Nothing happens for
+   * files of another epoch, or when the transaction is refused: a text that moved since it was planned over.
+   */
+  fromDisk: (
+    epoch: number,
+    label: string,
+    disk: Readonly<Record<string, DiskFile | null>>,
+    take: readonly string[],
+    from?: Readonly<Record<string, string | null>>,
+  ) => EditOutcome;
+  setSaving: (saving: Saving | undefined) => void;
+  setSettling: (settling: Settling | undefined) => void;
   setEdit: (on: boolean) => void;
   /** The author chose to edit a generated file: "Edit anyway". */
   unlock: (path: string) => void;
@@ -504,6 +559,97 @@ function restoreOf(s: SessionState, conflict: RestoreConflict): history.TxInput 
 /** Per path whose text is not its base: the base, or `null` when it has none (a file created since). */
 export type BaseDiff = Record<string, string | null>;
 
+/** The files with each saved path's base moved to the text written, or gone where the folder has no file. */
+function savedFiles(
+  files: SessionState['files'],
+  texts: Readonly<Record<string, string | null>>,
+): SessionState['files'] {
+  const base = { ...files.base };
+  for (const [path, text] of Object.entries(texts))
+    if (text === null) delete base[path];
+    else base[path] = text;
+  return { ...files, base };
+}
+
+/**
+ * The transaction that gives each path of `take` the folder's text: a region edit, a creation or a removal, each over
+ * the text it was planned over, so a text that moved since refuses it.
+ */
+function diskTx(
+  byPath: Record<string, string>,
+  label: string,
+  disk: Readonly<Record<string, DiskFile | null>>,
+  take: readonly string[],
+  from: Readonly<Record<string, string | null>> = {},
+): history.TxInput {
+  const files: history.TxFile[] = [];
+  for (const path of take) {
+    const now = Object.hasOwn(from, path) ? (from[path] ?? undefined) : byPath[path];
+    const then = disk[path]?.text;
+    if (now === then) continue;
+    if (then === undefined) files.push({ path, edits: [], remove: true, expect: history.stampOf(now!) });
+    else if (now === undefined) files.push({ path, edits: [{ from: 0, to: 0, insert: then }], create: true });
+    else files.push({ path, edits: [regionEdit(now, then)], expect: history.stampOf(now) });
+  }
+  return { label, origin: 'disk', files };
+}
+
+/**
+ * The files with each path's base moved to the folder's text, or gone where the folder has none. A path that took
+ * the folder's text takes what reading found too; one that keeps its own text takes only the folder's BOM, which a
+ * save puts back, and keeps its encoding and line endings, which are its text's.
+ */
+function rebased(
+  files: SessionState['files'],
+  disk: Readonly<Record<string, DiskFile | null>>,
+  take: ReadonlySet<string>,
+  lenient: Readonly<Record<string, string[]>>,
+): SessionState['files'] {
+  const base = { ...files.base };
+  const meta = { ...files.meta };
+  for (const [path, d] of Object.entries(disk)) {
+    if (d === null) {
+      delete base[path];
+      continue;
+    }
+    base[path] = d.text;
+    const own = meta[path];
+    meta[path] = take.has(path) || !own ? d.meta : { ...own, bom: d.meta.bom };
+  }
+  return { ...files, base, meta, ...withLenient(files.lenient, lenient) };
+}
+
+/**
+ * The texts a disk take involves that were read from bytes that are not UTF-8: the text it replaces and the text it
+ * takes, so an undo or a redo across it brings the encoding back with the text.
+ */
+function lenientOf(
+  files: SessionState['files'],
+  disk: Readonly<Record<string, DiskFile | null>>,
+  take: readonly string[],
+): Record<string, string[]> {
+  const found: Record<string, string[]> = {};
+  for (const path of take) {
+    const texts: string[] = [];
+    const now = files.byPath[path];
+    if (now !== undefined && files.meta[path]?.utf8 === false) texts.push(now);
+    const d = disk[path];
+    if (d && !d.meta.utf8) texts.push(d.text);
+    if (texts.length > 0) found[path] = texts;
+  }
+  return found;
+}
+
+const withLenient = (
+  known: Readonly<Record<string, string[]>> | undefined,
+  more: Readonly<Record<string, string[]>>,
+): Pick<SessionState['files'], 'lenient'> => {
+  if (Object.keys(more).length === 0) return known ? { lenient: known } : {};
+  const lenient = { ...known };
+  for (const [path, texts] of Object.entries(more)) lenient[path] = [...(lenient[path] ?? []), ...texts];
+  return { lenient };
+};
+
 /**
  * The files whose text is not what was read or last saved: edited, created since, or removed since. A selector, never
  * stored: undoing back to the base leaves nothing unsaved.
@@ -532,6 +678,7 @@ const UNLOADED = {
   graph: undefined,
   generated: undefined,
   stale: false,
+  saving: undefined,
   ...UNCHANGED,
 } as const;
 
@@ -547,12 +694,16 @@ export function createSessionStore(initial: SessionState = initialSessionState()
       said: (s: SessionState) => Said,
       verb?: 'undo' | 'redo',
       after?: history.SelectionRef,
+      /** What else the same `set()` changes, unless the step was refused. */
+      also?: (files: SessionState['files']) => SessionState['files'],
     ): EditOutcome => {
       let outcome: EditOutcome = { ok: false };
       set((s) => {
         const result = committed(s, step(s), said(s), verb && { verb, id: ++noticeId }, after);
         outcome = result.outcome;
-        return result.patch;
+        if (!also || ('refusal' in result.outcome && result.outcome.refusal)) return result.patch;
+        const files = also(result.patch.files ?? s.files);
+        return result.patch === s ? { files } : { ...result.patch, files };
       });
       return outcome;
     };
@@ -724,6 +875,23 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         set((s) => ({ edit: withoutConflict(s.edit, path) }));
       },
       setReplacing: (replacing) => set({ replacing }),
+      saved: (epoch, texts) =>
+        set((s) => (s.files.epoch === epoch ? { files: savedFiles(s.files, texts) } : s)),
+      fromDisk: (epoch, label, disk, take, from) => {
+        const s = get();
+        if (s.files.epoch !== epoch) return { ok: false };
+        const input = diskTx(s.files.byPath, label, disk, take, from);
+        const lenient = lenientOf(s.files, disk, take);
+        return commit(
+          (now) => history.transact(now.edit, now.files.byPath, input, contextOf(now)),
+          () => ({ label }),
+          undefined,
+          undefined,
+          (files) => rebased(files, disk, new Set(take), lenient),
+        );
+      },
+      setSaving: (saving) => set({ saving }),
+      setSettling: (settling) => set({ settling }),
       setEdit: (on) =>
         set((s) =>
           s.edit.on === on
@@ -993,12 +1161,19 @@ export function withTexts(
     }
     files.byPath[path] = text;
     const meta = files.meta[path];
-    files.meta[path] = meta ? withEol(meta, text) : textMeta(text);
+    files.meta[path] = encodingOf(meta ? withEol(meta, text) : textMeta(text), files.lenient?.[path], text);
     files.revs[path] = version;
   }
   // Only a project file's text is in the plan; a test file (C10) leaves it current.
   const planned = changed.some(([path]) => isProjectFile(path));
   return { files, stale: s.plan === undefined ? false : planned ? 'edit' : s.stale };
+}
+
+/** A file's meta for its new text as to its encoding: not UTF-8 exactly while the text is one read from such bytes. */
+function encodingOf(meta: FileMeta, lenient: readonly string[] | undefined, text: string): FileMeta {
+  if (!lenient) return meta;
+  const utf8 = !lenient.includes(text);
+  return utf8 === meta.utf8 ? meta : { ...meta, utf8 };
 }
 
 /** A file's meta for its new text: its line endings as the text has them, the ones it had while it has no break. */

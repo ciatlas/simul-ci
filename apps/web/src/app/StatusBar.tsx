@@ -6,6 +6,7 @@ import { summarize } from '../plan/summary';
 import type { Change } from '../state/store';
 import { ChangeDetails } from './ChangeDetails';
 import { useSession } from './providers';
+import { SaveLine } from './SaveDialog';
 
 /**
  * The sentence the line says, the key of the element that says it, and the rows Details lists with it. A polite live
@@ -58,7 +59,8 @@ export function StatusBar() {
 
   return (
     <footer className="flex items-center gap-3 border-border border-t bg-chrome px-4 py-1 text-muted text-xs">
-      <span aria-live="polite" className="min-w-0">
+      {/* One line tall even before the first sentence comes, so the canvas does not shrink under a fit already made. */}
+      <span aria-live="polite" className="min-h-4 min-w-0">
         <span key={line.key} className={stale && line.key !== 'held' ? 'italic' : undefined}>
           {line.text}
         </span>
@@ -71,6 +73,7 @@ export function StatusBar() {
           </Suspense>
         )}
       </div>
+      <SaveLine />
     </footer>
   );
 }

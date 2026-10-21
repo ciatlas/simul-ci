@@ -9,6 +9,7 @@ import { gestures } from '../gestures';
 import { RefusalView } from '../Refusal';
 import { type Target, targetOf } from '../selection';
 import type { Refused } from '../types';
+import { MatrixEditor } from '../matrix/MatrixEditor';
 import { PropertyField } from './Field';
 import { KeyValueRows } from './KeyValueRows';
 import { asText, type FieldSpec, jobFields, stepFields, workflowFields } from './model';
@@ -195,6 +196,7 @@ function JobProperties({ target, doc, locked }: PartProps) {
       <Heading kind="Job" name={doc.get([...at, 'name'])?.value} fallback={job} />
       <Fields specs={jobFields(target.file, job, call)} target={target} doc={doc} locked={locked} />
       <Needs doc={doc} file={target.file} job={job} locked={locked} />
+      <MatrixEditor key={`${target.file}#${job}`} target={target} doc={doc} locked={locked} />
       {call ? (
         <>
           <KeyValueRows
@@ -264,7 +266,6 @@ function JobProperties({ target, doc, locked }: PartProps) {
         file={target.file}
         at={at}
         keys={[
-          ['strategy', 'Strategy and matrix'],
           ['permissions', 'Permissions'],
           ['concurrency', 'Concurrency'],
           ['services', 'Services'],

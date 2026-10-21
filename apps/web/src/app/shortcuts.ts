@@ -4,9 +4,10 @@ import { viewport } from '../graph/commands';
 import { cardOf } from '../graph/navigate';
 import { planIndex, resolveSelection } from '../plan/index';
 import type { PanelTab, Prefs } from '../state/prefs';
-import type { SessionActions, SessionState, SessionStore } from '../state/store';
+import { dirtyPaths, type SessionActions, type SessionState, type SessionStore } from '../state/store';
 import { historyCommand, letterOf } from '../lib/history-keys';
 import { caseAvailability } from '../testcase/case';
+import { canSave } from './saver';
 
 /**
  * The page's keys outside the canvas (synthesis § 11): `t` switches between the graph and the text, `f` fits, `.`
@@ -24,6 +25,8 @@ import { caseAvailability } from '../testcase/case';
  * field keeps its own undo: whatever `prefs.keys` says, since a modifier makes them no single keys. The YAML pane
  * binds the same keys itself. Mod+Shift+D opens the Changes dialog (§ 5.2) in edit mode, the YAML pane included, and
  * Mod+K the palette, as `s` does.
+ * Mod+S saves to the folder (§ 5.3) anywhere outside a dialog, fields and the pane included; with no folder to save
+ * to it opens Changes, which downloads. The page always takes it, so the browser never offers to save the page.
  */
 
 export type PageCommand =
@@ -113,11 +116,20 @@ function ownedElsewhere(target: EventTarget | null, owners = OWNERS): boolean {
   return el.isContentEditable === true || el.closest(owners) !== null;
 }
 
-/** Listens for the page keys on the window; the returned function stops. */
-export function installShortcuts(store: SessionStore, win: Window = window): () => void {
+/** Listens for the page keys on the window; the returned function stops. `save` saves to the folder (`app/saver.ts`). */
+export function installShortcuts(
+  store: SessionStore,
+  win: Window = window,
+  save: () => void = () => undefined,
+): () => void {
   const onKey = (event: KeyboardEvent): void => {
     const s = store.getState();
-    if (historyKey(event, s) || changesKey(event, s) || paletteKey(event, s, store)) {
+    if (
+      historyKey(event, s) ||
+      changesKey(event, s) ||
+      saveKey(event, s, save) ||
+      paletteKey(event, s, store)
+    ) {
       event.preventDefault();
       return;
     }
@@ -154,10 +166,36 @@ export function changesKey(event: HistoryKey, s: SessionState & SessionActions):
   return true;
 }
 
+/**
+ * Mod+S: true whenever it is the chord, so the browser's Save Page never opens. While no dialog is open it saves when
+ * the files came from a folder with a handle, and otherwise opens Changes while something is unsaved; under an open
+ * dialog (a modal keeps the focus, but a click on its text leaves it on the page's body) it does nothing more. A field
+ * commits its text on the way (`edit/property/Field.tsx`); the pane's typing is in the files already.
+ */
+export function saveKey(event: HistoryKey, s: SessionState & SessionActions, save: () => void): boolean {
+  const chord = (event.metaKey || event.ctrlKey) && event.shiftKey !== true && !event.altKey;
+  if (!chord || event.defaultPrevented || letterOf(event) !== 's') return false;
+  if (dialogAround(event.target)) return true;
+  if (canSave(s)) save();
+  else if (dirtyPaths(s.files).length > 0) s.setChangesOpen(true);
+  return true;
+}
+
+/**
+ * Whether a key comes from inside a dialog, or while a `<dialog>` is open anywhere on the page: the page's modals are
+ * all `<dialog>`s. A popover that calls itself a dialog (Details) stays in the page while closed, so only being inside
+ * one counts.
+ */
+function dialogAround(target: EventTarget | null): boolean {
+  const el = target as (Partial<HTMLElement> & { ownerDocument?: Document | null }) | null;
+  if (typeof el?.closest === 'function' && el.closest('dialog, [role="dialog"]') !== null) return true;
+  const doc = el?.ownerDocument ?? (typeof document === 'undefined' ? undefined : document);
+  return doc?.querySelector('dialog[open]') != null;
+}
+
 /** Mod+K in edit mode, outside a dialog: the palette, when a job or a step of the focused workflow is selected. */
 function paletteKey(event: HistoryKey, s: SessionState, store: SessionStore): boolean {
-  if (!s.edit.on || !modKey(event, 'k') || ownedElsewhere(event.target, 'dialog, [role="dialog"]'))
-    return false;
+  if (!s.edit.on || !modKey(event, 'k') || dialogAround(event.target)) return false;
   return Boolean(s.sel) && !s.sel?.includes('/') && gestures.ask(store, (g) => g.palette());
 }
 

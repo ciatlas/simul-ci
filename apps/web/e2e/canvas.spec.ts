@@ -152,7 +152,7 @@ test('a drag that would loop draws no need and says why', async ({ page }) => {
   await opened(page);
   await connect(page, 'deploy', 'test');
   const sentence = 'deploy already needs test through build; test needing deploy would loop.';
-  await expect(status(page).getByRole('status')).toContainText(sentence);
+  await expect(status(page).getByRole('status').filter({ hasText: sentence })).toBeVisible();
   await expect(page.getByRole('note', { name: 'Refused' })).toContainText(sentence);
   await expect(page.getByRole('button', { name: /^Undo/ }).first()).toHaveAttribute('aria-disabled', 'true');
   // The note under the card and a removal's question after it are two things: one question, not two.
