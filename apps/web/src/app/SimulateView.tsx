@@ -111,9 +111,9 @@ export function SimulateView() {
 }
 
 /**
- * The scenario and the outline on the left, the plan in the middle with the YAML pane docked under it, the panel on
- * the right. `[`, `]` and `\` close and open them (app/shortcuts.ts, which reads `data-pane`); the choice is a
- * preference. Below 1024 px the right panel goes under the plan, with the scenario column beside both; below 768 px
+ * The scenario and the outline on the left, the plan in the middle with the YAML pane docked under it (closed, a bar
+ * that opens it), the panel on the right. `[`, `]` and `\` close and open them (app/shortcuts.ts, which reads
+ * `data-pane`); the choice is a preference, and edit mode opens the YAML pane. Below 1024 px the right panel goes under the plan, with the scenario column beside both; below 768 px
  * everything stacks at its own height and the page scrolls.
  */
 function Panes() {
@@ -140,7 +140,9 @@ function Panes() {
       <div className="flex min-h-0 flex-col md:col-start-2">
         <UntriggeredBanner />
         <PlanView />
-        {!collapsed.yaml && (
+        {collapsed.yaml ? (
+          <OpenSource />
+        ) : (
           <section
             data-pane="yaml"
             aria-label="Workflow source"
@@ -163,6 +165,32 @@ function Panes() {
         <Panels />
       </aside>
     </main>
+  );
+}
+
+/**
+ * Under the plan while the YAML pane is closed: the way to open it, with `\`, which does the same, beside it while the
+ * page keys are on. The pane's footer closes it again.
+ */
+function OpenSource() {
+  const { store } = useApp();
+  const keys = useSession((s) => s.ui.prefs.keys);
+  return (
+    <div className="flex shrink-0 items-center border-border border-t bg-chrome px-3 py-1 text-xs">
+      <button
+        type="button"
+        className="rounded px-1.5 py-0.5 text-text hover:bg-surface"
+        aria-keyshortcuts={keys ? '\\' : undefined}
+        onClick={() => store.getState().togglePane('yaml')}
+      >
+        Open the workflow source
+        {keys && (
+          <span aria-hidden="true" className="ml-2 font-mono text-muted">
+            \
+          </span>
+        )}
+      </button>
+    </div>
   );
 }
 

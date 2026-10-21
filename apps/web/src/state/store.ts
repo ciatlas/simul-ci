@@ -281,7 +281,10 @@ export interface RestoreOffer {
 
 export interface EditState extends history.History {
   restore?: RestoreOffer;
-  /** Edit mode (`e`, the top bar's Edit switch, `edit=1`): the pane edits the files it may (`writable`). */
+  /**
+   * Edit mode (`e`, the top bar's Edit switch, `edit=1`): the pane edits the files it may (`writable`). Turning it on
+   * opens the pane.
+   */
   on: boolean;
   /** Generated files the author chose to edit this session. */
   unlocked: string[];
@@ -907,6 +910,16 @@ export function createSessionStore(initial: SessionState = initialSessionState()
                   unlocked: s.edit.unlocked,
                   refused: on ? s.edit.refused : undefined,
                 },
+                // Entering edit mode opens the YAML pane, where the text is typed and every refusal's fallback is;
+                // the author may close it again.
+                ...(on && s.ui.prefs.collapsed.yaml
+                  ? {
+                      ui: {
+                        ...s.ui,
+                        prefs: { ...s.ui.prefs, collapsed: { ...s.ui.prefs.collapsed, yaml: false } },
+                      },
+                    }
+                  : {}),
               },
         ),
       unlock: (path) =>
