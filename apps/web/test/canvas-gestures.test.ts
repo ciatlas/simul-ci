@@ -309,7 +309,21 @@ describe('adding a job', () => {
       workflows: [{ jobs: [{ steps: [{ uses: 'actions/checkout@v4' }] }] }],
     } as unknown as Outline;
     expect(checkoutOf(outline)).toBe('actions/checkout@v4');
-    expect(checkoutOf(undefined)).toBe('actions/checkout@v5');
+    expect(checkoutOf(undefined)).toBeUndefined();
+    // The repository's ref wins over the catalog's.
+    const catalog = [
+      {
+        uses: 'actions/checkout',
+        ref: 'v7',
+        sha: 'a'.repeat(40),
+        name: 'Checkout',
+        inputs: [],
+        outputs: [],
+        license: 'MIT',
+      },
+    ];
+    expect(checkoutOf(undefined, catalog)).toBe('actions/checkout@v7');
+    expect(checkoutOf(outline, catalog)).toBe('actions/checkout@v4');
   });
 });
 

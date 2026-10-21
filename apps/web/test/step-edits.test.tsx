@@ -6,7 +6,7 @@
  * moves a step with Alt+↑/↓ keeping the focus on it, removes one with Delete, and opens the palette between rows. A
  * step that moved under a gesture is refused, and nothing is written.
  */
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
@@ -160,10 +160,14 @@ describe('the palette', () => {
     expect(
       screen.getByRole('heading', { name: 'Change the action of step 1 of build (actions/checkout@v4)' }),
     ).toBeTruthy();
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'actions/checkout@v41 use here',
-      'actions/setup-node@v41 use here',
+    // Once the catalog is in, its actions follow what the repository uses, which it names.
+    await screen.findByRole('group', { name: 'Common actions' });
+    const used = within(screen.getByRole('group', { name: 'Used here' }));
+    expect(used.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      expect.stringMatching(/^actions\/checkout@v4Checkout · 1 use here$/),
+      expect.stringMatching(/^actions\/setup-node@v4.+ · 1 use here$/),
     ]);
+    expect(screen.queryByRole('option', { name: /Run a script/ })).toBeNull();
     // A browser's modal dialog gives its first control the focus; happy-dom does not.
     screen.getByRole('combobox', { name: 'Actions' }).focus();
     await user.keyboard('{ArrowDown}{Enter}');

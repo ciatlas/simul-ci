@@ -10,6 +10,11 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 
 const PATH = '.github/workflows/ci.yml';
 
+/** The ref Add job's Checkout writes in a repository that has none: the bundled catalog's. */
+const CHECKOUT: string = JSON.parse(
+  readFileSync(new URL('../src/catalog/catalog.json', import.meta.url), 'utf8'),
+).find((a: { uses: string }) => a.uses === 'actions/checkout').ref;
+
 const CI = `name: CI
 on: push
 jobs:
@@ -131,7 +136,7 @@ test('a and Enter add a job after the selected one that is laid out, selected, f
   );
   const written = await downloaded(page);
   expect(written).toContain(
-    '      - run: npm run build\n  job:\n    runs-on: ubuntu-latest\n    needs:\n      - build\n    steps:\n      - uses: actions/checkout@v5\n  deploy:\n',
+    `      - run: npm run build\n  job:\n    runs-on: ubuntu-latest\n    needs:\n      - build\n    steps:\n      - uses: actions/checkout@${CHECKOUT}\n  deploy:\n`,
   );
   await undoAll(page);
   expect(await downloaded(page)).toBe(CI);

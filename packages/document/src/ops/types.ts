@@ -122,6 +122,8 @@ export type WorkflowOp =
       field: StepField;
       value: Json | null;
     }
+  /** A step's action pinned to a commit: `uses: <action>@<sha> # <tag>`, the line's comment set or replaced. */
+  | { op: 'pinStepUses'; file: string; job: string; index: number; fp: Fp; sha: string; tag: string }
   // matrix and strategy
   | { op: 'setMatrixDim'; file: string; job: string; dim: string; values: Json[] | null }
   | {
