@@ -175,7 +175,10 @@ test('filtering the push to release branches keeps the jobs on the canvas, dimme
   );
 
   await banner.getByRole('button', { name: 'Simulate pull_request instead' }).click();
-  await expect(page.locator('[data-field="event"]')).toHaveValue('pull_request');
+  // In edit mode the triggers editor's radios are the event picker.
+  await expect(
+    page.getByRole('region', { name: 'Triggers' }).getByRole('radio', { name: 'pull_request' }),
+  ).toBeChecked();
   await expect(banner).toHaveCount(0);
   await expect(jobNode(page, 'test')).not.toHaveAttribute('aria-label', /^skipped/);
 });

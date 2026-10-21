@@ -162,6 +162,8 @@ runs: { using: node20, main: index.js }
       narrowed: true,
     });
     expect(ci.events[3]!.crons).toEqual(['0 6 * * 1']);
+    // In GitHub's words, from the engine's describeCron, for the triggers editor.
+    expect(ci.events[3]!.cronText).toEqual(['Runs at 06:00, only on Monday']);
     expect(ci.dispatch).toEqual([
       { name: 'env', type: 'choice', required: false, default: 'staging', options: ['staging', 'prod'] },
       { name: 'dry', type: 'boolean', required: true },
@@ -388,6 +390,30 @@ runs: { using: node20, main: index.js }
     expect(byPath.get('.github/actions/made/action.yml')!.generated).toBe('@generated');
     expect(byPath.get('.github/actions/x/action.yml')).not.toHaveProperty('generated');
     expect(byPath.get('.github/workflows/bad-on.yml')).not.toHaveProperty('generated');
+  });
+
+  it('words each cron as GitHub does, and leaves one GitHub would refuse to the converter’s problem', () => {
+    const r = handle(initialState(), {
+      id: 1,
+      type: 'load',
+      files: {
+        '.github/workflows/nightly.yml':
+          "on:\n  schedule:\n    - cron: '*/15 * * * *'\n    - cron: '61 6 * * 1'\n      timezone: Europe/Paris\njobs:\n  a:\n    runs-on: x\n    steps: [{ run: a }]\n",
+      },
+    });
+    if (r.response.type !== 'loaded') throw new Error(JSON.stringify(r.response));
+    const [schedule] = r.response.outline.workflows[0]!.events;
+    expect(schedule).toMatchObject({
+      crons: ['*/15 * * * *', '61 6 * * 1'],
+      cronText: ['Runs every 15 minutes', null],
+    });
+    expect(r.response.outline.files[0]!.errors).toEqual([
+      expect.objectContaining({
+        line: 4,
+        source: 'workflow',
+        message: expect.stringMatching(/^Invalid cron/),
+      }),
+    ]);
   });
 
   it('accepts only well-formed requests', () => {

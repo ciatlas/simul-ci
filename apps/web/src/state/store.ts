@@ -9,7 +9,7 @@ import { classifyEol, type FileMeta, textMeta } from '../input/read';
 import type { DiskConflict, DiskFile, FileOutcome } from '../input/save';
 import { type ChangeRow, changeRows, changeSentence } from '../plan/change-rows';
 import { diffOf, pinSentence, verdictChanges } from '../plan/changes';
-import type { Derived, ModelInfo, Outline } from '../worker/protocol';
+import type { Derived, ModelInfo, Outline, ReadyResponse } from '../worker/protocol';
 import * as history from './history';
 import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
 
@@ -199,6 +199,8 @@ export interface SessionState {
     status: 'booting' | 'ready' | 'failed';
     version?: string;
     models: ModelInfo[];
+    /** Every event `on:` takes, with its activity types: the worker's `ready` sends them once (Add event). */
+    events?: ReadyResponse['events'];
     restarts: number;
     busy: boolean;
   };
@@ -445,7 +447,7 @@ export interface SessionActions {
   /** A load of edited texts broke YAML that parsed: the project shown stays (§ 7.2). */
   projectHeld: (held: Held) => void;
   projectFailed: (error: SessionError) => void;
-  engineReady: (info: { version: string; models: ModelInfo[] }) => void;
+  engineReady: (info: { version: string; models: ModelInfo[]; events?: ReadyResponse['events'] }) => void;
   engineFailed: (error: SessionError) => void;
   /**
    * The engine was restarted. `project` is the id the fresh worker gave the texts it loaded, adopted for the project
@@ -949,8 +951,10 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         set((s) => ({ project: { ...s.project, held }, generated: markersOf(held.outline) })),
       projectFailed: (error) =>
         set((s) => ({ project: { status: 'error' }, error: replaceError(s.error, error) })),
-      engineReady: ({ version, models }) =>
-        set((s) => ({ engine: { ...s.engine, status: 'ready', version, models } })),
+      engineReady: ({ version, models, events }) =>
+        set((s) => ({
+          engine: { ...s.engine, status: 'ready', version, models, ...(events ? { events } : {}) },
+        })),
       engineFailed: (error) =>
         set((s) => ({ engine: { ...s.engine, status: 'failed', busy: false }, error })),
       engineRestarted: (restarts, project) =>

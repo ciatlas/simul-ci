@@ -107,7 +107,12 @@ export function createSession({
   };
 
   client.ready.then(
-    (r) => actions.engineReady({ version: r.engine.version, models: r.models }),
+    (r) =>
+      actions.engineReady({
+        version: r.engine.version,
+        models: r.models,
+        ...(r.events ? { events: r.events } : {}),
+      }),
     () => undefined, // the failure listener reports it
   );
   client.onFailure((message) =>
