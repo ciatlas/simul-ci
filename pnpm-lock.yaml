@@ -168,6 +168,10 @@ patchedDependencies:
 importers:
 
   .:
+    dependencies:
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
     devDependencies:
       '@ciatlas/core':
         specifier: github:ciatlas/core#v2.5.0

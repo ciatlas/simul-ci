@@ -6,6 +6,7 @@
  *   the edit runtime;
  * - the engine worker chunk is built from core's browser entry (no node-fs, no git);
  * - elkjs lives only in the layout worker chunk, which holds none of the engine;
+ * - the bundled action catalog is a chunk of its own, holding the catalog alone;
  * - no chunk imports a Node built-in or holds the Node host (packages/node);
  * - no stylesheet inlines a font, which the CSP's font-src 'self' would refuse;
  * - every chunk has a gzip budget and stays under it.
@@ -40,11 +41,14 @@ const BUDGETS = [
   // The edit runtime: yaml with its composer, the document model, the op dispatch, Properties, the matrix editor, the
   // canvas's gestures (Add job, What it needs, the palette, the step lists; platform popovers and a combobox of our
   // own, not Base UI's, which would add 33 kB) and the triggers editor, fetched for editing: 84.8 kB measured (78.9
-  // before the triggers editor); the budget is that and 15 %.
+  // before the triggers editor); the budget is that and 15 %. The catalog's loader and Pin to SHA: 86.4 measured.
   { name: 'the edit runtime', test: (f) => f.startsWith('edit-'), kB: 98 },
   // The Changes, save and test case dialogs with the restore conflicts' rows, the line diff and the patch, and what
   // Save and Reload run against the folder, fetched on idle once a file is unsaved (synthesis § 8.5): 9.6 kB measured.
   { name: 'the dialogs', test: (f) => f.startsWith('dialogs-'), kB: 12 },
+  // The bundled action catalog, 50 actions with their refs, commits and inputs, fetched by the edit runtime when the
+  // palette or Properties needs it (synthesis § 4.8): 33.0 kB measured.
+  { name: 'the action catalog', test: (f) => f.startsWith('catalog-'), kB: 38 },
 ];
 
 const problems = [];

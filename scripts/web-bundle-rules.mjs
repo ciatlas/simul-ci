@@ -22,6 +22,11 @@ const ENGINE = /packages\/engine\/src\//;
  */
 const DOCUMENT = /packages\/document\/src\//;
 const PAGE_DOCUMENT_OK = /packages\/document\/src\/edits\.ts$/;
+/**
+ * The bundled action catalog (synthesis § 8.5): the one source of the `catalog-*` chunk, which the edit runtime fetches
+ * with `import()` as the palette or Properties asks, and of no other chunk.
+ */
+const CATALOG = /(?:^|\/)src\/catalog\/catalog\.json$/;
 /** The Node host (@simulci/node): it reads the checkout from disk, which neither the page nor the worker can. */
 const NODE_HOST = /packages\/node\/src\//;
 /**
@@ -37,6 +42,7 @@ const isEngineWorker = (file) => file.startsWith('engine.worker-');
 const isLayoutWorker = (file) => file.startsWith('layout.worker-');
 /** The edit runtime, fetched when the author edits: the page's but for the document model and its YAML parser. */
 const isEditRuntime = (file) => file.startsWith('edit-');
+const isCatalog = (file) => file.startsWith('catalog-');
 
 /**
  * What breaks the contract in one JavaScript chunk.
@@ -53,9 +59,21 @@ export function chunkProblems(file, sources) {
       );
     if (NODE_HOST.test(s)) problems.push(`${file} holds ${s}, which runs only under Node`);
   }
+  if (isCatalog(file)) return [...problems, ...catalogProblems(file, sources)];
+  for (const s of sources)
+    if (CATALOG.test(s)) problems.push(`${file} holds ${s}, which only the catalog chunk may: import() it`);
   if (isEngineWorker(file)) problems.push(...engineWorkerProblems(file, sources));
   else if (isLayoutWorker(file)) problems.push(...layoutWorkerProblems(file, sources));
   else problems.push(...pageProblems(file, sources));
+  return problems;
+}
+
+/** The catalog chunk is the catalog's JSON and nothing else: a module joining it would load with the catalog. */
+function catalogProblems(file, sources) {
+  const problems = sources
+    .filter((s) => !CATALOG.test(s))
+    .map((s) => `${file} holds ${s}: the catalog chunk holds catalog.json alone`);
+  if (!sources.some((s) => CATALOG.test(s))) problems.push(`${file} holds no catalog.json`);
   return problems;
 }
 

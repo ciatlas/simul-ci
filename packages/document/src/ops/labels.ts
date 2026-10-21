@@ -22,6 +22,7 @@ const LABELS: { [K in WorkflowOp['op']]: (op: Of<K>) => string } = {
   removeStep: (op) => `Remove ${owner(op.job, op.index)}`,
   moveStep: (op) => `Move ${owner(op.job, op.from)}`,
   setStepField: (op) => `${setOr(op.value)} ${op.field} of ${owner(op.job, op.index)}`,
+  pinStepUses: (op) => `Pin the action of ${owner(op.job, op.index)} to ${op.tag}'s commit`,
   setMatrixDim: (op) => `${setOr(op.values)} ${op.job}'s matrix ${op.dim}`,
   setMatrixEntry: (op) =>
     op.index === 'append'

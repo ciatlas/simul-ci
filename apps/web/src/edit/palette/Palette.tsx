@@ -6,6 +6,7 @@ import { newestOutline, type SessionStore } from '../../state/store';
 import { addJob } from '../canvas/actions';
 import { Combobox } from '../canvas/Combobox';
 import type { GestureUi, PaletteOpen } from '../canvas/ui';
+import { useCatalog } from '../catalog';
 import { type Dispatched, dispatch } from '../dispatch';
 import { documents } from '../documents';
 import { RefusalNote } from '../Refusal';
@@ -15,9 +16,10 @@ import { type Entry, paletteEntries } from './entries';
 /**
  * The palette (synthesis § 4.8; `s`, Mod+K, + between steps, + Add step, Uses → Change…): a modal dialog with a
  * combobox over this repository's actions and callable workflows, what the repository uses with its counts and refs,
- * and Run a script. Picking an action inserts a step that writes `uses: <ref>` and nothing else, after the selected
- * step or last in the job, and selects it with Properties open; Run a script inserts a `run:` step and puts the focus
- * in its Run; calling a workflow adds a job after this one. Changing a step's action writes its `uses:` alone.
+ * the bundled catalog's common actions (its chunk fetched as the palette opens), a typed `owner/repo@ref`, and Run a
+ * script. Picking an action inserts a step that writes `uses: <ref>` and nothing else, after the selected step or last
+ * in the job, and selects it with Properties open, where its inputs are; Run a script inserts a `run:` step and puts
+ * the focus in its Run; calling a workflow adds a job after this one. Changing a step's action writes its `uses:` alone.
  */
 
 export function Palette({ open, ui, onClose }: { open: PaletteOpen; ui: GestureUi; onClose: () => void }) {
@@ -28,9 +30,10 @@ export function Palette({ open, ui, onClose }: { open: PaletteOpen; ui: GestureU
   const [query, setQuery] = useState('');
   const [refusedSeq, setRefusedSeq] = useState<number>();
   const mode = open.change ? 'change' : 'add';
+  const { catalog, failed } = useCatalog();
   const entries = useMemo(
-    () => paletteEntries(outline, open.file, query, mode),
-    [outline, open.file, query, mode],
+    () => paletteEntries(outline, open.file, query, mode, catalog),
+    [outline, open.file, query, mode, catalog],
   );
   const pick = useCallback(
     (entry: Entry): void => {
@@ -59,14 +62,19 @@ export function Palette({ open, ui, onClose }: { open: PaletteOpen; ui: GestureU
           onQuery={setQuery}
           options={entries}
           onPick={(o) => pick(o as Entry)}
-          placeholder="owner/repo, ./.github/actions/…, run"
+          placeholder="owner/repo@ref, ./.github/actions/…, run"
           empty={
-            query.trim() ? `Nothing here matches ${query.trim()}.` : 'This repository uses no actions yet.'
+            query.trim()
+              ? `Nothing here matches ${query.trim()}. Type owner/repo@ref to use any action.`
+              : 'This repository uses no actions yet.'
           }
         />
         <RefusalNote seq={refusedSeq} />
         <p className="text-muted">
-          Inserts <code className="font-mono">uses:</code> and nothing else; inputs are set in Properties.
+          Inserts <code className="font-mono">uses:</code> and nothing else; inputs are set in Properties.{' '}
+          {failed
+            ? 'The common actions could not be loaded: reload the page to list them.'
+            : !catalog && 'Loading the common actions…'}
         </p>
       </div>
     </dialog>
