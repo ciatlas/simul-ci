@@ -1,0 +1,5 @@
+  - name: added from the page
+    when: { event: pull_request, action: opened, base: main, head: feat/x }
+    then:
+      run: [title]
+      conclusion: success

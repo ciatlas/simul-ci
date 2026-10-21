@@ -1,7 +1,7 @@
 import { heldSentence } from '../engine/hold';
 import type { SessionState } from '../state/store';
 import type { CaseResult, EngineClient } from '../worker/client';
-import type { CaseRequest } from '../worker/protocol';
+import type { CaseRequest, CaseResponse } from '../worker/protocol';
 
 /**
  * Copy as test case (synthesis § 7): the focused workflow's route test, or the plan in another format, written by
@@ -63,15 +63,20 @@ export function caseAvailability(s: Pick<SessionState, 'plan' | 'focus' | 'proje
 }
 
 /** The `case` request for a format, or nothing while a case cannot be asked for. */
-export function caseBody(s: Inputs, format: CaseFormat): CaseBody | undefined {
+export function caseBody(s: Inputs, format: CaseFormat, given?: unknown): CaseBody | undefined {
   const available = caseAvailability(s);
-  return available.ok ? bodyOf(s, available, format) : undefined;
+  return available.ok ? bodyOf(s, available, format, given) : undefined;
 }
 
 type CaseBody = Omit<CaseRequest, 'id' | 'type'>;
 
-function bodyOf(s: Inputs, available: Extract<CaseAvailability, { ok: true }>, format: CaseFormat): CaseBody {
-  return {
+function bodyOf(
+  s: Inputs,
+  available: Extract<CaseAvailability, { ok: true }>,
+  format: CaseFormat,
+  given: unknown,
+): CaseBody {
+  const body: CaseBody = {
     project: available.project,
     workflow: available.workflow,
     scenario: s.scenario,
@@ -79,15 +84,17 @@ function bodyOf(s: Inputs, available: Extract<CaseAvailability, { ok: true }>, f
     detail: format === 'steps' ? 'steps' : 'jobs',
     format: isTestFormat(format) ? 'test' : format === 'text' ? 'text' : 'mermaid',
   };
+  return given === undefined || !isTestFormat(format) ? body : { ...body, given };
 }
 
 /**
  * What the dialog shows for an answer. `maybes` counts the case's maybe comments; `errors` are the headlines of the
  * error diagnostics of the plan the case was written from, each of which makes `simulci test` report the case
- * invalid (a mock that matches nothing, a conflict). Both are empty for the plan formats.
+ * invalid (a mock that matches nothing, a conflict). Both are empty for the plan formats, which have no `case`: the
+ * test case as JSON, which the dialog adds to the workflow's test file.
  */
 export type CaseOutcome =
-  | { type: 'case'; text: string; maybes: number; errors: string[] }
+  | { type: 'case'; text: string; maybes: number; errors: string[]; case?: CaseResponse['case'] }
   | { type: 'failed'; message: string }
   | { type: 'superseded' };
 
@@ -99,6 +106,7 @@ export function outcomeOf(result: CaseResult): CaseOutcome {
       text: result.text,
       maybes: result.case?.comments.length ?? 0,
       errors: (result.errors ?? []).map((e) => `${e.code} ${e.message}`),
+      ...(result.case ? { case: result.case } : {}),
     };
   if (result.type === 'invalid')
     return { type: 'failed', message: `the ${result.what} is not valid: ${messagesOf(result.issues)}` };
@@ -109,15 +117,19 @@ export function outcomeOf(result: CaseResult): CaseOutcome {
 const messagesOf = (issues: { path: (string | number)[]; message: string }[]): string =>
   issues.map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message)).join('; ');
 
-/** Asks the worker for the case in a format, from the inputs the store holds now. */
+/**
+ * Asks the worker for the case in a format, from the inputs the store holds now; a test case under the `given` of the
+ * test file it is for, as `simulci test` will run it there.
+ */
 export async function requestCase(
   client: Pick<EngineClient, 'case'>,
   s: Inputs,
   format: CaseFormat,
+  given?: unknown,
 ): Promise<CaseOutcome> {
   const available = caseAvailability(s);
   if (!available.ok) return { type: 'failed', message: available.reason };
-  return outcomeOf(await client.case(bodyOf(s, available, format)));
+  return outcomeOf(await client.case(bodyOf(s, available, format, given)));
 }
 
 /** `ci` for `.github/workflows/ci.yml` or `ci.yaml`. */

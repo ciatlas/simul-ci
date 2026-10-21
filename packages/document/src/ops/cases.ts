@@ -48,7 +48,7 @@ function appendCase(doc: WorkflowDocument, testCase: CaseJson): Draft | Refusal 
   const cases = doc.get(['cases'])?.value;
   const names = Array.isArray(cases) ? cases.map((c) => (isObject(c) ? c.name : undefined)) : [];
   const index = Array.isArray(cases) ? cases.length : 0;
-  const name = freeName(testCase.name, names);
+  const name = freeCaseName(testCase.name, names);
   const flow = whenInFlow(doc, testCase);
   const draft = chain(doc, `Add a case to ${fileName(doc.path)}`, [
     (d) => insertDraft(d, ['cases'], index, caseValue({ ...testCase, name })),
@@ -62,7 +62,7 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** A case name the file does not have yet: the name, else `name (2)`, `name (3)`. */
-function freeName(name: string, taken: readonly unknown[]): string {
+export function freeCaseName(name: string, taken: readonly unknown[]): string {
   if (!taken.includes(name)) return name;
   for (let n = 2; ; n++) if (!taken.includes(`${name} (${n})`)) return `${name} (${n})`;
 }

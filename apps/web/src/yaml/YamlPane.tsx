@@ -2,6 +2,7 @@ import type { Extension, StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { NodeId } from '@simulci/engine';
 import {
+  Fragment,
   type KeyboardEvent,
   type RefObject,
   useEffect,
@@ -347,13 +348,19 @@ function movedTab(key: string, at: number, count: number): number | undefined {
   return undefined;
 }
 
-/** How a tab names its file to a screen reader: its label, then what its dots say. */
+/** How a tab names its file to a screen reader: its label, a route test as one, then what its dots say. */
 const tabLabel = (tab: FileTab, dirty: boolean): string =>
-  [tab.label, ...(dirty ? ['unsaved'] : []), ...(tab.problems > 0 ? ['has problems'] : [])].join(', ');
+  [
+    tab.label,
+    ...(tab.kind === 'test' ? ['route test'] : []),
+    ...(dirty ? ['unsaved'] : []),
+    ...(tab.problems > 0 ? ['has problems'] : []),
+  ].join(', ');
 
 /**
- * The files as tabs; a file with unsaved edits has a dot, a file with problems a red one, and each says so. The arrows
- * move between tabs and open them.
+ * The files as tabs; a file with unsaved edits has a dot, a file with problems a red one, and each says so. The route
+ * tests come last, under a label of their own, which a screen reader skips: each test's name says it is one. The
+ * arrows move between tabs and open them.
  */
 function FileTabs({
   tabs,
@@ -377,6 +384,7 @@ function FileTabs({
     buttons.current[next]?.focus();
   };
   if (tabs.length === 0) return null;
+  const tests = tabs.findIndex((t) => t.kind === 'test');
   return (
     <div
       role="tablist"
@@ -385,28 +393,37 @@ function FileTabs({
       onKeyDown={onKeyDown}
     >
       {tabs.map((tab, i) => (
-        <button
-          key={tab.path}
-          ref={(el) => {
-            buttons.current[i] = el;
-          }}
-          type="button"
-          role="tab"
-          id={`${ids}-tab-${i}`}
-          aria-selected={i === active}
-          aria-controls={`${ids}-panel`}
-          aria-label={tabLabel(tab, files.byPath[tab.path] !== files.base[tab.path])}
-          tabIndex={i === active || (active < 0 && i === 0) ? 0 : -1}
-          title={tab.path}
-          className="flex shrink-0 items-center gap-1.5 rounded-t px-2.5 py-1 font-mono text-muted text-xs hover:text-text aria-selected:bg-surface aria-selected:text-text"
-          onClick={() => onPick(tab.path)}
-        >
-          {tab.label}
-          {files.byPath[tab.path] !== files.base[tab.path] && (
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-text" />
+        <Fragment key={tab.path}>
+          {i === tests && (
+            <span
+              aria-hidden="true"
+              className="ml-1 self-center border-border border-l pl-2 text-[0.625rem] text-muted uppercase tracking-wide"
+            >
+              Tests
+            </span>
           )}
-          {tab.problems > 0 && <span aria-hidden="true" className="size-1.5 rounded-full bg-danger" />}
-        </button>
+          <button
+            ref={(el) => {
+              buttons.current[i] = el;
+            }}
+            type="button"
+            role="tab"
+            id={`${ids}-tab-${i}`}
+            aria-selected={i === active}
+            aria-controls={`${ids}-panel`}
+            aria-label={tabLabel(tab, files.byPath[tab.path] !== files.base[tab.path])}
+            tabIndex={i === active || (active < 0 && i === 0) ? 0 : -1}
+            title={tab.path}
+            className="flex shrink-0 items-center gap-1.5 rounded-t px-2.5 py-1 font-mono text-muted text-xs hover:text-text aria-selected:bg-surface aria-selected:text-text"
+            onClick={() => onPick(tab.path)}
+          >
+            {tab.label}
+            {files.byPath[tab.path] !== files.base[tab.path] && (
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-text" />
+            )}
+            {tab.problems > 0 && <span aria-hidden="true" className="size-1.5 rounded-full bg-danger" />}
+          </button>
+        </Fragment>
       ))}
     </div>
   );

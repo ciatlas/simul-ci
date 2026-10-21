@@ -25,6 +25,11 @@ export interface LoadRequest {
   type: 'load';
   /** Repository files by path (`.github/workflows/ci.yml`, …). */
   files: Record<string, string>;
+  /**
+   * Route tests by path (`.github/simulci/tests/ci.test.yml`): never loaded into the project, only checked against
+   * the test file schema, their failures reported as the Outline's `kind: 'test'` files.
+   */
+  tests?: Record<string, string>;
   repository?: string;
 }
 
@@ -54,6 +59,12 @@ export interface CaseRequest {
   detail: 'jobs' | 'steps';
   name?: string;
   format: 'test' | 'text' | 'mermaid';
+  /**
+   * The `given` of the test file the case is for, which `simulci test` merges into each case's scenario and mocks: the
+   * case is planned under it, its `when` still the scenario sent. One the test file schema refuses is not applied (the
+   * file's own failure says why).
+   */
+  given?: unknown;
 }
 
 /**
@@ -240,12 +251,14 @@ export interface OutlineWorkflow {
 
 export interface OutlineFile {
   path: string;
-  kind: 'workflow' | 'action' | 'other';
+  kind: 'workflow' | 'action' | 'test' | 'other';
   /**
    * `yaml`: the YAML parser refused the text (core's `parseErrors`), which the edit hold watches for; `workflow`: the
-   * workflow converter refused what parsed (an unknown event, a bad filter).
+   * workflow converter refused what parsed (an unknown event, a bad filter); `test`: a route test's failure as `simulci
+   * test` reports it before running a case (T001 YAML, T002 schema, T103 a duplicate name), which never holds the
+   * plan: no route test is in it.
    */
-  errors: { line: number; column: number; message: string; source?: 'yaml' | 'workflow' }[];
+  errors: { line: number; column: number; message: string; source?: 'yaml' | 'workflow' | 'test' }[];
   /** Core's marker of a generated workflow or action (`DO NOT EDIT`, `.lock.yml`): the pane keeps it read-only. */
   generated?: string;
 }
@@ -277,12 +290,14 @@ export interface Derived {
 
 const TYPES = new Set(['load', 'simulate', 'case', 'refs']);
 
+const isObject = (v: unknown): boolean => typeof v === 'object' && v !== null;
+
 /** Whether a message is a request the worker answers: the shape is checked, not trusted. */
 export function isEngineRequest(data: unknown): data is EngineRequest {
   if (typeof data !== 'object' || data === null) return false;
   const d = data as Record<string, unknown>;
   if (typeof d.id !== 'number' || typeof d.type !== 'string' || !TYPES.has(d.type)) return false;
-  if (d.type === 'load') return typeof d.files === 'object' && d.files !== null;
+  if (d.type === 'load') return isObject(d.files) && (d.tests === undefined || isObject(d.tests));
   if (d.type === 'refs') return typeof d.project === 'number' && isTarget(d.target);
   return (
     typeof d.project === 'number' &&

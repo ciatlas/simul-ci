@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { targetsOf } from '../src/app/save-targets';
 import { createSaver } from '../src/app/saver';
+import { addTestCase, placementOf } from '../src/edit/cases/add';
+import { documents } from '../src/edit/documents';
 import { readFolder } from '../src/input/folder';
 import { type Choice, type Choices, type DiskConflict, saveTo } from '../src/input/save';
 import { memoryStore } from '../src/lib/idb';
@@ -359,6 +361,37 @@ describe('saving to the folder', () => {
       `close ${TEST}`,
     ]);
     expect(fake.text(TEST)).toBe('cases: []\n');
+  });
+
+  it('saves a case added to a route test the folder has and one in a new nested file, which the next walk reads', async () => {
+    const RELEASE_TEST = '.github/simulci/tests/release.test.yml';
+    const NESTED = '.github/simulci/tests/nested/ci.test.yml';
+    const released =
+      'workflow: release.yml\ncases:\n  - { name: x, when: { event: push }, then: { run: [a] } }\n';
+    const { fake, store, saver } = await opened({ [CI]: 'on: push\njobs: {}\n', [RELEASE_TEST]: released });
+    // The walk took the route test in beside the workflow.
+    expect(Object.keys(store.getState().files.byPath).sort()).toEqual([RELEASE_TEST, CI]);
+    store.setState({ generated: {} });
+    const testCase = { name: 'a push', when: { event: 'push' }, then: { run: ['a'] }, comments: [] };
+    const release = placementOf(store.getState(), documents(store), '.github/workflows/release.yml');
+    expect(release).toMatchObject({ kind: 'add', path: RELEASE_TEST, cases: 1 });
+    expect(addTestCase(store, release, '.github/workflows/release.yml', testCase).ok).toBe(true);
+    expect(addTestCase(store, { kind: 'create', path: NESTED }, CI, testCase).ok).toBe(true);
+    expect(await saver.save()).toBe(true);
+    // The update first; then the one directory the create needs, just before it.
+    expect(fake.calls).toEqual([
+      'requestPermission',
+      `close ${RELEASE_TEST}`,
+      'mkdir .github/simulci/tests/nested',
+      `create ${NESTED}`,
+      `close ${NESTED}`,
+    ]);
+    const files = store.getState().files;
+    expect(fake.text(NESTED)).toBe(files.byPath[NESTED]);
+    expect(fake.text(RELEASE_TEST)).toBe(files.byPath[RELEASE_TEST]);
+    expect(dirtyPaths(files)).toEqual([]);
+    const again = await readFolder(fake.handle);
+    expect(again.files).toEqual(files.byPath);
   });
 
   it('leaves no directory behind when a conflict is cancelled', async () => {

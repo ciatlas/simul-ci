@@ -1,4 +1,4 @@
-import { isProjectFile } from '../input/filter';
+import { isKeptFile } from '../input/filter';
 import type { Walked } from '../input/limits';
 import { asWritten, type FileMeta, textMeta } from '../input/read';
 import type { Choices, DiskConflict, DiskFile } from '../input/save';
@@ -27,14 +27,14 @@ export interface ReloadPlan {
 type Files = Pick<SessionState['files'], 'byPath' | 'base' | 'meta'>;
 
 /**
- * Compares the folder as read again with the files. The paths are the folder's project files and the page's; a file
- * the walk left out for its size is not taken for gone.
+ * Compares the folder as read again with the files. The paths are the folder's files and the page's (project files
+ * and route tests); a file the walk left out for its size is not taken for gone.
  */
 export function reloadPlan(files: Files, read: Pick<Walked, 'files' | 'meta' | 'skipped'>): ReloadPlan {
   const plan: ReloadPlan = { disk: {}, take: [], conflicts: [], from: {} };
   const left = new Set(read.skipped.map((s) => s.path));
   const here = [...Object.keys(files.base), ...Object.keys(files.byPath)].filter(
-    (p) => isProjectFile(p) && !left.has(p),
+    (p) => isKeptFile(p) && !left.has(p),
   );
   for (const path of new Set([...Object.keys(read.files), ...here].sort())) {
     const text = read.files[path];

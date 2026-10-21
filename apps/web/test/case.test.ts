@@ -113,6 +113,14 @@ describe('the case request', () => {
     expect(caseBody(inputs(), 'mermaid')).toEqual({ ...shared, detail: 'jobs', format: 'mermaid' });
   });
 
+  it('carries the given of the test file a test case is for, and none with a plan', () => {
+    const given = { changed: ['src/a.ts'] };
+    expect(caseBody(inputs(), 'jobs', given)).toMatchObject({ format: 'test', given });
+    expect(caseBody(inputs(), 'steps', given)).toMatchObject({ format: 'test', given });
+    expect(caseBody(inputs(), 'text', given)).not.toHaveProperty('given');
+    expect(caseBody(inputs(), 'jobs')).not.toHaveProperty('given');
+  });
+
   it('carries the scenario and the assumptions the store holds now, as they are', () => {
     const now = inputs({ scenario: { event: 'pull_request', base: 'dev' }, assume: [] });
     const body = caseBody(now, 'jobs');
@@ -128,18 +136,27 @@ describe('the case request', () => {
 });
 
 describe('what the dialog shows for an answer', () => {
-  it('counts the maybe comments of a case, and no errors when the worker sent none', () => {
+  it('counts the maybe comments of a case, keeps the case to add, and no errors when the worker sent none', () => {
     const generated = { name: 'push main', when: {}, then: {}, allowMaybe: true, comments: ['a', 'b'] };
     expect(outcomeOf({ id: 1, type: 'case', text: 'workflow: ci.yml\n', case: generated })).toEqual({
       type: 'case',
       text: 'workflow: ci.yml\n',
       maybes: 2,
       errors: [],
+      case: generated,
     });
     const settled = { name: 'push main', when: {}, then: {}, comments: [] };
     expect(outcomeOf({ id: 1, type: 'case', text: 'x', case: settled })).toEqual({
       type: 'case',
       text: 'x',
+      maybes: 0,
+      errors: [],
+      case: settled,
+    });
+    // The plan formats have no case.
+    expect(outcomeOf({ id: 1, type: 'case', text: 'the plan' })).toEqual({
+      type: 'case',
+      text: 'the plan',
       maybes: 0,
       errors: [],
     });
@@ -155,6 +172,7 @@ describe('what the dialog shows for an answer', () => {
       type: 'case',
       text: 'x',
       maybes: 0,
+      case: generated,
       errors: [
         'SC102 assume[0] matches nothing in this plan',
         'SC103 assume[1] and assume[2] both set outcome of build.t to different values',

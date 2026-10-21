@@ -1,4 +1,4 @@
-import { isProjectFile } from '../input/filter';
+import { isProjectFile, isTestFile } from '../input/filter';
 import { debounce, scheduler, type Timers } from '../lib/debounce';
 import { markEdit } from '../lib/marks';
 import { defaultScenario } from '../scenario/defaults';
@@ -39,11 +39,21 @@ export interface SessionOptions {
 /** Why a load goes out: a new source, an edit of its texts, or the same texts again after a stale reply. */
 type Cause = 'source' | 'edit' | 'reload';
 
-/** The files the engine loads: the project's, never a route test (C10 sends those apart). */
-function projectFiles(byPath: Record<string, string>): Record<string, string> {
+/**
+ * What a load sends: the project's files, which the engine loads, and the route tests apart, which the worker only
+ * checks (synthesis § 4.9). `tests` is left out when there are none.
+ */
+function loadBody(byPath: Record<string, string>): {
+  files: Record<string, string>;
+  tests?: Record<string, string>;
+} {
   const paths = Object.keys(byPath);
-  if (paths.every(isProjectFile)) return byPath;
-  return Object.fromEntries(paths.filter(isProjectFile).map((p) => [p, byPath[p]!]));
+  if (paths.every(isProjectFile)) return { files: byPath };
+  const pick = (keep: (path: string) => boolean): Record<string, string> =>
+    Object.fromEntries(paths.filter(keep).map((p) => [p, byPath[p]!]));
+  const tests = pick(isTestFile);
+  const files = pick(isProjectFile);
+  return Object.keys(tests).length ? { files, tests } : { files };
 }
 
 const hasProjectFiles = (s: SessionState): boolean => Object.keys(s.files.byPath).some(isProjectFile);
@@ -95,9 +105,10 @@ export interface Session {
   refs(target: RefsTarget): Promise<FoundRefs>;
   /**
    * The focused workflow's case, or the plan in another format, from the scenario and the assumptions the store
-   * holds now: the worker simulates them again. Busy and the plan are not touched; the dialog shows the answer.
+   * holds now: the worker simulates them again, a test case under the `given` of the test file it is for. Busy and
+   * the plan are not touched; the dialog shows the answer.
    */
-  testCase(format: CaseFormat): Promise<CaseOutcome>;
+  testCase(format: CaseFormat, given?: unknown): Promise<CaseOutcome>;
   dispose(): void;
 }
 
@@ -175,7 +186,7 @@ export function createSession({
     if (cause !== 'edit') actions.projectLoading();
     busy(1);
     try {
-      const r = await client.load({ files: projectFiles(byPath) });
+      const r = await client.load(loadBody(byPath));
       if (store.getState().files.version !== version) return;
       if (r.type === 'loaded') {
         if (cause === 'edit') markEdit('edit:loaded', version);
@@ -334,7 +345,7 @@ export function createSession({
         return { ...at, project: r.project, refs: r.refs, exact: r.exact, notes: r.notes };
       return { ok: false, message: r.type === 'error' ? r.message : 'a newer request replaced it' };
     },
-    testCase: (format) => requestCase(client, store.getState(), format),
+    testCase: (format, given) => requestCase(client, store.getState(), format, given),
     dispose: () => {
       unsubscribe();
       simulate.cancel();

@@ -22,8 +22,9 @@ import {
 /** A client whose answers the test hands out in order. */
 function fakeClient() {
   const loads: ((r: LoadResult) => void)[] = [];
-  /** What each load sent, by the index of its answer in `loads`. */
+  /** What each load sent, by the index of its answer in `loads`: the project's files, and the route tests apart. */
   const loaded: Record<string, string>[] = [];
+  const tested: (Record<string, string> | undefined)[] = [];
   const simulates: {
     body: { project: number; scenario: { event: string }; planUntriggered?: string[] };
     resolve: (r: SimulateResult) => void;
@@ -42,6 +43,7 @@ function fakeClient() {
       new Promise<LoadResult>((resolve) => {
         loads.push(resolve);
         loaded.push(body.files);
+        tested.push(body.tests);
       }),
     simulate: (body) => new Promise<SimulateResult>((resolve) => simulates.push({ body, resolve })),
     case: (body) => new Promise<CaseResult>((resolve) => cases.push({ body, resolve })),
@@ -56,7 +58,7 @@ function fakeClient() {
     readyReject(new Error(message));
     for (const l of failureListeners) l(message);
   };
-  return { client, loads, loaded, simulates, cases, readyResolve, fail, restartListeners };
+  return { client, loads, loaded, tested, simulates, cases, readyResolve, fail, restartListeners };
 }
 
 /** A worker for the real client that answers only when the test says. */
@@ -374,13 +376,21 @@ describe('the session', () => {
     // The case is the dialog's: while it is out, the engine reads idle and the plan stays as the simulate left it.
     expect(store.getState().engine.busy).toBe(false);
     expect(store.getState().plan).toBe(before);
-    f.cases[0]!.resolve({
-      id: 9,
+    const generated = {
+      name: 'push release/1',
+      when: {},
+      then: {},
+      allowMaybe: true,
+      comments: ['ci.yml: maybe'],
+    };
+    f.cases[0]!.resolve({ id: 9, type: 'case', text: 'workflow: ci.yml\n', case: generated });
+    expect(await answer).toEqual({
       type: 'case',
       text: 'workflow: ci.yml\n',
-      case: { name: 'push release/1', when: {}, then: {}, allowMaybe: true, comments: ['ci.yml: maybe'] },
+      maybes: 1,
+      errors: [],
+      case: generated,
     });
-    expect(await answer).toEqual({ type: 'case', text: 'workflow: ci.yml\n', maybes: 1, errors: [] });
     // And so they stay once it is answered.
     expect(store.getState().plan).toBe(before);
     expect(store.getState().engine.busy).toBe(false);
@@ -702,6 +712,44 @@ describe('the session’s edit cadence and the hold', () => {
     expect(store.getState().project).toMatchObject({ status: 'ready', version: 4 });
     expect(store.getState().project.held).toBeUndefined();
     expect(f.simulates[1]!.body).toMatchObject({ project: 4, scenario: { branch: 'dev' } });
+  });
+
+  it('sends route tests apart from the project, leaves the plan current after a test’s edit, and never holds for one', async () => {
+    const TEST = '.github/simulci/tests/ci.test.yml';
+    const store = createSessionStore();
+    const f = fakeClient();
+    createSession({ store, client: f.client, debounceMs: 100 });
+    store
+      .getState()
+      .setFiles({ [CI]: 'on: push\n', [TEST]: 'workflow: ci.yml\n' }, { kind: 'sample', name: 'x' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.loaded[0]).toEqual({ [CI]: 'on: push\n' });
+    expect(f.tested[0]).toEqual({ [TEST]: 'workflow: ci.yml\n' });
+    const withTest = (errors: Outline['files'][number]['errors']): Outline => ({
+      ...outline,
+      files: [...outline.files, { path: TEST, kind: 'test', errors }],
+    });
+    f.loads[0]!(loadedAs(1, withTest([])));
+    await vi.advanceTimersByTimeAsync(0);
+    f.simulates[0]!.resolve(plan(1));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // A case added: the test file loads again at once, the plan is not of older texts, and its failure holds nothing.
+    op(store, TEST, 'cases: [\n');
+    expect(store.getState().stale).toBe(false);
+    await Promise.resolve();
+    expect(f.loaded[1]).toEqual({ [CI]: 'on: push\n' });
+    expect(f.tested[1]).toEqual({ [TEST]: 'cases: [\nworkflow: ci.yml\n' });
+    f.loads[1]!(
+      loadedAs(2, withTest([{ line: 2, column: 1, message: 'T001 Flow sequence…', source: 'test' }])),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().project).toMatchObject({ status: 'ready', version: 2 });
+    expect(store.getState().project.held).toBeUndefined();
+    // No test, no `tests`.
+    store.getState().setFiles({ [CI]: 'on: push\n' }, { kind: 'sample', name: 'y' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.tested.at(-1)).toBeUndefined();
   });
 
   it('never holds for a converter’s error, nor for a file already broken on the plan shown', async () => {

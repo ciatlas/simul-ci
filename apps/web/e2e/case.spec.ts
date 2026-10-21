@@ -1,9 +1,8 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import type { ScenarioInput } from '@simulci/engine';
 import { parse } from 'yaml';
+import { type NodeCase, nodeCase, nodePlan } from './node-run';
 
 /**
  * Copy as test case in a real browser, over the bundled starter sample: the top bar's button and the `c` key wait
@@ -59,30 +58,6 @@ async function shownText(dialog: Locator): Promise<string> {
   return area.inputValue();
 }
 
-/** Runs one of the browser pass's Node helpers beside this file, with the engine's root entry, and gives its stdout. */
-function runNode(helper: string, args: string[], input?: string): string {
-  const script = join(import.meta.dirname, helper);
-  return execFileSync(process.execPath, ['--conditions=source', '--import', 'tsx', script, ...args], {
-    cwd: import.meta.dirname,
-    encoding: 'utf8',
-    ...(input === undefined ? {} : { input }),
-  });
-}
-
-/** What e2e/node-case.ts prints for a test file's text. */
-interface NodeCase {
-  schema: { success: boolean; issues: { path: string[]; message: string }[] };
-  exitCode: number;
-  summary: { passed: number; failed: number; invalid: number; skipped: number };
-  cases: { name: string; status: string; failures: string[] }[];
-}
-
-/** A test file's text checked against TestFileSchema and run as `simulci test --ci` runs it, in Node. */
-const nodeCase = (text: string): NodeCase => JSON.parse(runNode('node-case.ts', [], text)) as NodeCase;
-
-/** The starter's plan for a scenario as `simulci plan` prints it, computed in Node (e2e/node-plan.ts). */
-const nodePlan = (scenario: ScenarioInput): string => runNode('node-plan.ts', [JSON.stringify(scenario)]);
-
 /** The schema takes the file and its one case passes in CI, as the dialog says `simulci test` will. */
 function expectPasses(result: NodeCase): void {
   expect(result).toMatchObject({ schema: { success: true, issues: [] }, exitCode: 0 });
@@ -131,7 +106,7 @@ test('c opens the jobs case, Copy puts exactly that text on the clipboard, and s
   expect(jobs).toContain('allowMaybe: true');
   // The case is about the page's scenario, as the author gave it.
   expect((parse(jobs) as { cases: { when: unknown }[] }).cases[0]?.when).toEqual(STARTER);
-  await expect(dialog).toContainText('Save it as .github/simulci/tests/ci.test.yml and run simulci test.');
+  await expect(dialog).toContainText('A new .github/simulci/tests/ci.test.yml, where simulci test runs it.');
   await expectCopied(page, dialog, jobs);
   expectPasses(nodeCase(jobs));
 

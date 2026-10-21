@@ -1,0 +1,14 @@
+  # smoke: maybe — github.event.client_payload.project.name → (no pin: only the run decides it)
+  - name: added from the page
+    when:
+      event: repository_dispatch
+      action: vercel.deployment.success
+      assume:
+        - step: smoke.deployment
+          outputs:
+            sha: 0123456789abcdef0123456789abcdef01234567
+            url: https://simulci-a1b2c3.vercel.app
+    allowMaybe: true
+    then:
+      maybe: [smoke]
+      conclusion: success

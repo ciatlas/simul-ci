@@ -1,7 +1,7 @@
 import { type Rename, type Warning, WorkflowDocument } from '@simulci/document';
+import { isTestFile } from '../../input/filter';
 import { fileLabel } from '../../lib/file-label';
 import { namesWorkflow, renamedUnit } from '../../state/renames';
-import { TESTS_DIR } from '../../testcase/case';
 
 /**
  * The route tests a rename leaves behind (synthesis § 3.3, `tests-name`): a rename edits one workflow only, so the
@@ -9,12 +9,10 @@ import { TESTS_DIR } from '../../testcase/case';
  * (`run`, `skip`, `maybe`, `units`) or in its mocks (`assume`); the file's `given` mocks count once.
  */
 
-const TEST_FILE = new RegExp(`^${TESTS_DIR.replaceAll('.', '\\.')}/(?:[^/]+/)*[^/]+\\.test\\.ya?ml$`);
-
 /** One warning per open test file of the renamed workflow that names the old id. */
 export function testsNaming(byPath: Readonly<Record<string, string>>, rename: Rename): Warning[] {
   return Object.entries(byPath).flatMap(([path, text]) => {
-    if (!TEST_FILE.test(path)) return [];
+    if (!isTestFile(path)) return [];
     const file = WorkflowDocument.open(text, { path, kind: 'test' }).value();
     const message = isRecord(file) ? naming(path, file, rename) : undefined;
     return message ? [{ code: 'tests-name', message }] : [];

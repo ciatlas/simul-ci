@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { caseFileText, type CaseJson } from '@simulci/document';
 import type { ScenarioInput } from '@simulci/engine';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -9,9 +10,11 @@ import { sampleByName } from '../src/input/samples';
 import { downloadText } from '../src/lib/download';
 import {
   createSessionStore,
+  dirtyPaths,
   initialSessionState,
   type PlanState,
   type SessionState,
+  type Source,
 } from '../src/state/store';
 import { type CaseFormat, type CaseOutcome, requestCase } from '../src/testcase/case';
 import { CopyAsTest } from '../src/testcase/CopyAsTest';
@@ -69,11 +72,11 @@ function ready(scenario: ScenarioInput = push): Partial<SessionState> {
 }
 
 /** The session's testCase, given the store's state when it is asked, as the real one reads it. */
-type TestCase = (format: CaseFormat, s: SessionState) => Promise<CaseOutcome>;
+type TestCase = (format: CaseFormat, s: SessionState, given?: unknown) => Promise<CaseOutcome>;
 
 function mount(state: Partial<SessionState>, testCase: TestCase) {
   const store = createSessionStore({ ...initialSessionState(), focus: CI, ...state });
-  const ask = vi.fn((format: CaseFormat) => testCase(format, store.getState()));
+  const ask = vi.fn((format: CaseFormat, given?: unknown) => testCase(format, store.getState(), given));
   render(
     <AppProvider app={{ store, session: { testCase: ask } } as unknown as App}>
       <CopyAsTest />
@@ -145,7 +148,7 @@ describe('Copy as test case', () => {
 
   it('opens on the jobs case, shows the text the session writes, and says where it belongs', async () => {
     const { ask } = await openWith(answer('cases:\n  - name: push to main\n'));
-    expect(ask).toHaveBeenCalledWith('jobs');
+    expect(ask).toHaveBeenCalledWith('jobs', undefined);
     expect(within(dialog()).getByRole('radio', { name: 'Test case (jobs)' })).toHaveProperty('checked', true);
     expect(textOf().value).toBe('cases:\n  - name: push to main\n');
     expect(textOf().readOnly).toBe(true);
@@ -153,8 +156,13 @@ describe('Copy as test case', () => {
     const path = document.getElementById(dialog().getAttribute('aria-describedby') ?? '');
     expect(path?.textContent).toBe(CI);
     expect(path?.className).toContain('font-mono');
+    // The destination: the workflow's test file, created, since none is loaded; adding waits for a case to add.
+    const create = await within(dialog()).findByRole<HTMLButtonElement>('button', {
+      name: 'Create ci.test.yml',
+    });
+    expect(create.disabled).toBe(true);
     expect(dialog().textContent).toContain(
-      'Save it as .github/simulci/tests/ci.test.yml and run simulci test.',
+      'A new .github/simulci/tests/ci.test.yml, where simulci test runs it.',
     );
     expect(button('Copy').disabled).toBe(false);
     expect(button('Download ci.test.yml').disabled).toBe(false);
@@ -202,6 +210,8 @@ describe('Copy as test case', () => {
     const { store, user } = mount(ready(), testCase);
     await open(user);
     await settle(0, answer('ci case'));
+    // The destination comes with the edit runtime.
+    await within(dialog()).findByRole('button', { name: 'Create ci.test.yml' });
     const tag: ScenarioInput = { event: 'push', tag: 'v1' };
     act(() => store.getState().setScenario(tag));
     act(() => store.getState().select(RELEASE, undefined));
@@ -214,13 +224,13 @@ describe('Copy as test case', () => {
     expect(textOf().getAttribute('aria-busy')).toBe('true');
     expect(textOf().value).toBe('ci case');
     expect(pathLine()).toBe(CI);
-    expect(dialog().textContent).toContain('Save it as .github/simulci/tests/ci.test.yml');
+    expect(dialog().textContent).toContain('A new .github/simulci/tests/ci.test.yml');
     expect(button('Download ci.test.yml').disabled).toBe(true);
 
     await settle(2, answer('release case'));
     expect(textOf().value).toBe('release case');
     expect(pathLine()).toBe(RELEASE);
-    expect(dialog().textContent).toContain('Save it as .github/simulci/tests/release.test.yml');
+    expect(dialog().textContent).toContain('A new .github/simulci/tests/release.test.yml');
     expect(button('Download release.test.yml').disabled).toBe(false);
     // The answer for the scenario alone, landing late, changes nothing.
     await settle(1, answer('ci case under the tag'));
@@ -376,5 +386,171 @@ describe('Copy as test case', () => {
       '1 maybe is written as a comment naming the unknown and the pin that decides it, or why none does; ' +
         'allowMaybe: true lets the case pass while it stays open.',
     );
+  });
+});
+
+describe('Add it to the repository', () => {
+  afterEach(() => cleanup());
+
+  const TEST = '.github/simulci/tests/ci.test.yml';
+  const PUSH: CaseJson = {
+    name: 'push to main',
+    when: { event: 'push', branch: 'main' },
+    then: { run: ['build', 'deploy'] },
+    comments: [],
+  };
+  const withCase = (testCase: CaseJson = PUSH): CaseOutcome => ({
+    type: 'case',
+    text: 'workflow: ci.yml\n',
+    maybes: 0,
+    errors: [],
+    case: testCase,
+  });
+  const FOLDER: Source = { kind: 'folder', name: 'repo', readAt: 0 };
+
+  /** The starter in a folder with these route tests, its plan on screen, and the dialog open on a case to add. */
+  async function openRepo(tests: Record<string, string>, testCase: TestCase = async () => withCase()) {
+    const mounted = mount({}, testCase);
+    act(() => {
+      mounted.store.getState().setFiles({ ...starter, ...tests }, FOLDER);
+      mounted.store.setState({ ...ready(), focus: CI, generated: {} });
+    });
+    await open(mounted.user);
+    return mounted;
+  }
+
+  /** The destination's button once the edit runtime is in and the case is there to add. */
+  async function adder(name: string): Promise<HTMLButtonElement> {
+    const found = await within(dialog()).findByRole<HTMLButtonElement>('button', { name });
+    await waitFor(() => expect(found.disabled).toBe(false));
+    return found;
+  }
+
+  it('adds the case to the workflow’s test file as one entry, then shows it in the pane, unsaved', async () => {
+    const before =
+      'workflow: ci.yml\ncases:\n  - name: a pull request\n    when: { event: pull_request }\n    then: { run: [build] }\n';
+    const { store, user } = await openRepo({ [TEST]: before });
+    const add = await adder('Add to ci.test.yml');
+    expect(dialog().textContent).toContain(
+      'Into .github/simulci/tests/ci.test.yml (1 case), where simulci test runs it. It stays unsaved until you download it.',
+    );
+    await user.click(add);
+    const s = store.getState();
+    expect(s.files.byPath[TEST]).toBe(
+      `${before}  - name: push to main\n    when: { event: push, branch: main }\n    then:\n      run: [build, deploy]\n`,
+    );
+    expect(s.edit.past.at(-1)!.label).toBe("Added test case 'push to main'");
+    expect(dirtyPaths(s.files)).toEqual([TEST]);
+    // Shown: edit mode, the pane on the case, a notice with Undo; the dialog is closed.
+    expect(s.edit.on).toBe(true);
+    expect(s.reveal).toMatchObject({ file: TEST, line: 6 });
+    expect(s.ui.yamlFile).toBe(TEST);
+    expect(s.notices.at(-1)).toMatchObject({ text: "Added test case 'push to main' to ci.test.yml" });
+    expect(s.notices.at(-1)!.undo).toBe(s.edit.past.at(-1));
+    expect(s.caseOpen).toBe(false);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    act(() => {
+      store.getState().undo();
+    });
+    expect(store.getState().files.byPath[TEST]).toBe(before);
+  });
+
+  it('creates the test file when none is loaded, in the workflow’s line endings, and an undo removes it', async () => {
+    const { store, user } = await openRepo({});
+    await user.click(await adder('Create ci.test.yml'));
+    const s = store.getState();
+    expect(s.files.byPath[TEST]).toBe(caseFileText(TEST, 'ci.yml', PUSH, '\n'));
+    // A file the folder does not have: Save writes it as a create.
+    expect(s.files.base).not.toHaveProperty(TEST);
+    expect(s.edit.past.at(-1)!.label).toBe("Added test case 'push to main'");
+    act(() => {
+      store.getState().undo();
+    });
+    expect(store.getState().files.byPath).not.toHaveProperty(TEST);
+    expect(dirtyPaths(store.getState().files)).toEqual([]);
+
+    cleanup();
+    const crlf = Object.fromEntries(Object.entries(starter).map(([p, t]) => [p, t.replaceAll('\n', '\r\n')]));
+    const again = mount({}, async () => withCase());
+    act(() => {
+      again.store.getState().setFiles(crlf, FOLDER);
+      again.store.setState({ ...ready(), focus: CI, generated: {} });
+    });
+    await open(again.user);
+    await again.user.click(await adder('Create ci.test.yml'));
+    expect(again.store.getState().files.byPath[TEST]).toBe(caseFileText(TEST, 'ci.yml', PUSH, '\r\n'));
+  });
+
+  it('writes the name the author gives, says when the file has it, and adds nothing without one', async () => {
+    const before =
+      'workflow: ci.yml\ncases:\n  - name: push to main\n    when: { event: push }\n    then: { run: [build] }\n';
+    const { store, user } = await openRepo({ [TEST]: before });
+    const add = await adder('Add to ci.test.yml');
+    const field = within(dialog()).getByRole<HTMLInputElement>('textbox', { name: 'Case name' });
+    expect(field.value).toBe('push to main');
+    expect(dialog().textContent).toContain(
+      'ci.test.yml has a case by that name: this one is added as push to main (2).',
+    );
+    await user.clear(field);
+    expect(add.disabled).toBe(true);
+    await user.type(field, 'a push to main deploys');
+    expect(dialog().textContent).not.toContain('has a case by that name');
+    await user.click(add);
+    const cases = store.getState().files.byPath[TEST]!;
+    expect(cases).toContain('  - name: a push to main deploys\n');
+    expect(store.getState().edit.past.at(-1)!.label).toBe("Added test case 'a push to main deploys'");
+  });
+
+  it('refuses a file that tests another workflow, and its fix writes the case beside it', async () => {
+    const before =
+      'workflow: release.yml\ncases:\n  - { name: x, when: { event: push }, then: { run: [] } }\n';
+    const { store, user } = await openRepo({ [TEST]: before });
+    await user.click(await adder('Add to ci.test.yml'));
+    expect(dialog().textContent).toContain('ci.test.yml tests release.yml.');
+    expect(store.getState().files.byPath[TEST]).toBe(before);
+    await user.click(within(dialog()).getByRole('button', { name: 'Create ci-2.test.yml' }));
+    const s = store.getState();
+    const beside = '.github/simulci/tests/ci-2.test.yml';
+    expect(s.files.byPath[beside]).toBe(caseFileText(beside, 'ci.yml', PUSH, '\n'));
+    expect(s.files.byPath[TEST]).toBe(before);
+    expect(s.edit.past.at(-1)!.label).toBe("Added test case 'push to main'");
+    expect(s.reveal).toMatchObject({ file: beside });
+    expect(s.notices.at(-1)).toMatchObject({ text: "Added test case 'push to main' to ci-2.test.yml" });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('asks for the case under the given of the file it goes to, and says so', async () => {
+    const before =
+      'workflow: ci.yml\ngiven: { changed: [src/a.ts] }\ncases:\n  - { name: x, when: { event: push }, then: { run: [build] } }\n';
+    const { ask, user } = await openRepo({ [TEST]: before });
+    await adder('Add to ci.test.yml');
+    expect(ask.mock.calls).toEqual([
+      ['jobs', undefined],
+      ['jobs', { changed: ['src/a.ts'] }],
+    ]);
+    expect(dialog().textContent).toContain(
+      "where simulci test runs it with the file's given, which the case above is planned under.",
+    );
+    // The plan formats are no case for the file.
+    await user.click(within(dialog()).getByRole('radio', { name: 'Plan as text' }));
+    expect(ask.mock.lastCall).toEqual(['text', undefined]);
+  });
+
+  it('says a folder with a handle saves the file, and waits for a case to add', async () => {
+    const { pending, testCase, settle } = answeredByHand();
+    const mounted = mount({}, testCase);
+    act(() => {
+      mounted.store.getState().setFiles(starter, { ...FOLDER, handle: {} as FileSystemDirectoryHandle });
+      mounted.store.setState({ ...ready(), focus: CI, generated: {} });
+    });
+    await open(mounted.user);
+    const create = await within(dialog()).findByRole<HTMLButtonElement>('button', {
+      name: 'Create ci.test.yml',
+    });
+    expect(dialog().textContent).toContain('It stays unsaved until you save it to the folder.');
+    expect(create.disabled).toBe(true);
+    await settle(0, withCase());
+    expect(create.disabled).toBe(false);
+    expect(pending).toHaveLength(1);
   });
 });

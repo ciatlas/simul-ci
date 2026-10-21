@@ -32,7 +32,7 @@ const BUDGETS = [
   // React, the router, React Flow and its d3 modules, Base UI, the scenario form, the panels and the edit history,
   // with the crash snapshot, the replace prompt, edit mode, what an edit changed (the plan diff and Details, a
   // platform popover), the edit runtime's and the dialogs' loaders, Save's buttons and keys with its permission
-  // request, the canvas's side of its gestures, and a rename's remaps: 241.0 kB measured (246.5 before the dialogs
+  // request, the canvas's side of its gestures, and a rename's remaps: 241.1 kB measured (246.5 before the dialogs
   // moved to their own chunk). The synthesis keeps 251 (§ 8.5).
   { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 251 },
   // CodeMirror's view, state, language and commands with the YAML grammar, and the pane's edit mode, fetched when the
@@ -40,11 +40,12 @@ const BUDGETS = [
   { name: 'the YAML pane', test: (f) => f.startsWith('YamlPane-'), kB: 124 },
   // The edit runtime: yaml with its composer, the document model, the op dispatch, Properties, the matrix editor, the
   // canvas's gestures (Add job, What it needs, the palette, the step lists; platform popovers and a combobox of our
-  // own, not Base UI's, which would add 33 kB), the triggers editor, the catalog's loader and Pin to SHA, and renames,
-  // fetched for editing: 90.4 kB measured (78.9 before the triggers editor); the budget stays 98.
+  // own, not Base UI's, which would add 33 kB), the triggers editor, the catalog's loader and Pin to SHA, a test case
+  // added to its file, and renames, fetched for editing: 91.6 kB measured (78.9 before the triggers editor); the budget
+  // stays 98.
   { name: 'the edit runtime', test: (f) => f.startsWith('edit-'), kB: 98 },
   // The Changes, save and test case dialogs with the restore conflicts' rows, the line diff and the patch, and what
-  // Save and Reload run against the folder, fetched on idle once a file is unsaved (synthesis § 8.5): 9.6 kB measured.
+  // Save and Reload run against the folder, fetched on idle once a file is unsaved (synthesis § 8.5): 9.9 kB measured.
   { name: 'the dialogs', test: (f) => f.startsWith('dialogs-'), kB: 12 },
   // The bundled action catalog, 50 actions with their refs, commits and inputs, fetched by the edit runtime when the
   // palette or Properties needs it (synthesis § 4.8): 33.0 kB measured.

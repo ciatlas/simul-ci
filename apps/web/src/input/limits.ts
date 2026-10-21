@@ -30,15 +30,15 @@ export function overLimit(files: Record<string, string>): string | undefined {
   return undefined;
 }
 
-/** A project file a walk did not read for its size. */
+/** A file a walk did not read for its size. */
 export interface Skipped {
   path: string;
   bytes: number;
 }
 
 /**
- * What a walk gathered: the project files it read, by path, what reading each one found (its BOM, line endings and
- * whether it is UTF-8), and the ones it left out.
+ * What a walk gathered: the files it read (project files and route tests), by path, what reading each one found
+ * (its BOM, line endings and whether it is UTF-8), and the ones it left out.
  */
 export interface Walked {
   files: Record<string, string>;
@@ -47,7 +47,7 @@ export interface Walked {
 }
 
 /**
- * Reads a project file into the walk byte-exact, its meta beside its text, or leaves it out when it is over the
+ * Reads a file into the walk byte-exact, its meta beside its text, or leaves it out when it is over the
  * per-file limit; true when it read it.
  */
 export async function readWithin(file: Blob, path: string, walked: Walked): Promise<boolean> {

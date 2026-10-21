@@ -5,9 +5,11 @@
  * up once more; the next Outline is checked, and a rename that did not hold is undone while it is the newest entry.
  */
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fingerprint } from '@simulci/document';
 import type { ReferenceTarget } from '@simulci/engine';
+import { readWorkflowFiles } from '@simulci/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renameProblem, startingId, summaryOf, takenIds } from '../src/edit/rename/form';
 import {
@@ -252,6 +254,36 @@ describe('dispatchRename', () => {
     });
     await planned(store);
     expect(store.getState().sel).toBe('build[os=a].probe');
+  });
+});
+
+describe('a rename over this repository’s own files', () => {
+  it('renames ci.yml’s fallow job, and counts the cases of ci.test.yml that still name it', async () => {
+    const root = join(import.meta.dirname, '../../..');
+    const tests = '.github/simulci/tests/ci.test.yml';
+    const byPath: Record<string, string> = {
+      ...readWorkflowFiles(root),
+      [tests]: readFileSync(join(root, tests), 'utf8'),
+    };
+    const { store, session } = await opened(byPath);
+    const target = jobTarget(store, CI, 'fallow');
+    const found = await findRefs(session, store, target);
+    if (!found.ok) throw new Error(found.message);
+    const p = preview(store, target, 'code-health', found);
+    if (!p.ok) throw new Error(p.refusal.message);
+    expect(p.warnings.map((w) => w.message)).toContain(
+      '2 cases in ci.test.yml name fallow; they are not renamed.',
+    );
+    expect(await dispatchRename({ store, session }, target, 'code-health', found)).toMatchObject({
+      ok: true,
+    });
+    const after = textOf(store, CI);
+    expect(after.replaceAll('code-health', 'fallow')).toBe(byPath[CI]);
+    expect(textOf(store, tests)).toBe(byPath[tests]);
+    await planned(store);
+    expect(store.getState().notices.map((n) => n.text)).toEqual([
+      'Renamed job fallow to code-health. 2 cases in ci.test.yml name fallow; they are not renamed.',
+    ]);
   });
 });
 

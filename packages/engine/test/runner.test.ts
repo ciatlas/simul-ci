@@ -5,6 +5,7 @@ import {
   runTests,
   type Snapshot,
   type SnapshotStore,
+  testFileFailures,
 } from '@simulci/engine';
 import { describe, expect, it } from 'vitest';
 
@@ -287,6 +288,23 @@ cases:
     expect(runTests(project, []).files[0]!.failures[0]!.headline).toBe(
       'T000 no test files: expected .github/simulci/tests/**/*.test.yml',
     );
+  });
+
+  it('testFileFailures: the file failures runTests reports before a case runs, without the project', () => {
+    const invalid = [
+      'workflow: ci.yml\ncases: [\n',
+      'workflow: ci.yml\ncases:\n  - { name: a, when: { brnach: x }, then: { run: [a] } }\n  - { name: a, when: {} }\n',
+      'workflow: ci\ncases: []\n',
+    ];
+    for (const text of invalid) {
+      expect(testFileFailures(text).length).toBeGreaterThan(0);
+      expect(testFileFailures(text)).toEqual(run(text).files[0]!.failures);
+    }
+    expect(testFileFailures(passing)).toEqual([]);
+    // The project's own checks are the runner's: a workflow it does not have, an `only` under CI.
+    expect(
+      testFileFailures('workflow: nope.yml\ncases:\n  - { name: x, when: {}, then: { run: [a] } }\n'),
+    ).toEqual([]);
   });
 
   it('runs only the only cases, rejects only under ci, honours skip and filter', () => {
