@@ -169,11 +169,12 @@ describe('the web app as it builds', () => {
   }, 60_000);
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('splits the page, the YAML pane, the edit runtime and the two workers, and no chunk they share', () => {
+  it('splits the page, the YAML pane, the edit runtime, the dialogs and the two workers, and no chunk they share', () => {
     // A module two lazy chunks share that the page does not hold goes to a chunk of its own, named after it; so does
     // the page's when rolldown cannot leave it there: a name outside this list is that.
     expect(chunks.map((f) => f.replace(/-[\w-]{8}\.js$/, '')).sort()).toEqual([
       'YamlPane',
+      'dialogs',
       'edit',
       'engine.worker',
       'index',
@@ -192,6 +193,40 @@ describe('the web app as it builds', () => {
     const code = readFileSync(join(dir, 'assets', page), 'utf8');
     expect(code).toContain(`import(\`./${edit}\`)`);
     expect(code).not.toMatch(new RegExp(`from\\s*["'\`]\\./${edit.replace('.', '\\.')}`));
+  });
+
+  it('puts the Changes, save and test case dialogs, the diff, the patch and the folder writes in the dialogs chunk, which the page loads only on demand', () => {
+    const dialogs = chunks.find((f) => f.startsWith('dialogs-'))!;
+    const page = chunks.find((f) => f.startsWith('index-'))!;
+    const lazy = [
+      'src/app/ChangesDialog.tsx',
+      'src/app/SaveDialog.tsx',
+      'src/testcase/CaseDialog.tsx',
+      'src/app/RestoreConflicts.tsx',
+      'src/app/DiffView.tsx',
+      'src/lib/line-diff.ts',
+      'src/lib/patch.ts',
+      'src/state/changes.ts',
+      'src/app/save-run.ts',
+      'src/input/save.ts',
+      'src/state/reload.ts',
+    ];
+    // The buttons, the keys, the status line's save line and the permission request stay on the page.
+    const kept = [
+      'src/app/ChangesButton.tsx',
+      'src/app/SaveButton.tsx',
+      'src/testcase/CopyAsTest.tsx',
+      'src/app/shortcuts.ts',
+      'src/app/saver.ts',
+    ];
+    const holds = (chunk: string, modules: string[]) =>
+      modules.filter((m) => sourcesOf(chunk).some((s) => s.endsWith(m)));
+    expect(holds(dialogs, lazy)).toEqual(lazy);
+    expect(holds(page, lazy)).toEqual([]);
+    expect(holds(page, kept)).toEqual(kept);
+    const code = readFileSync(join(dir, 'assets', page), 'utf8');
+    expect(code).toContain(`import(\`./${dialogs}\`)`);
+    expect(code).not.toMatch(new RegExp(`from\\s*["'\`]\\./${dialogs.replace('.', '\\.')}`));
   });
 });
 

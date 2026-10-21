@@ -10,17 +10,17 @@ import {
 import { Canvas } from '../graph/Canvas';
 import { OutlineTree } from '../panels/OutlineTree';
 import { Panels } from '../panels/Panels';
+import type { SessionState } from '../state/store';
 import { restoreDefault } from '../state/url-sync';
 import { TextView } from '../text/TextView';
 import { EmptyState } from './EmptyState';
 import { ErrorBanner } from './ErrorBanner';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ReplacePrompt } from './ReplaceDialog';
-import { RestoreConflicts } from './RestoreConflicts';
 import { useApp, useSession } from './providers';
-import { SaveDialogs } from './SaveDialog';
 import { ScenarioForm } from './ScenarioForm';
-import { shownView, togglePaneKeepingFocus, useNarrow } from './shortcuts';
+import { togglePaneKeepingFocus } from './panes';
+import { shownView, useNarrow } from './shortcuts';
 import { StatusBar } from './StatusBar';
 import { Toaster } from './Toaster';
 import { TopBar } from './TopBar';
@@ -31,6 +31,19 @@ const EditHost = lazy(() => import('../edit/edit').then((m) => ({ default: m.Edi
 
 /** CodeMirror is a chunk of its own, fetched the first time the pane opens. */
 const YamlPane = lazy(() => import('../yaml/YamlPane').then((m) => ({ default: m.YamlPane })));
+
+/** The save's dialogs and the restore conflicts' rows, from the dialogs chunk (`app/dialogs.ts`) once they show. */
+const SaveDialogs = lazy(() => import('./dialogs').then((m) => ({ default: m.SaveDialogs })));
+const RestoreConflicts = lazy(() => import('./dialogs').then((m) => ({ default: m.RestoreConflicts })));
+
+const savesShown = (s: SessionState): boolean =>
+  s.settling !== undefined || (s.saving?.status === 'done' && s.saving.open);
+const restoreShown = (s: SessionState): boolean => s.edit.restore !== undefined;
+
+/** A lazy view, mounted only while the store has something for it to show, so its chunk is fetched no sooner. */
+function WhenShown({ shown, children }: { shown: (s: SessionState) => boolean; children: ReactNode }) {
+  return useSession(shown) ? <Suspense fallback={null}>{children}</Suspense> : null;
+}
 
 /**
  * The screen: top bar, banner, the scenario and the outline, the plan with the YAML pane under it, the right panel,
@@ -65,7 +78,9 @@ export function SimulateView() {
     >
       <TopBar />
       <ErrorBanner />
-      <RestoreConflicts />
+      <WhenShown shown={restoreShown}>
+        <RestoreConflicts />
+      </WhenShown>
       {hasFiles ? (
         <PlanBoundary>
           <Panes />
@@ -81,7 +96,9 @@ export function SimulateView() {
         </Suspense>
       )}
       <ReplacePrompt />
-      <SaveDialogs />
+      <WhenShown shown={savesShown}>
+        <SaveDialogs />
+      </WhenShown>
       {dragging && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center border-4 border-accent border-dashed bg-bg/80">
           <p className="rounded bg-surface px-4 py-2 font-medium text-lg">

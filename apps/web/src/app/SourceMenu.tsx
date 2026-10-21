@@ -3,7 +3,7 @@ import { SAMPLES } from '../input/samples';
 import { dirtyPaths, type Source } from '../state/store';
 import { PasteDialog } from './PasteDialog';
 import { useApp, useSession } from './providers';
-import { SaveButton } from './SaveDialog';
+import { SaveButton } from './SaveButton';
 
 const button =
   'rounded border border-border bg-surface px-2 py-1 text-xs text-text hover:border-border-strong disabled:opacity-50';

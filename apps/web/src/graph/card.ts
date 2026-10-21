@@ -2,7 +2,7 @@ import type { NodeId, Tri } from '@simulci/engine';
 import { MARK } from '@simulci/engine/render';
 import { planIndex, resolveSelection, selectionOf } from '../plan/index';
 import type { SessionState, SessionStore } from '../state/store';
-import { MARK_LABEL } from './Mark';
+import { MARK_LABEL } from '../lib/words';
 import {
   CARD,
   type EdgeModel,

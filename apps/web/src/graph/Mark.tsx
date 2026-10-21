@@ -1,11 +1,10 @@
 import type { Tri } from '@simulci/engine';
+import { MARK_LABEL } from '../lib/words';
 
 /**
  * The run-state mark: a filled circle runs, a ring is skipped, a half-filled ring might run. The shape carries the
  * state without the colour; the label names it for a screen reader. Text uses the engine's glyphs (● ○ ◐) instead.
  */
-
-export const MARK_LABEL: Record<Tri, string> = { yes: 'runs', no: 'skipped', maybe: 'might run' };
 
 const COLOUR: Record<Tri, string> = { yes: 'var(--run)', no: 'var(--skip)', maybe: 'var(--might)' };
 

@@ -1,8 +1,8 @@
+import { type Dialogs, loadDialogs } from '../app/dialogs-load';
 import { downloadText } from '../lib/download';
 import { fileLabel } from '../lib/file-label';
-import { downloadPatch } from '../state/changes';
 import type { SourceStore, StoredSource } from '../state/persist';
-import { type ReloadPlan, reloadPlan, settledReload } from '../state/reload';
+import type { ReloadPlan } from '../state/reload';
 import { type BaseDiff, dirtyPaths, type SessionStore, type Settling, type Source } from '../state/store';
 import { type Dropped, filesFromDrop } from './drop';
 import { filterFiles } from './filter';
@@ -69,6 +69,8 @@ export interface SourcesOptions {
     folder: string,
     conflicts: DiskConflict[],
   ) => Promise<Choices | undefined>;
+  /** Fetches the dialogs chunk, which makes the patch and merges a reload (`app/dialogs-load.ts`). */
+  load?: () => Promise<Pick<Dialogs, 'downloadPatch' | 'reloadPlan' | 'settledReload'>>;
 }
 
 const downloadFile = (name: string, text: string): void =>
@@ -89,6 +91,7 @@ export function createSources({
   download = downloadFile,
   save,
   settle,
+  load = loadDialogs,
 }: SourcesOptions): Sources {
   const actions = store.getState();
 
@@ -107,9 +110,27 @@ export function createSources({
       // keeps them all.
       if (choice === 'save') return save?.() ?? false;
       if (choice === 'download') downloadAll(lost);
-      if (choice === 'patch') downloadPatch(store.getState().files, lost, 'base', download);
+      if (choice === 'patch') return downloadPatch(lost);
       return choice !== 'cancel';
     });
+  };
+
+  /**
+   * One patch of the files' edits, made by the dialogs chunk: true once it is handed over; false, which keeps the
+   * files, when the chunk could not be fetched.
+   */
+  const downloadPatch = (paths: readonly string[]): Promise<boolean> => {
+    const { files } = store.getState();
+    return load().then(
+      (dialogs) => {
+        dialogs.downloadPatch(files, paths, 'base', download);
+        return true;
+      },
+      () => {
+        actions.notify('The patch could not be made, so nothing was replaced: try again');
+        return false;
+      },
+    );
   };
 
   const downloadAll = (paths: readonly string[]): void => {
@@ -288,16 +309,19 @@ export function createSources({
   };
 
   /**
-   * The folder read again, merged into the files (`state/reload.ts`): the files both sides changed wait for the
-   * author's choices, and Cancel leaves everything as it was.
+   * The folder read again, merged into the files (`state/reload.ts`, in the dialogs chunk with the conflicts dialog):
+   * the files both sides changed wait for the author's choices, and Cancel leaves everything as it was.
    */
   const merge = async (name: string, epoch: number, read: Walked): Promise<void> => {
     const where = `the folder ${name}`;
     const limit = overLimit(read.files);
     if (limit) return fail(`${where} is too big: ${limit}`);
-    const plan = reloadPlan(store.getState().files, read);
+    const code = await load().catch(() => undefined);
+    if (!code) return fail(`reloading ${name} stopped: the page could not fetch the merge; reload again`);
+    if (store.getState().files.epoch !== epoch) return;
+    const plan = code.reloadPlan(store.getState().files, read);
     if (Object.keys(plan.disk).length === 0) actions.notify(`${name}: no changes`);
-    else if (!(await takeIn(name, epoch, plan))) return;
+    else if (!(await takeIn(name, epoch, plan, code))) return;
     tellLeftOut(where, read.skipped);
   };
 
@@ -305,7 +329,12 @@ export function createSources({
    * The reload's plan taken in once the author chose for the files both sides changed (without anyone to ask, they
    * stay as they are); false when nothing was taken: cancelled, new files, a save meanwhile, or a text moved since.
    */
-  const takeIn = async (name: string, epoch: number, plan: ReloadPlan): Promise<boolean> => {
+  const takeIn = async (
+    name: string,
+    epoch: number,
+    plan: ReloadPlan,
+    code: Pick<Dialogs, 'settledReload'>,
+  ): Promise<boolean> => {
     const { base } = store.getState().files;
     const asking = plan.conflicts.length > 0 && settle;
     const choices = asking ? await settle('reload', name, plan.conflicts) : {};
@@ -315,7 +344,7 @@ export function createSources({
       fail(`reloading ${name} stopped: the files were saved meanwhile`);
       return false;
     }
-    const { disk, take, from } = settledReload(plan, choices);
+    const { disk, take, from } = code.settledReload(plan, choices);
     const outcome = actions.fromDisk(epoch, `Reloaded ${name}`, disk, take, from);
     if (outcome.ok || !outcome.refusal) return true;
     fail(`reloading ${name} stopped: ${fileLabel(outcome.refusal.path)} changed meanwhile`);

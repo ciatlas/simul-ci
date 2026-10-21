@@ -76,10 +76,13 @@ const LATIN1 = new Uint8Array([...utf8('name: caf'), 0xe9, ...utf8('\non: push\n
 const BOM_CRLF_META = { bom: true, eol: 'crlf', utf8: true };
 const LATIN1_META = { bom: false, eol: 'lf', utf8: false };
 
-function setup(persistOf: (kv: ReturnType<typeof memoryStore>) => SourceStore = sourceStore) {
+function setup(
+  persistOf: (kv: ReturnType<typeof memoryStore>) => SourceStore = sourceStore,
+  load?: Parameters<typeof createSources>[0]['load'],
+) {
   const store = createSessionStore();
   const kv = memoryStore();
-  const sources = createSources({ store, persist: persistOf(kv) });
+  const sources = createSources({ store, persist: persistOf(kv), ...(load && { load }) });
   const notices = () => store.getState().notices.map((n) => n.text);
   return { store, kv, sources, notices };
 }
@@ -328,6 +331,19 @@ describe('the sources of a session, at their edges', () => {
     });
     await sources.reload();
     expect(notices()).toEqual(['repo: no changes']);
+  });
+
+  it('leaves the files as they are when the merge cannot be fetched, and says to reload again', async () => {
+    const { store, sources } = setup(sourceStore, () => Promise.reject(new Error('offline')));
+    const files = { 'ci.yml': 'on: push' };
+    await sources.drop(dropOf(folderItem(folder('repo', workflows(files)))));
+    files['ci.yml'] = 'on: [push, pull_request]';
+    await sources.reload();
+    expect(store.getState().files.byPath).toEqual({ [CI]: 'on: push' });
+    expect(store.getState().error).toMatchObject({
+      kind: 'source',
+      message: 'reloading repo stopped: the page could not fetch the merge; reload again',
+    });
   });
 
   it('reads a stored meta entry that is not one from the file’s text instead', async () => {

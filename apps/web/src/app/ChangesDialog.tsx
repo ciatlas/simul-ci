@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { undoLabel } from '../state/history';
-import { changedPaths, downloadOne, downloadPatch, revertOf, type Since } from '../state/changes';
+import { downloadOne } from '../input/read';
+import { changedPaths, downloadPatch, revertOf, type Since } from '../state/changes';
 import { DiffCounts, diffOf, UnifiedDiff } from './DiffView';
 import { useModal } from './modal';
 import { useApp, useSession } from './providers';
@@ -14,41 +15,11 @@ const SINCE: Record<Since, { label: string; none: string }> = {
 };
 
 /**
- * The top bar's Changes (synthesis § 5.2): in edit mode, or while a file has unsaved edits, with their count. It opens
- * the Changes dialog, as Mod+Shift+D does in edit mode.
- */
-export function ChangesButton() {
-  const on = useSession((s) => s.edit.on);
-  const unsaved = useSession((s) => changedPaths(s.files, 'base').length);
-  const open = useSession((s) => s.changesOpen);
-  const setOpen = useSession((s) => s.setChangesOpen);
-  if (!on && unsaved === 0 && !open) return null;
-  return (
-    <>
-      <button
-        type="button"
-        className="rounded border border-border bg-surface px-2 py-1 text-text hover:border-border-strong"
-        aria-keyshortcuts={on ? 'Control+Shift+D Meta+Shift+D' : undefined}
-        title={
-          unsaved === 0
-            ? 'No unsaved edits'
-            : `${unsaved} ${unsaved === 1 ? 'file' : 'files'} with unsaved edits`
-        }
-        onClick={() => setOpen(true)}
-      >
-        Changes{unsaved > 0 && ` (${unsaved})`}
-      </button>
-      {open && <ChangesDialog />}
-    </>
-  );
-}
-
-/**
  * Every changed file, since the last save or since the files were opened, with its +/− counts and a unified diff.
  * Revert puts a file back, as one undoable entry (Undo here takes it back, the dialog keeping the keys); Download hands
  * one file over as it would be written; Download patch hands every change over as `simulci-changes.patch`.
  */
-function ChangesDialog() {
+export function ChangesDialog() {
   const { store } = useApp();
   const files = useSession((s) => s.files);
   const undo = useSession((s) => undoLabel(s.edit));

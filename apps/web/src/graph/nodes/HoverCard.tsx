@@ -1,6 +1,7 @@
 import type { Tri } from '@simulci/engine';
 import { NodeToolbar, Position } from '@xyflow/react';
-import { Mark, MARK_LABEL } from '../Mark';
+import { MARK_LABEL } from '../../lib/words';
+import { Mark } from '../Mark';
 
 export interface HoverFacts {
   verdict: Tri;

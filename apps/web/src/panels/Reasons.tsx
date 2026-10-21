@@ -2,7 +2,9 @@ import type { Diagnostic } from '@simulci/engine';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from '../app/providers';
 import { focusPanel } from '../app/shortcuts';
-import { MARK_LABEL, Mark } from '../graph/Mark';
+import { Mark } from '../graph/Mark';
+import { copyText } from '../lib/clipboard';
+import { MARK_LABEL } from '../lib/words';
 import { EmptyNote, LocLink, SectionTitle, type Selected, useSelected } from './kit';
 import { ReasonRow } from './ReasonRow';
 import { type ReasonsHeader, reasonsModel } from './reason-rows';
@@ -86,13 +88,9 @@ function CopyPath({ path }: { path: string }) {
   }, [state]);
 
   const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(path);
-      setState('copied');
-    } catch {
-      if (code.current) window.getSelection()?.selectAllChildren(code.current);
-      setState('refused');
-    }
+    if (await copyText(path)) return setState('copied');
+    if (code.current) window.getSelection()?.selectAllChildren(code.current);
+    setState('refused');
   };
 
   return (

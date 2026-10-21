@@ -1,9 +1,9 @@
 import type { Extension, Transaction } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { regionEdit } from '@simulci/document/edits';
+import { downloadOne } from '../input/read';
 import { fileLabel } from '../lib/file-label';
 import { markEdit } from '../lib/marks';
-import { downloadOne } from '../state/changes';
 import { stampOf } from '../state/history';
 import { type SessionStore, writable } from '../state/store';
 import { agrees, type Eol, eolOf, toTextEdits } from './bridge';

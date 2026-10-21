@@ -1,27 +1,8 @@
+import { fetchOnce, type Idle, onIdle } from '../lib/lazy';
 import type { SessionState, SessionStore } from '../state/store';
 
-/**
- * The edit runtime (`edit/edit.ts`, the `edit-*` chunk) fetched ahead of need. The browser fetches a module once, so
- * the `React.lazy` views that import it later find it here. A fetch that fails is forgotten, so the next asks again.
- */
-
-let loading: Promise<unknown> | undefined;
-
-function loadEdit(): Promise<unknown> {
-  loading ??= import('./edit').catch((error: unknown) => {
-    loading = undefined;
-    throw error;
-  });
-  return loading;
-}
-
-/** Runs a callback when the browser is idle, or soon where it cannot say. */
-export type Idle = (run: () => void) => void;
-
-const onIdle: Idle = (run) => {
-  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 });
-  else setTimeout(run, 200);
-};
+/** The edit runtime (`edit/edit.ts`, the `edit-*` chunk) fetched ahead of need. */
+const loadEdit = fetchOnce(() => import('./edit'));
 
 /**
  * Fetches the runtime before the author needs it (synthesis § 4.1): at once on entering edit mode, and on idle once

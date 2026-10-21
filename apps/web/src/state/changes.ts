@@ -43,17 +43,6 @@ export function downloadPatch(
   download(PATCH_NAME, patchOf(patchFiles(files, paths, since)));
 }
 
-/** Hands one file to the browser to save as it would be written, its BOM back; nothing for a file removed. */
-export function downloadOne(files: Pick<Files, 'byPath' | 'meta'>, path: string): void {
-  const text = files.byPath[path];
-  if (text !== undefined)
-    downloadText(
-      path.slice(path.lastIndexOf('/') + 1),
-      asWritten(text, files.meta[path]),
-      'application/yaml',
-    );
-}
-
 /**
  * The transaction that puts a file back to its text then: one region edit, the removal of a file created since, or
  * the creation of one removed since. Nothing when it has that text.

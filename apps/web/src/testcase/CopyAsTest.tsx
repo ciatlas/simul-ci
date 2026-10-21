@@ -1,8 +1,10 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { useSession } from '../app/providers';
 import { heldSentence } from '../engine/hold';
 import { caseAvailability } from './case';
-import { CaseDialog } from './CaseDialog';
+
+/** The dialog is in the dialogs chunk, fetched the first time it opens (or before, once a file is unsaved). */
+const CaseDialog = lazy(() => import('../app/dialogs').then((m) => ({ default: m.CaseDialog })));
 
 /**
  * The top bar's Copy as test case: enabled with a plan and a focused depth-0 workflow, and not while the plan waits
@@ -35,7 +37,11 @@ export function CopyAsTest() {
       >
         Copy as test case
       </button>
-      {open && planned && <CaseDialog />}
+      {open && planned && (
+        <Suspense fallback={<span className="text-muted text-xs">loading the test case…</span>}>
+          <CaseDialog />
+        </Suspense>
+      )}
     </>
   );
 }
