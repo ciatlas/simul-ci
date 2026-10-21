@@ -18,7 +18,11 @@ const strict = new TextDecoder('utf-8', { fatal: true });
 const lenient = new TextDecoder('utf-8');
 
 export async function readExact(blob: Blob): Promise<{ text: string; meta: FileMeta }> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return decodeExact(new Uint8Array(await blob.arrayBuffer()));
+}
+
+/** `readExact` over bytes already read. */
+export function decodeExact(bytes: Uint8Array): { text: string; meta: FileMeta } {
   const bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
   let text: string;
   let utf8 = true;

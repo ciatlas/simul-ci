@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { useApp } from '../../app/providers';
+import { letterOf } from '../../lib/history-keys';
 import { control, monoControl } from '../../scenario/fields/kit';
 import { documents } from '../documents';
 import { RefusalNote, RefusalView } from '../Refusal';
@@ -135,13 +136,16 @@ function useEditing({ spec, target, doc, locked, idle, request, value }: FieldPr
 
 /**
  * Enter commits (Mod+Enter in a multi-line field, where Enter breaks the line); Escape drops the text typed since
- * the last commit, and a second Escape, with nothing to drop, goes on to the panel.
+ * the last commit, and a second Escape, with nothing to drop, goes on to the panel. Mod+S commits and goes on to the
+ * page, which saves.
  */
 function onKey(event: KeyboardEvent, multiline: boolean, commit: () => void, revert: () => boolean): void {
-  if (event.key === 'Enter' && (!multiline || event.metaKey || event.ctrlKey)) {
+  const mod = event.metaKey || event.ctrlKey;
+  if (event.key === 'Enter' && (!multiline || mod)) {
     event.preventDefault();
     commit();
-  } else if (event.key === 'Escape' && revert()) event.stopPropagation();
+  } else if (mod && !event.altKey && letterOf(event) === 's') commit();
+  else if (event.key === 'Escape' && revert()) event.stopPropagation();
 }
 
 /** Commits once the author has paused for `idle` milliseconds in the field (Run if). */
