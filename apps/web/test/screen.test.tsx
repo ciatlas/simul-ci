@@ -137,6 +137,19 @@ describe('the screen', () => {
     expect(screen.getByRole('region', { name: 'The run graph' })).toBeTruthy();
   });
 
+  it('offers the closed YAML pane under the plan, naming its key while the page keys are on', async () => {
+    const { store, user } = mount();
+    expect(screen.queryByRole('region', { name: 'Workflow source' })).toBeNull();
+    const open = screen.getByRole('button', { name: 'Open the workflow source' });
+    expect(open.getAttribute('aria-keyshortcuts')).toBe('\\');
+    act(() => store.getState().setPrefs({ keys: false }));
+    expect(open.hasAttribute('aria-keyshortcuts')).toBe(false);
+    expect(open.textContent).toBe('Open the workflow source');
+    await user.click(open);
+    expect(await screen.findByRole('region', { name: 'Workflow source' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open the workflow source' })).toBeNull();
+  });
+
   it('keeps an editor that could not load inside the YAML pane, with a way to close it and one to reload', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     chunk.fails = true;
