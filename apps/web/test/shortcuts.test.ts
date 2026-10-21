@@ -13,6 +13,7 @@ import {
   isNarrow,
   keyFor,
   type PageKey,
+  saveKey,
   shownView,
 } from '../src/app/shortcuts';
 import { ViewToggle } from '../src/app/ViewToggle';
@@ -487,5 +488,51 @@ describe('the history keys in edit mode', () => {
     expect(s().changesOpen).toBe(true);
     s().setChangesOpen(false);
     expect(changesKey({ ...key('В', { ctrlKey: true, shiftKey: true }), code: 'KeyD' }, s())).toBe(true);
+  });
+
+  it('take Mod+S everywhere, so the browser never saves the page: it saves a folder, else opens Changes', () => {
+    const store = createSessionStore();
+    const s = () => store.getState();
+    let saves = 0;
+    const save = () => saves++;
+    const handle = {} as FileSystemDirectoryHandle;
+    s().setFiles({ [CI]: 'on: push\n' }, { kind: 'folder', name: 'repo', handle, readAt: 0 });
+    const field = document.createElement('input');
+    expect(saveKey(key('s', { ctrlKey: true }, field), s(), save)).toBe(true);
+    expect(saveKey(key('S', { metaKey: true }), s(), save)).toBe(true);
+    expect(saveKey({ ...key('ы', { ctrlKey: true }), code: 'KeyS' }, s(), save)).toBe(true);
+    expect(saves).toBe(3);
+    // Not the chord: Mod+Shift+S, Mod+Alt+S, a plain s, a key already handled.
+    expect(saveKey(key('S', { ctrlKey: true, shiftKey: true }), s(), save)).toBe(false);
+    expect(saveKey(key('s', { ctrlKey: true, altKey: true }), s(), save)).toBe(false);
+    expect(saveKey(key('s'), s(), save)).toBe(false);
+    expect(saveKey({ ...key('s', { ctrlKey: true }), defaultPrevented: true }, s(), save)).toBe(false);
+    // An open dialog keeps its keys, but the browser still does not get this one.
+    const dialog = document.createElement('dialog');
+    const inside = document.createElement('button');
+    dialog.append(inside);
+    expect(saveKey(key('s', { ctrlKey: true }, inside), s(), save)).toBe(true);
+    expect(saves).toBe(3);
+    // An open modal keeps it wherever the focus is; Details, a popover that stays in the page closed, does not.
+    const details = document.createElement('div');
+    details.setAttribute('role', 'dialog');
+    details.setAttribute('popover', 'auto');
+    document.body.append(details, dialog);
+    expect(saveKey(key('s', { ctrlKey: true }, document.body), s(), save)).toBe(true);
+    expect(saves).toBe(4);
+    dialog.setAttribute('open', '');
+    expect(saveKey(key('s', { ctrlKey: true }, document.body), s(), save)).toBe(true);
+    expect(saves).toBe(4);
+    details.remove();
+    dialog.remove();
+    saves = 3;
+    // A copy, a paste or a sample has nowhere to save: Changes downloads, once something is unsaved.
+    s().setFiles({ [CI]: 'on: push\n' }, { kind: 'folder', name: 'repo', readAt: 0 });
+    expect(saveKey(key('s', { ctrlKey: true }), s(), save)).toBe(true);
+    expect(s().changesOpen).toBe(false);
+    s().typed(CI, [{ from: 0, to: 0, insert: '#' }]);
+    expect(saveKey(key('s', { ctrlKey: true }), s(), save)).toBe(true);
+    expect(s().changesOpen).toBe(true);
+    expect(saves).toBe(3);
   });
 });
