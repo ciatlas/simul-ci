@@ -227,6 +227,23 @@ describe('edits through the store', () => {
     expect(sample.getState().source).toMatchObject({ name: 'edited copy of the starter sample' });
   });
 
+  it('opens the YAML pane on entering edit mode, and leaves it as the author left it otherwise', () => {
+    const store = createSessionStore();
+    const yaml = () => store.getState().ui.prefs.collapsed.yaml;
+    expect(yaml()).toBe(true);
+    store.getState().setEdit(true);
+    expect(yaml()).toBe(false);
+    store.getState().togglePane('yaml');
+    store.getState().setEdit(true);
+    expect(yaml()).toBe(true);
+    store.getState().setEdit(false);
+    expect(yaml()).toBe(true);
+    store.getState().togglePane('yaml');
+    store.getState().setEdit(true);
+    store.getState().setEdit(false);
+    expect(yaml()).toBe(false);
+  });
+
   describe('which files the pane may edit', () => {
     const GEN = '.github/workflows/gen.yml';
     const outline = (generated: Record<string, string>) => ({
