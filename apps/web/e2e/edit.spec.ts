@@ -3,11 +3,11 @@ import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
 /**
- * Editing the YAML in the pane, in a real browser under the deployment's CSP (synthesis § 9.2 A5, C2, § 9.5): in edit
- * mode a key typed into a file re-simulates and the card follows; undoing everything gives back the file's bytes; an
- * edit that stops the workflow from being triggered keeps its jobs on the canvas, dimmed under a banner; a
- * CRLF file with a BOM edited by one character downloads with exactly that character changed, its BOM and its CRLF
- * kept; a generated file refuses edits until the author unlocks it; an edit survives a reload; opening another
+ * Editing the YAML in the pane, in a real browser under the deployment's CSP (synthesis § 9.2 A5, C2, § 9.5): the
+ * closed pane has a bar that opens it, and edit mode opens it; in edit mode a key typed into a file re-simulates and
+ * the card follows; undoing everything gives back the file's bytes; an edit that stops the workflow from being
+ * triggered keeps its jobs on the canvas, dimmed under a banner; a CRLF file with a BOM edited by one character
+ * downloads with exactly that character changed, its BOM and its CRLF kept; a generated file refuses edits until the author unlocks it; an edit survives a reload; opening another
  * source while a file has unsaved edits asks first; and the status line says what an edit changed, with Details. The
  * edit runtime (the `edit-*` chunk, synthesis § 2.1) is fetched when the author turns edit mode on, or on idle once
  * dropped files have a plan, and not for a sample looked at.
@@ -43,11 +43,10 @@ async function openStarter(page: Page): Promise<void> {
   await expect(jobNode(page, 'deploy')).toBeVisible();
 }
 
-/** The top bar's Edit switch on, and the YAML pane open on its file. */
+/** The top bar's Edit switch on, which opens the YAML pane on its file. */
 async function editMode(page: Page): Promise<void> {
   await page.getByRole('switch', { name: /^Edit/ }).click();
   await expect(page.getByRole('switch', { name: /^Edit/ })).toHaveAttribute('aria-checked', 'true');
-  if ((await pane(page).count()) === 0) await page.keyboard.press('\\');
   await expect(editor(page)).toHaveAttribute('contenteditable', 'true');
 }
 
@@ -86,6 +85,20 @@ async function skipDeploy(page: Page): Promise<void> {
   for (let i = 0; i < DEPLOY_IF.length; i++) await page.keyboard.press('Shift+ArrowLeft');
   await page.keyboard.type('false');
 }
+
+test('the bar under the plan opens the closed YAML pane, and turning edit mode on opens it too', async ({
+  page,
+}) => {
+  await openStarter(page);
+  await expect(pane(page)).toHaveCount(0);
+  const open = page.getByRole('button', { name: 'Open the workflow source' });
+  await open.click();
+  await expect(editor(page)).toBeVisible();
+  await footer(page).getByRole('button', { name: 'Close the workflow source' }).click();
+  await expect(pane(page)).toHaveCount(0);
+  await expect(open).toBeVisible();
+  await editMode(page);
+});
 
 test('typing if: false turns the deploy card skipped, and undoing everything gives back the file’s bytes', async ({
   page,
