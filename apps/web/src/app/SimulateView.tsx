@@ -26,6 +26,9 @@ import { Toaster } from './Toaster';
 import { TopBar } from './TopBar';
 import { UntriggeredBanner } from './UntriggeredBanner';
 
+/** The canvas's structural gestures and what they open, from the edit runtime's chunk, while edit mode shows. */
+const EditHost = lazy(() => import('../edit/edit').then((m) => ({ default: m.EditHost })));
+
 /** CodeMirror is a chunk of its own, fetched the first time the pane opens. */
 const YamlPane = lazy(() => import('../yaml/YamlPane').then((m) => ({ default: m.YamlPane })));
 
@@ -38,6 +41,7 @@ const YamlPane = lazy(() => import('../yaml/YamlPane').then((m) => ({ default: m
 export function SimulateView() {
   const { sources } = useApp();
   const hasFiles = useSession((s) => Object.keys(s.files.byPath).length > 0);
+  const editing = useSession((s) => s.edit.on);
   const [dragging, setDragging] = useState(false);
 
   const onDragOver = (e: DragEvent): void => {
@@ -71,6 +75,11 @@ export function SimulateView() {
       )}
       <StatusBar />
       <Toaster />
+      {editing && hasFiles && (
+        <Suspense fallback={null}>
+          <EditHost />
+        </Suspense>
+      )}
       <ReplacePrompt />
       <SaveDialogs />
       {dragging && (

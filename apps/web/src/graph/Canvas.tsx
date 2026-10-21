@@ -3,8 +3,11 @@ import {
   type AriaLabelConfig,
   Background,
   BackgroundVariant,
+  type Connection,
   Controls,
+  type EdgeMouseHandler,
   type NodeMouseHandler,
+  type OnConnectEnd,
   type OnMove,
   ReactFlow,
   ReactFlowProvider,
@@ -25,6 +28,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useApp, useSession } from '../app/providers';
+import { gestures, pendingEdges } from '../edit/gestures';
 import { markEdit } from '../lib/marks';
 import type { SessionState, SessionStore } from '../state/store';
 import { cardActions, selectedNode } from './card';
@@ -32,6 +36,8 @@ import { type ViewportCommands, viewport } from './commands';
 import { NeedsEdge } from './edges/NeedsEdge';
 import {
   cardFocus,
+  edgeIdOf,
+  editKey,
   type Flow,
   type FlowNode,
   type FlowView,
@@ -63,6 +69,13 @@ import './canvas.css';
  * changed flash once, and the cards an edit added get a ring for two seconds. For an author who asked for less motion
  * nothing on the canvas moves by itself: the viewport jumps, nothing flashes or rings, and index.css turns the
  * recolour transitions off.
+ *
+ * In edit mode the focused workflow's picture is the builder's (synthesis § 4.5): a drag from one job's handle onto
+ * another's makes the second need the first, through ops like every other gesture, and a drag the document refuses
+ * (the same job, another workflow, a need it has, a loop) draws a red line and connects nothing; an edge takes the
+ * focus and shows ✕ (a click on it selects the job whose need it is), and Delete on it removes the need; Delete on the
+ * canvas removes the selected job or step, and Alt+↑/↓ move the selected step. Nodes stay where
+ * ELK put them. A need just written is drawn dashed until a picture of its texts is on screen.
  */
 
 const NODE_TYPES = { workflow: WorkflowNode, job: JobNode };
@@ -77,6 +90,7 @@ const DESCRIPTION =
 const ARIA: Partial<AriaLabelConfig> = {
   'node.a11yDescription.default': DESCRIPTION,
   'node.a11yDescription.keyboardDisabled': DESCRIPTION,
+  'edge.a11yDescription.default': 'Delete removes this need.',
 };
 
 /** The props that never change: a read view, single selection, our keys, our pan on focus and double-click. */
@@ -100,6 +114,13 @@ const FIXED = {
   deleteKeyCode: null,
   elevateNodesOnSelect: true,
   ariaLabelConfig: ARIA,
+} as const;
+
+/** What edit mode changes for the workflow being edited: its jobs connect, its edges take the focus. */
+const EDITING = {
+  nodesConnectable: true,
+  edgesFocusable: true,
+  edgesReconnectable: false,
 } as const;
 
 const WAITING: Record<SessionState['project']['status'], string> = {
@@ -142,15 +163,15 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
   const selected = useSession(selectedNode);
   const stale = useSession((s) => s.staleShown);
   const colorMode = useColorMode();
-  const [hovered, setHovered] = useState<NodeId>();
-  const hover = useHover(setHovered);
+  const hover = useHover();
   const wrapper = useRef<HTMLDivElement>(null);
   const placed = useRef<NodeId>(undefined);
   const act = useMemo(() => cardActions(store), [store]);
-  const flow = useFlow(store, graph, { selected, hovered });
+  const { editing, hot, pending, edit } = useBuilder(store, graph);
+  const flow = useFlow(store, graph, { selected, hovered: hover.id, editing, hotEdge: hot.id, pending });
   const start = useStartView(store, graph.for.epoch);
-  const onKeyDown = useCanvasKeys(store, { wrapper, placed }, graphRef, selected);
-  const onFocus = useCardFocus(store, graphRef, placed);
+  const onKeyDown = useCanvasKeys(store, { wrapper, placed }, graphRef, selected, editing !== undefined);
+  const onCardFocus = useCardFocus(store, graphRef, placed);
   const onDoubleClick = useDoubleClickZoom();
   const onNodeClick: NodeMouseHandler<FlowNode> = (_, node) => act.select(node.id);
   return (
@@ -159,11 +180,13 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
       className="sc-canvas"
       data-stale={stale || undefined}
       onKeyDown={onKeyDown}
-      onFocus={onFocus}
+      onFocus={hot.focusIn(onCardFocus)}
+      onBlur={hot.blur}
       onDoubleClick={onDoubleClick}
     >
       <ReactFlow<FlowNode, NeedsFlowEdge>
         {...FIXED}
+        {...edit}
         nodes={flow.nodes}
         edges={flow.edges}
         colorMode={colorMode}
@@ -173,12 +196,117 @@ function Picture({ graph, graphRef }: { graph: GraphState; graphRef: RefObject<G
         onPaneClick={act.selectFocus}
         onNodeMouseEnter={hover.enter}
         onNodeMouseLeave={hover.leave}
+        onEdgeMouseEnter={hot.enter}
+        onEdgeMouseLeave={hot.leave}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Controls showInteractive={false} fitViewOptions={FIT} />
       </ReactFlow>
     </div>
   );
+}
+
+/** What the builder adds to the picture (synthesis § 4.5): what it edits, its hot edge, its pending needs, its props. */
+function useBuilder(store: SessionStore, graph: GraphState) {
+  const editing = useEditing(store, graph);
+  const hot = useHotEdge(graph);
+  const pending = usePendingEdges(store, graph.for.files);
+  const edit = useEditProps(store, editing);
+  return { editing, hot, pending, edit };
+}
+
+/**
+ * The depth-0 workflow edit mode is editing, when the picture draws it and the edit runtime answers its gestures: until
+ * its chunk is in, the cards offer no handle, ✕ or + that would do nothing.
+ */
+function useEditing(store: SessionStore, graph: GraphState): NodeId | undefined {
+  const focus = useSession((s) => (s.edit.on ? s.focus : undefined));
+  const watch = useCallback((changed: () => void) => gestures.watch(store, changed), [store]);
+  const ready = useSyncExternalStore(watch, () => gestures.of(store) !== undefined);
+  const scope = focus === undefined || !ready ? undefined : graph.model.scopes[focus];
+  return scope && scope.caller === undefined ? scope.id : undefined;
+}
+
+/** How long an edge stays hot after the pointer leaves it: time to reach its ✕, which then holds itself by hover. */
+const COOL_MS = 400;
+
+/**
+ * The edge that shows its ✕: the one under the pointer, else the one with the focus. An edge removed while it has the
+ * focus fires no blur, so the focus is read again whenever the picture changes.
+ */
+function useHotEdge(graph: GraphState) {
+  const [pointer, setPointer] = useState<string>();
+  const [focused, setFocused] = useState<string>();
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => setFocused(edgeIdOf(document.activeElement)), [graph]);
+  return useMemo(() => {
+    const enter: EdgeMouseHandler<NeedsFlowEdge> = (_, edge) => {
+      clearTimeout(timer.current);
+      setPointer(edge.id);
+    };
+    const leave: EdgeMouseHandler<NeedsFlowEdge> = () => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setPointer(undefined), COOL_MS);
+    };
+    return {
+      id: pointer ?? focused,
+      enter,
+      leave,
+      /** The canvas's focus handler, with the focused edge read first. */
+      focusIn:
+        (then: (e: FocusEvent<HTMLDivElement>) => void) =>
+        (e: FocusEvent<HTMLDivElement>): void => {
+          setFocused(edgeIdOf(e.target));
+          then(e);
+        },
+      blur: (e: FocusEvent<HTMLDivElement>): void => {
+        if (edgeIdOf(e.target) !== undefined) setFocused(undefined);
+      },
+    };
+  }, [pointer, focused]);
+}
+
+/** The needs written and not drawn yet; a picture of their texts or newer ones settles them. */
+function usePendingEdges(store: SessionStore, files: number) {
+  const subscribe = useCallback((changed: () => void) => pendingEdges.subscribe(store, changed), [store]);
+  const pending = useSyncExternalStore(subscribe, () => pendingEdges.of(store));
+  useEffect(() => pendingEdges.settle(store, files), [store, files]);
+  return pending;
+}
+
+/**
+ * What edit mode gives the picture of the workflow being edited: connectable jobs, focusable edges, and an edge that
+ * takes the pointer (React Flow leaves an edge nothing clicks inert), a click selecting the job whose need it is.
+ */
+function useEditProps(store: SessionStore, editing: NodeId | undefined) {
+  const connect = useConnect(store);
+  return useMemo(() => {
+    if (editing === undefined) return {};
+    const onEdgeClick: EdgeMouseHandler<NeedsFlowEdge> = (_, edge) => cardActions(store).select(edge.target);
+    return { ...EDITING, ...connect, onEdgeClick };
+  }, [store, editing, connect]);
+}
+
+/**
+ * A drag between two handles, as the edit runtime answers it: whether it may end where it is, the need it writes, and
+ * for a drop the runtime refused, the reason it gives (a loop's sentence) in the status line.
+ */
+function useConnect(store: SessionStore) {
+  return useMemo(() => {
+    const onConnectEnd: OnConnectEnd = (_, state) => {
+      if (state.isValid !== false || !state.toNode || !state.fromNode || !state.fromHandle) return;
+      const from = state.fromHandle.type === 'source';
+      const [source, target] = from ? [state.fromNode, state.toNode] : [state.toNode, state.fromNode];
+      gestures.of(store)?.connect(source.id, target.id);
+    };
+    return {
+      isValidConnection: (c: Connection | NeedsFlowEdge): boolean =>
+        gestures.of(store)?.canConnect(c.source, c.target) ?? false,
+      onConnect: (c: Connection): void => gestures.of(store)?.connect(c.source, c.target),
+      onConnectEnd,
+    };
+  }, [store]);
 }
 
 /**
@@ -221,16 +349,16 @@ function Waiting() {
 function useFlow(
   store: SessionStore,
   graph: GraphState,
-  { selected, hovered }: Pick<FlowView, 'selected' | 'hovered'>,
+  { selected, hovered, editing, hotEdge, pending }: Omit<FlowView, 'lit' | 'flash'>,
 ): Flow {
   const lit = useLit(graph.model);
   const flash = useFlash(store, graph);
   const last = useRef<Flow>(undefined);
   return useMemo(() => {
-    const view = { selected, hovered, lit, flash };
+    const view = { selected, hovered, lit, flash, editing, hotEdge, pending };
     last.current = keepUnchanged(last.current, toFlow(graph.model, graph.layout, view));
     return last.current;
-  }, [graph, selected, hovered, lit, flash]);
+  }, [graph, selected, hovered, lit, flash, editing, hotEdge, pending]);
 }
 
 /** The cards the unknown hovered in the Unknowns tab lights, while one is. */
@@ -329,23 +457,45 @@ interface FocusRefs {
 
 /**
  * The canvas keys on the wrapper: `navigate()` answers, with the last needs edge remembered for Alt to cycle, and the
- * card the keys are moving the focus to until it has it.
+ * card the keys are moving the focus to until it has it. In edit mode the edit keys go first: Delete removes the
+ * focused edge's need or the selection, Alt+↑/↓ move a selected step (and are ↑/↓ for anything else).
  */
 function useCanvasKeys(
   store: SessionStore,
   refs: FocusRefs,
   graph: RefObject<GraphState | undefined>,
   selected: NodeId | undefined,
+  editing: boolean,
 ): (e: KeyboardEvent<HTMLDivElement>) => void {
   const moving = useRef<NodeId>(undefined);
   const effects = useNavEffects(store, refs, graph, moving);
   const [navigate] = useState(createNavigator);
   return (e) => {
+    if (editing && runEditKey(store, e, graph.current, selected)) {
+      e.preventDefault();
+      return;
+    }
     const action = keyAction(e, navigate, selected, graph.current, moving.current);
     if (!action) return;
     e.preventDefault();
     runNav(action, effects);
   };
+}
+
+/** An edit key on the canvas, run through the edit runtime: false when it is none, or nothing took it. */
+function runEditKey(
+  store: SessionStore,
+  e: KeyboardEvent<HTMLDivElement>,
+  graph: GraphState | undefined,
+  selected: NodeId | undefined,
+): boolean {
+  const key = editKey(e, graph?.model, selected);
+  const edit = key && gestures.of(store);
+  if (!key || !edit) return false;
+  if (key === 'remove') return edit.remove();
+  if (key === 'up' || key === 'down') return edit.move(key === 'up' ? -1 : 1);
+  edit.disconnect(key.source, key.target);
+  return true;
 }
 
 /**
@@ -436,25 +586,28 @@ function useDoubleClickZoom(): (e: MouseEvent<HTMLDivElement>) => void {
 }
 
 /** The hover card opens 300 ms after the pointer settles on a node and closes as it leaves. */
-function useHover(set: (id: NodeId | undefined) => void): {
+function useHover(): {
+  id: NodeId | undefined;
   enter: NodeMouseHandler<FlowNode>;
   leave: NodeMouseHandler<FlowNode>;
 } {
+  const [id, set] = useState<NodeId>();
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  return useMemo(
+  const handlers = useMemo(
     () => ({
-      enter: (_, node) => {
+      enter: ((_, node) => {
         clearTimeout(timer.current);
         timer.current = setTimeout(() => set(node.id), HOVER_MS);
-      },
-      leave: () => {
+      }) satisfies NodeMouseHandler<FlowNode>,
+      leave: (() => {
         clearTimeout(timer.current);
         set(undefined);
-      },
+      }) satisfies NodeMouseHandler<FlowNode>,
     }),
-    [set],
+    [],
   );
+  return { id, ...handlers };
 }
 
 /** React Flow's colour mode follows the page's resolved `data-theme`, which app/theme.ts keeps. */

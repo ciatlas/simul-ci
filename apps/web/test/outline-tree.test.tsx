@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
+import { type Gestures, gestures } from '../src/edit/gestures';
 import type { IndexedNode, PlanIndex } from '../src/plan/index';
 import { OutlineTree } from '../src/panels/OutlineTree';
 import {
@@ -302,6 +303,27 @@ describe('the outline tree', () => {
     await user.click(item('test, runs').querySelector('[data-disclosure]')!);
     expect(item('test, runs').getAttribute('aria-expanded')).toBe('true');
     expect(store.getState().sel).toBeUndefined();
+  });
+
+  it('opens a row’s actions in edit mode from the context menu key, Shift+F10 or a right click, at the row', () => {
+    const { store } = mount();
+    const asked: [NodeId, Element][] = [];
+    const unregister = gestures.register(store, {
+      menu: (node: NodeId, at: HTMLElement) => asked.push([node, at]) > 0,
+    } as unknown as Gestures);
+    // Outside edit mode the browser keeps its own menu.
+    expect(fireEvent.contextMenu(item('build, runs'))).toBe(true);
+    expect(fireEvent.keyDown(item('CI, runs'), { key: 'ContextMenu' })).toBe(true);
+    act(() => store.getState().setEdit(true));
+    expect(fireEvent.contextMenu(item('build, runs'))).toBe(false);
+    expect(fireEvent.keyDown(item('build, runs'), { key: 'F10', shiftKey: true })).toBe(false);
+    expect(fireEvent.keyDown(item('build, runs'), { key: 'ContextMenu' })).toBe(false);
+    expect(asked.map(([node, at]) => [node, at.getAttribute('aria-label')])).toEqual([
+      [`${CI}#build`, 'build, runs'],
+      [`${CI}#build`, 'build, runs'],
+      [`${CI}#build`, 'build, runs'],
+    ]);
+    unregister();
   });
 
   it('hides untriggered workflows when the canvas does, and shows nothing before a plan', () => {

@@ -30,14 +30,17 @@ const BUDGETS = [
   { name: 'the layout worker', test: (f) => f.startsWith('layout.worker-'), kB: 493 },
   // React, the router, React Flow and its d3 modules, Base UI, the scenario form, the panels and the edit history,
   // with the crash snapshot, the replace prompt, edit mode, what an edit changed (the plan diff and Details, a
-  // platform popover) and the edit runtime's loader: 238.0 kB measured.
-  { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 251 },
+  // platform popover), the edit runtime's loader, saving to the folder and the canvas's side of its gestures:
+  // 246.5 kB measured (238.0 before saving and the gestures); the budget is that and 15 %.
+  { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 284 },
   // CodeMirror's view, state, language and commands with the YAML grammar, and the pane's edit mode, fetched when the
   // pane first opens: 107.1 kB measured (95.4 before edit mode).
   { name: 'the YAML pane', test: (f) => f.startsWith('YamlPane-'), kB: 124 },
-  // The edit runtime: yaml with its composer, the document model, the op dispatch, Properties, the matrix editor and
-  // the triggers editor, fetched for editing: 75.9 kB measured (69.9 before the triggers editor).
-  { name: 'the edit runtime', test: (f) => f.startsWith('edit-'), kB: 87 },
+  // The edit runtime: yaml with its composer, the document model, the op dispatch, Properties, the matrix editor, the
+  // canvas's gestures (Add job, What it needs, the palette, the step lists; platform popovers and a combobox of our
+  // own, not Base UI's, which would add 33 kB) and the triggers editor, fetched for editing: 84.8 kB measured (78.9
+  // before the triggers editor); the budget is that and 15 %.
+  { name: 'the edit runtime', test: (f) => f.startsWith('edit-'), kB: 98 },
 ];
 
 const problems = [];
