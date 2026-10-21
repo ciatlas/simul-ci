@@ -14,6 +14,7 @@ import { createEngineClient, type EngineClient, spawnEngineWorker } from '../wor
 import { createLayoutClient, type LayoutClient, spawnLayoutWorker } from '../worker/layout-client';
 import { installLeaveGuard } from './leave';
 import { createReplacePrompt, type ReplacePrompt } from './replace';
+import { createSaver, type Saver } from './saver';
 import { installShortcuts } from './shortcuts';
 import { installStaleClock } from './stale';
 import { applyTheme } from './theme';
@@ -34,6 +35,8 @@ export interface App {
   keeper: SnapshotKeeper;
   /** Asks before files with unsaved edits give way to another source. */
   prompt: ReplacePrompt;
+  /** Saves the edits to the folder, and asks about the files it and the page both changed. */
+  saver: Saver;
 }
 
 export function bootApp(): App {
@@ -47,7 +50,14 @@ export function bootApp(): App {
   const kv = openKeyValue(DB_NAME, STORE_NAME);
   const persist = sourceStore(kv);
   const prompt = createReplacePrompt(store);
-  const sources = createSources({ store, persist, ask: (what, paths) => prompt.ask(what, paths) });
+  const saver = createSaver({ store });
+  const sources = createSources({
+    store,
+    persist,
+    ask: (what, paths) => prompt.ask(what, paths),
+    save: () => saver.save(),
+    settle: (mode, folder, conflicts) => saver.settle(mode, folder, conflicts),
+  });
   const buffers = createBufferWriter({ store, persist, win: window });
   // Before the source is restored below, so the edits of the folder it brings back come back with it.
   const keeper = createSnapshotKeeper({ store, snapshots: snapshotStore(kv), win: window });
@@ -66,9 +76,9 @@ export function bootApp(): App {
       if (s.ui.prefs.theme !== prev.ui.prefs.theme) applyTheme(s.ui.prefs.theme);
     }
   });
-  installShortcuts(store);
+  installShortcuts(store, window, () => void saver.save());
   installStaleClock({ store });
   installEditPrefetch(store);
   void sources.restore();
-  return { store, client, session, layout, graph, sources, buffers, keeper, prompt };
+  return { store, client, session, layout, graph, sources, buffers, keeper, prompt, saver };
 }

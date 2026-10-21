@@ -35,9 +35,9 @@ const BUDGETS = [
   // CodeMirror's view, state, language and commands with the YAML grammar, and the pane's edit mode, fetched when the
   // pane first opens: 107.1 kB measured (95.4 before edit mode).
   { name: 'the YAML pane', test: (f) => f.startsWith('YamlPane-'), kB: 124 },
-  // The edit runtime: yaml with its composer, the document model, the op dispatch, Properties and the triggers
-  // editor, fetched for editing: 71.8 kB measured (65.9 before the triggers editor, 60.0 before Properties).
-  { name: 'the edit runtime', test: (f) => f.startsWith('edit-'), kB: 76 },
+  // The edit runtime: yaml with its composer, the document model, the op dispatch, Properties, the matrix editor and
+  // the triggers editor, fetched for editing: 75.9 kB measured (69.9 before the triggers editor).
+  { name: 'the edit runtime', test: (f) => f.startsWith('edit-'), kB: 87 },
 ];
 
 const problems = [];

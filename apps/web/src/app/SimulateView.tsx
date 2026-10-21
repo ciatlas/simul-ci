@@ -18,6 +18,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { ReplacePrompt } from './ReplaceDialog';
 import { RestoreConflicts } from './RestoreConflicts';
 import { useApp, useSession } from './providers';
+import { SaveDialogs } from './SaveDialog';
 import { ScenarioForm } from './ScenarioForm';
 import { shownView, togglePaneKeepingFocus, useNarrow } from './shortcuts';
 import { StatusBar } from './StatusBar';
@@ -71,6 +72,7 @@ export function SimulateView() {
       <StatusBar />
       <Toaster />
       <ReplacePrompt />
+      <SaveDialogs />
       {dragging && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center border-4 border-accent border-dashed bg-bg/80">
           <p className="rounded bg-surface px-4 py-2 font-medium text-lg">
