@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSession } from '../src/engine/session';
 import { sampleByName } from '../src/input/samples';
 import { createSessionStore, type PlanState } from '../src/state/store';
-import type { CaseResult, EngineClient, LoadResult, SimulateResult } from '../src/worker/client';
+import type { CaseResult, EngineClient, LoadResult, SimulateResult, RefsResult } from '../src/worker/client';
 import { handle, initialState } from '../src/worker/handle';
 import type { Outline, ReadyResponse, SimulateRequest } from '../src/worker/protocol';
 
@@ -40,6 +40,7 @@ function fakeClient() {
     load: () => new Promise<LoadResult>((resolve) => loads.push(resolve)),
     simulate: (body) => new Promise<SimulateResult>((resolve) => simulates.push({ body, resolve })),
     case: () => new Promise<CaseResult>(() => undefined),
+    refs: () => new Promise<RefsResult>(() => undefined),
     onRestart: () => undefined,
     onFailure: () => undefined,
     restarts: () => 0,

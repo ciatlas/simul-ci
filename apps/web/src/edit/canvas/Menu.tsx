@@ -31,6 +31,7 @@ function menuItems(store: SessionStore, node: NodeId): MenuItem[] {
       { label: `Add a job after ${name}…`, keys: 'A', run: (g) => g.addJob() },
       { label: `What ${name} needs…`, keys: 'N', run: (g) => g.needs() },
       { label: `Add a step to ${name}…`, keys: 'S', run: (g) => g.palette() },
+      { label: `Rename ${name}…`, keys: 'F2', run: (g) => g.rename() },
       { label: `Remove job ${name}`, keys: 'Delete', run: (g) => g.remove() },
     ];
   if (kind === 'step')
@@ -38,6 +39,7 @@ function menuItems(store: SessionStore, node: NodeId): MenuItem[] {
       { label: 'Add a step after this one…', keys: 'S', run: (g) => g.palette() },
       { label: 'Move up', keys: 'Alt+ArrowUp', run: (g) => g.move(-1) },
       { label: 'Move down', keys: 'Alt+ArrowDown', run: (g) => g.move(1) },
+      { label: 'Rename its id…', keys: 'F2', run: (g) => g.rename() },
       { label: 'Remove this step', keys: 'Delete', run: (g) => g.remove() },
     ];
   return [];
@@ -57,6 +59,8 @@ export function RowMenu({ node, anchor, onClose }: { node: NodeId; anchor: Eleme
     all[(to + all.length) % all.length]?.focus();
   };
   const take = (item: MenuItem): void => {
+    // The row has the focus back before the action runs, so what it opens is anchored there, not at this menu.
+    if (anchor instanceof HTMLElement) anchor.focus({ preventScroll: true });
     onClose();
     const g = gestures.of(store);
     if (g) item.run(g);

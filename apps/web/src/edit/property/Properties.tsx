@@ -1,6 +1,7 @@
 import { type Json, planOp, type WorkflowDocument } from '@simulci/document';
 import { useMemo } from 'react';
 import { useApp, useSession } from '../../app/providers';
+import { callsOut } from '../../lib/unit-path';
 import { EmptyNote } from '../../panels/kit';
 import { newestOutline } from '../../state/store';
 import { storeLock } from '../dispatch';
@@ -37,7 +38,7 @@ export function Properties() {
   if (!target)
     return (
       <EmptyNote>
-        {sel?.includes('/')
+        {callsOut(sel)
           ? 'This is a job of the workflow it calls: select it there to edit it.'
           : 'Select a workflow, a job or a step of the focused workflow to edit it.'}
       </EmptyNote>

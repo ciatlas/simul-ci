@@ -11,6 +11,7 @@ import { type ChangeRow, changeRows, changeSentence } from '../plan/change-rows'
 import { diffOf, pinSentence, verdictChanges } from '../plan/changes';
 import type { Derived, ModelInfo, Outline, ReadyResponse } from '../worker/protocol';
 import * as history from './history';
+import { carried, changeRenames, inverse, type Renames, renamedBeside } from './renames';
 import { DEFAULT_PREFS, type PanelTab, type Prefs } from './prefs';
 
 /**
@@ -78,7 +79,7 @@ export interface Change {
    * exactly the inputs it left in the store, these very objects.
    */
   waitFor: { files?: number; scenario?: ScenarioInput; assume?: AssumeEntry[] };
-  /** Old id prefixes and their new ids, for a rename (C11); none until a transaction supplies them. */
+  /** Old id prefixes and their new ids, for a rename (C11): the plan before's ids in the terms of the answer's. */
   renames?: Readonly<Record<NodeId, NodeId>>;
   /** Only keys typed in the pane: a burst whose plan changed nothing says nothing. */
   quiet?: true;
@@ -846,13 +847,21 @@ export function createSessionStore(initial: SessionState = initialSessionState()
           },
         })),
       unknownFocused: (seq) => set((s) => (s.unknownFocus?.seq === seq ? { unknownFocus: undefined } : {})),
-      transact: (input) =>
-        commit(
-          (s) => history.transact(s.edit, s.files.byPath, input, contextOf(s)),
-          () => ({ label: input.label }),
+      transact: (input) => {
+        // The step and what it says read one state: the input as it commits is worked out once for it.
+        let memo: { s: SessionState; input: history.TxInput } | undefined;
+        const tx = (s: SessionState): history.TxInput =>
+          memo?.s === s ? memo.input : (memo = { s, input: carried(s, input) }).input;
+        return commit(
+          (s) => history.transact(s.edit, s.files.byPath, tx(s), contextOf(s)),
+          (s) => {
+            const { renames } = tx(s);
+            return { label: input.label, ...(renames ? { renames } : {}) };
+          },
           undefined,
           input.selectionAfter,
-        ),
+        );
+      },
       grouped: (key, input) =>
         commit(
           (s) => history.grouped(s.edit, s.files.byPath, key, input, contextOf(s)),
@@ -929,7 +938,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         revealed(
           commit(
             (s) => history.undo(s.edit, s.files.byPath),
-            (s) => ({ label: `Undo ${history.undoLabel(s.edit)}` }),
+            (s) => ({ label: `Undo ${history.undoLabel(s.edit)}`, ...stepRenames(s, 'undo') }),
             'undo',
           ),
           'undo',
@@ -938,7 +947,7 @@ export function createSessionStore(initial: SessionState = initialSessionState()
         revealed(
           commit(
             (s) => history.redo(s.edit, s.files.byPath),
-            (s) => ({ label: `Redo ${history.redoLabel(s.edit)}` }),
+            (s) => ({ label: `Redo ${history.redoLabel(s.edit)}`, ...stepRenames(s, 'redo') }),
             'redo',
           ),
           'redo',
@@ -1050,7 +1059,20 @@ function besideTexts(
 ): Partial<SessionState> {
   const source = writtenThrough(s.source, step.changes, files.byPath);
   if (!Object.keys(step.changes).some(isProjectFile)) return { source };
-  return { source, change: editOver(s, files.version, said) };
+  const change = editOver(s, files.version, said);
+  return said.renames
+    ? { source, ...renamedBeside(s, newestOutline(s), said.renames, change) }
+    : { source, change };
+}
+
+/**
+ * The renames an undo takes back or a redo makes again. An undo undoes the newest entry once open typing is closed
+ * into one, which carries none; typing that changed nothing closes into none, and the entry under it is undone.
+ */
+function stepRenames(s: SessionState, verb: 'undo' | 'redo'): { renames?: Renames } {
+  const tx = verb === 'undo' ? history.close(s.edit).past.at(-1) : s.edit.future.at(-1);
+  if (!tx?.renames) return {};
+  return { renames: verb === 'undo' ? inverse(tx.renames) : tx.renames };
 }
 
 /**
@@ -1270,6 +1292,8 @@ const pinOver = (s: SessionState, scenario: ScenarioInput, assume: AssumeEntry[]
 interface Said {
   label: string;
   quiet?: true;
+  /** The ids the commit renames (C11). */
+  renames?: Renames;
 }
 
 /**
@@ -1282,7 +1306,13 @@ function editOver(s: SessionState, files: number, said: Said): Change | undefine
   const quiet = said.quiet && (!open || open.quiet) ? { quiet: said.quiet } : {};
   if (open) {
     const { quiet: _, ...rest } = open;
-    return { ...rest, label: said.label, waitFor: { files }, ...quiet };
+    return {
+      ...rest,
+      label: said.label,
+      waitFor: { files },
+      ...quiet,
+      ...changeRenames(open.renames, said.renames),
+    };
   }
   if (!s.plan) return undefined;
   return {
@@ -1292,6 +1322,7 @@ function editOver(s: SessionState, files: number, said: Said): Change | undefine
     ...beforeOf(s.plan),
     waitFor: { files },
     ...quiet,
+    ...changeRenames(undefined, said.renames),
   };
 }
 

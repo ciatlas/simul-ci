@@ -4,6 +4,8 @@ import type {
   Json,
   Loc,
   NodeId,
+  Reference,
+  ReferenceTarget,
   RunPlan,
   ScenarioInput,
   UnknownId,
@@ -65,7 +67,18 @@ export interface CaseRequest {
   given?: unknown;
 }
 
-export type EngineRequest = LoadRequest | SimulateRequest | CaseRequest;
+/**
+ * Where a job's or a step's id is written in its workflow, for a rename (synthesis § 3.3, § 8.3): the engine's
+ * `referencesOf`, on the project `loaded` named.
+ */
+export interface RefsRequest {
+  id: number;
+  type: 'refs';
+  project: number;
+  target: ReferenceTarget;
+}
+
+export type EngineRequest = LoadRequest | SimulateRequest | CaseRequest | RefsRequest;
 
 export interface ModelInfo {
   id: string;
@@ -116,6 +129,18 @@ export interface CaseResponse {
   errors?: { code: string; message: string }[];
 }
 
+export interface RefsResponse {
+  id: number;
+  type: 'refs';
+  project: number;
+  /** Each place the id is written, cut to the id, in file order: what a rename writes the new id over. */
+  refs: Reference[];
+  /** False when the workflow reads the target in ways no rename can follow; `notes` says where. */
+  exact: boolean;
+  /** Each such read, as a sentence: `needs[matrix.job]` (line 40) reads a job it computes; it is not renamed. */
+  notes: string[];
+}
+
 export interface InvalidResponse {
   id: number;
   type: 'invalid';
@@ -137,6 +162,7 @@ export type EngineResponse =
   | LoadedResponse
   | PlanResponse
   | CaseResponse
+  | RefsResponse
   | InvalidResponse
   | ErrorResponse;
 
@@ -262,7 +288,7 @@ export interface Derived {
   unknownPaths: Record<UnknownId, string>;
 }
 
-const TYPES = new Set(['load', 'simulate', 'case']);
+const TYPES = new Set(['load', 'simulate', 'case', 'refs']);
 
 const isObject = (v: unknown): boolean => typeof v === 'object' && v !== null;
 
@@ -272,10 +298,19 @@ export function isEngineRequest(data: unknown): data is EngineRequest {
   const d = data as Record<string, unknown>;
   if (typeof d.id !== 'number' || typeof d.type !== 'string' || !TYPES.has(d.type)) return false;
   if (d.type === 'load') return isObject(d.files) && (d.tests === undefined || isObject(d.tests));
+  if (d.type === 'refs') return typeof d.project === 'number' && isTarget(d.target);
   return (
     typeof d.project === 'number' &&
     typeof d.scenario === 'object' &&
     d.scenario !== null &&
     Array.isArray(d.assume)
   );
+}
+
+/** A job (`workflow`, `job`) or a step (and `step`) to find the references of, all strings. */
+function isTarget(target: unknown): target is ReferenceTarget {
+  if (typeof target !== 'object' || target === null) return false;
+  const t = target as Record<string, unknown>;
+  const named = typeof t.workflow === 'string' && typeof t.job === 'string';
+  return named && (t.kind === 'job' || (t.kind === 'step' && typeof t.step === 'string'));
 }

@@ -48,15 +48,24 @@ export function PanelSteps({
   };
   const insert = (index: number): void => void gestures.of(store)?.palette({ job, index });
   const drag = useStepDrag(move);
+  // F2 on a row renames that step's id, as its other keys act on it while the job stays selected.
+  const rename = (index: number, at: Element): boolean => {
+    const target = stepTarget(store, file, job, index);
+    const ui = hostUi.of(store);
+    if (!target || !ui) return false;
+    ui.open({ kind: 'rename', target, anchor: at });
+    return true;
+  };
   const onKeyDown = (index: number) => (e: KeyboardEvent<HTMLButtonElement>) => {
     const by = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+    const plain = !e.altKey && !e.ctrlKey && !e.metaKey;
     if (e.altKey && by !== 0) {
       e.preventDefault();
       move(index, index + by);
-    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'Delete' || e.key === 'Backspace')) {
+    } else if (plain && (e.key === 'Delete' || e.key === 'Backspace')) {
       e.preventDefault();
       remove(index);
-    }
+    } else if (plain && !e.shiftKey && e.key === 'F2' && rename(index, e.currentTarget)) e.preventDefault();
   };
   return (
     <section className="flex flex-col gap-1" aria-label="Steps">
@@ -73,7 +82,7 @@ export function PanelSteps({
               type="button"
               data-step-name
               className="min-w-0 flex-1 truncate rounded px-1.5 py-0.5 text-left text-sm hover:bg-chrome"
-              aria-keyshortcuts={locked ? undefined : 'Alt+ArrowUp Alt+ArrowDown Delete'}
+              aria-keyshortcuts={locked ? undefined : 'Alt+ArrowUp Alt+ArrowDown Delete F2'}
               onClick={() =>
                 store.getState().select(file, unitPathAt(doc, ['jobs', job, 'steps', step.index]))
               }
@@ -105,7 +114,7 @@ export function PanelSteps({
           </button>
           {steps.length > 1 && (
             <p className="text-muted text-xs">
-              Drag a step, or Alt+↑ and Alt+↓ on it, to move it; Delete removes it.
+              Drag a step, or Alt+↑ and Alt+↓ on it, to move it; Delete removes it; F2 renames its id.
             </p>
           )}
         </>

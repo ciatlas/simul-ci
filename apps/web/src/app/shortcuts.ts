@@ -6,6 +6,7 @@ import { planIndex, resolveSelection } from '../plan/index';
 import type { PanelTab } from '../state/prefs';
 import { dirtyPaths, type SessionActions, type SessionState, type SessionStore } from '../state/store';
 import { historyCommand, letterOf } from '../lib/history-keys';
+import { callsOut } from '../lib/unit-path';
 import { caseAvailability } from '../testcase/case';
 import { type Pane, togglePaneKeepingFocus } from './panes';
 import { canSave } from './saver';
@@ -25,7 +26,7 @@ import { canSave } from './saver';
  * In edit mode Mod+Z undoes and Mod+Shift+Z or Mod+Y redoes the page's one edit history (synthesis § 6) wherever no
  * field keeps its own undo: whatever `prefs.keys` says, since a modifier makes them no single keys. The YAML pane
  * binds the same keys itself. Mod+Shift+D opens the Changes dialog (§ 5.2) in edit mode, the YAML pane included, and
- * Mod+K the palette, as `s` does.
+ * Mod+K the palette, as `s` does, and F2 renames the selected job or step.
  * Mod+S saves to the folder (§ 5.3) anywhere outside a dialog, fields and the pane included; with no folder to save
  * to it opens Changes, which downloads. The page always takes it, so the browser never offers to save the page.
  */
@@ -127,7 +128,8 @@ export function installShortcuts(
       historyKey(event, s) ||
       changesKey(event, s) ||
       saveKey(event, s, save) ||
-      paletteKey(event, s, store)
+      paletteKey(event, s, store) ||
+      renameKey(event, s, store)
     ) {
       event.preventDefault();
       return;
@@ -195,8 +197,23 @@ function dialogAround(target: EventTarget | null): boolean {
 /** Mod+K in edit mode, outside a dialog: the palette, when a job or a step of the focused workflow is selected. */
 function paletteKey(event: HistoryKey, s: SessionState, store: SessionStore): boolean {
   if (!s.edit.on || !modKey(event, 'k') || dialogAround(event.target)) return false;
-  return Boolean(s.sel) && !s.sel?.includes('/') && gestures.ask(store, (g) => g.palette());
+  return Boolean(s.sel) && !callsOut(s.sel) && gestures.ask(store, (g) => g.palette());
 }
+
+/**
+ * F2 in edit mode, outside fields, the YAML pane and dialogs: renames the selected job or step (synthesis § 4.2). A
+ * function key, so it obeys no `prefs.keys`, which turns off the single letters only.
+ */
+export function renameKey(event: HistoryKey, s: SessionState, store: SessionStore): boolean {
+  if (!s.edit.on || !aloneF2(event) || ownedElsewhere(event.target) || dialogAround(event.target))
+    return false;
+  return Boolean(s.sel) && !callsOut(s.sel) && gestures.ask(store, (g) => g.rename());
+}
+
+/** F2 with no modifier, that nothing handled yet. */
+const aloneF2 = (event: HistoryKey): boolean =>
+  event.key === 'F2' &&
+  !(event.altKey || event.ctrlKey || event.metaKey || event.shiftKey === true || event.defaultPrevented);
 
 /** Mod and a letter, without Shift or Alt, that nothing handled yet. */
 const modKey = (event: HistoryKey, letter: string): boolean =>
@@ -255,7 +272,7 @@ function runEdit(command: PageCommand, s: SessionState & SessionActions, store?:
   if (!s.edit.on) return false;
   if (!store) return false;
   if (command === 'addJob') return gestures.ask(store, (g) => g.addJob());
-  if (!s.sel || s.sel.includes('/')) return false;
+  if (!s.sel || callsOut(s.sel)) return false;
   if (command === 'runIf') {
     s.focusProperty('if');
     return true;

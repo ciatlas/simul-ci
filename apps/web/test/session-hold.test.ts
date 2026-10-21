@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSession } from '../src/engine/session';
 import { createSessionStore } from '../src/state/store';
-import type { CaseResult, EngineClient, LoadResult, SimulateResult } from '../src/worker/client';
+import type { CaseResult, EngineClient, LoadResult, SimulateResult, RefsResult } from '../src/worker/client';
 import type { Outline, ReadyResponse } from '../src/worker/protocol';
 
 /**
@@ -24,6 +24,7 @@ function fakeClient() {
       }),
     simulate: (body) => new Promise<SimulateResult>((resolve) => simulates.push({ body, resolve })),
     case: () => new Promise<CaseResult>(() => undefined),
+    refs: () => new Promise<RefsResult>(() => undefined),
     onRestart: (l) => restartListeners.push(l),
     onFailure: () => undefined,
     restarts: () => 0,

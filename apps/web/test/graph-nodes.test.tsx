@@ -7,6 +7,7 @@ import { type ReactNode, StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { App } from '../src/app/boot';
 import { AppProvider } from '../src/app/providers';
+import { type Gestures, gestures } from '../src/edit/gestures';
 import { type CardState, jobLabel, scopeLabel } from '../src/graph/card';
 import { Canvas } from '../src/graph/Canvas';
 import { viewport } from '../src/graph/commands';
@@ -152,7 +153,19 @@ function withApp(store: ReturnType<typeof storeOf>, children: ReactNode) {
  * `click` events: a pointer's `mousedown` reaches d3-zoom, which reads `event.view`, and happy-dom leaves it null.
  */
 function mountNodes(nodes: FlowNode[], store = storeOf()) {
-  render(withApp(store, <ReactFlow nodes={nodes} edges={[]} nodeTypes={TYPES} nodesDraggable={false} />));
+  render(
+    withApp(
+      store,
+      // As the canvas mounts it: d3-zoom's own double-click would stop the event before React sees it.
+      <ReactFlow
+        nodes={nodes}
+        edges={[]}
+        nodeTypes={TYPES}
+        nodesDraggable={false}
+        zoomOnDoubleClick={false}
+      />,
+    ),
+  );
   return store;
 }
 const click = (el: Element | null) => fireEvent.click(el!);
@@ -244,6 +257,32 @@ describe('a job card', () => {
     click(screen.getByRole('button', { name: 'Show the steps' }));
     expect(store.getState().ui.expanded).toEqual([TEST]);
     expect(store.getState().sel).toBeUndefined();
+  });
+
+  it('renames the job on a double-click of its title while it is edited, and the double-click goes no further', () => {
+    const asked: string[] = [];
+    const editable = jobNode(jobOf());
+    editable.data = { ...editable.data, editable: true };
+    const store = mountNodes([editable], storeOf({ [TEST]: 'test' }));
+    const stop = gestures.register(store, {
+      rename: () => asked.push(store.getState().sel ?? '') > 0,
+    } as unknown as Gestures);
+    const outer = vi.fn();
+    document.addEventListener('dblclick', outer);
+    fireEvent.doubleClick(drawn('runs test').querySelector('.sc-card-label')!);
+    expect(asked).toEqual(['test']);
+    expect(outer).not.toHaveBeenCalled();
+    document.removeEventListener('dblclick', outer);
+    stop();
+  });
+
+  it('keeps a double-click on the title of a card not being edited for the canvas', () => {
+    const store = mountNodes([jobNode(jobOf())], storeOf({ [TEST]: 'test' }));
+    const asked: string[] = [];
+    const stop = gestures.register(store, { rename: () => asked.push('rename') > 0 } as unknown as Gestures);
+    fireEvent.doubleClick(drawn('runs test').querySelector('.sc-card-label')!);
+    expect(asked).toEqual([]);
+    stop();
   });
 
   it('selects a step from the strip', () => {

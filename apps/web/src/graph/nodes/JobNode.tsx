@@ -30,7 +30,8 @@ const HANDLE = { top: CARD.header / 2 };
  * list. A skipped job keeps the strip's and the grid's room, the grid drawn as skipped cells. A call job's callee is
  * a node of its own placed below them. Runs have a solid border in the run colour, skipped ones a thin dimmed one,
  * might-run ones the only dashed border. The toggle is a tab stop only on the card that holds the selection. In edit
- * mode a card of the workflow being edited also has + on its right edge, which adds a job after it (`a` does the same).
+ * mode a card of the workflow being edited also has + on its right edge, which adds a job after it (`a` does the same),
+ * and a double-click on its title renames the job (F2 does the same).
  */
 function JobNodeView({ data, width }: NodeProps<JobFlowNode>) {
   const { store } = useApp();
@@ -45,10 +46,16 @@ function JobNodeView({ data, width }: NodeProps<JobFlowNode>) {
     act.select(job.id);
     gestures.of(store)?.addJob(job.jobId);
   };
+  // A double-click on the title of a card being edited renames the job; the canvas's double-click zoom never sees it.
+  const rename = (e: MouseEvent): void => {
+    e.stopPropagation();
+    act.select(job.id);
+    gestures.of(store)?.rename();
+  };
   return (
     <div className="sc-card" {...cardAttrs(job.verdict, state)} data-editable={editable || undefined}>
       <Handle type="target" position={Position.Left} isConnectable={editable} style={HANDLE} />
-      <Header job={job} tabStop={state.selected} onToggle={toggle} />
+      <Header job={job} tabStop={state.selected} onToggle={toggle} onRename={editable ? rename : undefined} />
       <Subline job={job} />
       <Body
         job={job}
@@ -91,15 +98,24 @@ function Header({
   job,
   tabStop,
   onToggle,
+  onRename,
 }: {
   job: JobModel;
   tabStop: boolean;
   onToggle: (e: MouseEvent) => void;
+  /** In edit mode: a double-click on the title renames the job. */
+  onRename?: ((e: MouseEvent) => void) | undefined;
 }) {
   return (
     <div className="sc-card-header" style={{ height: CARD.header }}>
       <Mark verdict={job.verdict} />
-      <span className="sc-card-label">{job.label}</span>
+      <span
+        className="sc-card-label"
+        onDoubleClick={onRename}
+        title={onRename ? `Double-click or F2 to rename ${job.jobId}` : undefined}
+      >
+        {job.label}
+      </span>
       {job.result && (
         <span className="sc-badge font-mono" data-tone={resultTone(job.result)}>
           {job.result}

@@ -67,9 +67,18 @@ function PlanTree({ plan }: { plan: PlanState }) {
   };
   const actions = (id: NodeId, at: HTMLElement | undefined): boolean =>
     at !== undefined && store.getState().edit.on && (gestures.of(store)?.menu(id, at) ?? false);
+  const renameRow = (id: NodeId, at: HTMLElement | undefined): boolean =>
+    at !== undefined &&
+    store.getState().edit.on &&
+    (gestures.of(store)?.rename({ node: id, anchor: at }) ?? false);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     const menu = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey);
     if (menu && stop !== undefined && actions(stop, items.current.get(stop))) {
+      e.preventDefault();
+      return;
+    }
+    // F2 renames the row with the focus, which the arrows move without selecting.
+    if (e.key === 'F2' && stop !== undefined && renameRow(stop, items.current.get(stop))) {
       e.preventDefault();
       return;
     }

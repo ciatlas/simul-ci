@@ -13,6 +13,7 @@ import {
   isNarrow,
   keyFor,
   type PageKey,
+  renameKey,
   saveKey,
   shownView,
 } from '../src/app/shortcuts';
@@ -231,6 +232,29 @@ describe('the page key listener', () => {
     store.getState().select(CI, undefined);
     expect(press('s')).toBe(true);
     expect(mod()).toBe(true);
+    stopGestures();
+  });
+
+  it('renames the selected job or step with F2 in edit mode, whatever the Shortcuts switch says', () => {
+    const asked: string[] = [];
+    const stopGestures = gestures.register(store, {
+      rename: () => asked.push('rename') > 0,
+    } as unknown as Gestures);
+    const f2 = (more: KeyboardEventInit = {}): boolean =>
+      win.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', cancelable: true, ...more }));
+    store.getState().select(CI, 'build.#2');
+    expect(f2()).toBe(true);
+    store.getState().setEdit(true);
+    store.getState().setPrefs({ keys: false });
+    expect(f2()).toBe(false);
+    expect(f2({ shiftKey: true })).toBe(true);
+    expect(f2({ ctrlKey: true })).toBe(true);
+    // The workflow has no id to rename; a called workflow's job is not this file's.
+    store.getState().select(CI, undefined);
+    expect(f2()).toBe(true);
+    store.getState().select(CI, 'build/inner');
+    expect(f2()).toBe(true);
+    expect(asked).toEqual(['rename']);
     stopGestures();
   });
 
@@ -515,6 +539,26 @@ describe('the history keys in edit mode', () => {
     expect(historyKey(key('z', { ctrlKey: true }, content), s())).toBe(true);
     // A layout that types no Latin letter there: the physical key says Z.
     expect(historyKey({ ...key('я', { ctrlKey: true }), code: 'KeyZ' }, s())).toBe(true);
+  });
+
+  it('leave F2 to a field, the YAML pane and an open dialog', () => {
+    const store = createSessionStore();
+    const s = () => store.getState();
+    s().setEdit(true);
+    s().select(CI, 'build');
+    const asked: string[] = [];
+    const stop = gestures.register(store, { rename: () => asked.push('rename') > 0 } as unknown as Gestures);
+    const pane = document.createElement('div');
+    pane.className = 'cm-editor';
+    const dialog = document.createElement('dialog');
+    const button = document.createElement('button');
+    dialog.append(button);
+    for (const target of [document.createElement('input'), pane, button])
+      expect(renameKey(key('F2', {}, target), s(), store)).toBe(false);
+    expect(renameKey({ ...key('F2'), defaultPrevented: true }, s(), store)).toBe(false);
+    expect(renameKey(key('F2'), s(), store)).toBe(true);
+    expect(asked).toEqual(['rename']);
+    stop();
   });
 
   it('open the Changes dialog with Mod+Shift+D in edit mode, the YAML pane included, not from inside a dialog', () => {

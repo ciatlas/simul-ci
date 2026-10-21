@@ -5,8 +5,8 @@ import { defaultScenario } from '../scenario/defaults';
 import type { SessionState, SessionStore } from '../state/store';
 import { type CaseFormat, type CaseOutcome, requestCase } from '../testcase/case';
 import type { EngineClient, SimulateResult } from '../worker/client';
-import type { LoadedResponse, Outline } from '../worker/protocol';
-import { newlyBroken } from './hold';
+import type { LoadedResponse, Outline, RefsResponse } from '../worker/protocol';
+import { heldSentence, newlyBroken } from './hold';
 
 /**
  * The store's one bridge to the engine: new files are loaded and simulated at once; a changed scenario, assume
@@ -82,9 +82,27 @@ function untriggeredMoved(s: SessionState, prev: SessionState): boolean {
   return untriggered(now) || untriggered(before);
 }
 
+/** The project the worker holds is of the store's newest texts: its number, that files version and its revisions. */
+export type Current =
+  | { ok: true; project: number; files: number; revs: Readonly<Record<string, number>> }
+  | { ok: false; message: string };
+
+/** Where a job's or a step's id is written in the texts of `files`, as the worker found it in `project`. */
+export type FoundRefs =
+  | (Extract<Current, { ok: true }> & Pick<RefsResponse, 'refs' | 'exact' | 'notes'>)
+  | { ok: false; message: string };
+
 export interface Session {
   /** Simulates now, skipping the quiet period. */
   simulateNow(): void;
+  /**
+   * Resolves once the worker holds the store's newest texts (synthesis § 8.2): at once when the project shown is of
+   * them, else when the load of them commits, sent now when a pause in typing still holds it back. Texts that do not
+   * parse, a load that failed, a new source or an engine gone answer why instead.
+   */
+  current(): Promise<Current>;
+  /** The references of a job or a step in the newest texts, for a rename (C11). */
+  refs(target: RefsTarget): Promise<FoundRefs>;
   /**
    * The focused workflow's case, or the plan in another format, from the scenario and the assumptions the store
    * holds now: the worker simulates them again, a test case under the `given` of the test file it is for. Busy and
@@ -92,6 +110,20 @@ export interface Session {
    */
   testCase(format: CaseFormat, given?: unknown): Promise<CaseOutcome>;
   dispose(): void;
+}
+
+type RefsTarget = Parameters<EngineClient['refs']>[0]['target'];
+
+/** Whether the project shown is of the newest texts, why it never will be, or undefined while a load may still come. */
+function currentOf(s: SessionState, epoch: number, failed: number | undefined): Current | undefined {
+  const { files, project } = s;
+  if (files.epoch !== epoch) return { ok: false, message: 'Other files were opened.' };
+  if (s.engine.status === 'failed') return { ok: false, message: 'The engine stopped.' };
+  if (project.held?.files === files.version) return { ok: false, message: heldSentence(project.held) };
+  if (failed === files.version) return { ok: false, message: 'The files could not be loaded.' };
+  if (project.status !== 'ready' || project.files !== files.version || project.version === undefined)
+    return undefined;
+  return { ok: true, project: project.version, files: files.version, revs: files.revs };
 }
 
 export function createSession({
@@ -111,6 +143,8 @@ export function createSession({
   let lastCycle = 0;
   /** The Outline of the project last committed: what the hold compares a load with, whatever failed since. */
   let shown: Outline | undefined;
+  /** The files version whose load the worker refused. */
+  let failed: number | undefined;
 
   const busy = (delta: 1 | -1): void => {
     unanswered += delta;
@@ -159,6 +193,7 @@ export function createSession({
         await commit(r, version, epoch);
         if (cause === 'edit') lastCycle = r.ms + planMs(version);
       } else if (r.type === 'error') {
+        failed = version;
         actions.projectFailed({
           kind: r.kind === 'engine' ? 'engine' : 'source',
           message: r.message,
@@ -277,10 +312,38 @@ export function createSession({
 
   if (hasProjectFiles(store.getState())) void load('source');
 
+  const current = (): Promise<Current> => {
+    const { epoch } = store.getState().files;
+    return new Promise((resolve) => {
+      const answered = (s: SessionState): boolean => {
+        const answer = currentOf(s, epoch, failed);
+        if (answer) resolve(answer);
+        return answer !== undefined;
+      };
+      if (answered(store.getState())) return;
+      if (edits.pending()) {
+        edits.cancel();
+        void load('edit');
+      }
+      const stop = store.subscribe((s) => {
+        if (answered(s)) stop();
+      });
+    });
+  };
+
   return {
     simulateNow: () => {
       simulate.cancel();
       void run();
+    },
+    current,
+    refs: async (target) => {
+      const at = await current();
+      if (!at.ok) return at;
+      const r = await client.refs({ project: at.project, target });
+      if (r.type === 'refs')
+        return { ...at, project: r.project, refs: r.refs, exact: r.exact, notes: r.notes };
+      return { ok: false, message: r.type === 'error' ? r.message : 'a newer request replaced it' };
     },
     testCase: (format, given) => requestCase(client, store.getState(), format, given),
     dispose: () => {

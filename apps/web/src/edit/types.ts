@@ -1,4 +1,4 @@
-import type { Refusal, WorkflowOp } from '@simulci/document';
+import type { Reference, Refusal, WorkflowOp } from '@simulci/document';
 
 /**
  * What the page and the edit runtime share about an op without the runtime's code: the store keeps the last refusal
@@ -23,6 +23,11 @@ export interface OpMeta {
    * closes when the field loses the focus or at any other edit.
    */
   group?: string;
+  /**
+   * Where the worker found the id a rename changes, in the texts of the revisions in `revs` (`ctx.refs`, synthesis
+   * § 3.3): each is checked against the text it is written over, so a reference that moved refuses `stale`.
+   */
+  refs?: readonly Reference[];
 }
 
 /** One op of a dispatch, and whether it changes every use of a shared anchor (the "Change all" fix). */
