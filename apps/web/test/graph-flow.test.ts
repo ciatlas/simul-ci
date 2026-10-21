@@ -23,6 +23,8 @@ import {
 import {
   canvasKey,
   cardFocus,
+  edgeIdOf,
+  editKey,
   type FlowNode,
   keepUnchanged,
   keyAction,
@@ -474,6 +476,86 @@ describe('a hovered unknown and a pin on the canvas', () => {
     const again = keepUnchanged(lit, toFlow(model, layout, { flash, lit: new Set([CI, j('lint')]) }));
     expect(again.nodes).toBe(lit.nodes);
     expect(again.edges).toBe(lit.edges);
+  });
+});
+
+describe('the workflow being edited', () => {
+  const editing = { editing: CI };
+
+  it('makes its jobs connectable and its edges focusable with ✕, and no other workflow’s', () => {
+    const { model, layout } = picture();
+    const { nodes, edges } = toFlow(model, layout, editing);
+    const data = (id: string) => byId(nodes, id).data as { editable?: boolean };
+    expect(data(j('build')).editable).toBe(true);
+    expect(data(CI).editable).toBe(true);
+    expect(data(j('compile', SUB)).editable).toBeUndefined();
+    expect(data(RELEASE).editable).toBeUndefined();
+    const own = edges.find((e) => e.id === `${j('build')}->${j('test')}`)!;
+    expect(own).toMatchObject({ focusable: true, data: { removable: true, hot: false } });
+    const callee = edges.find((e) => e.source === j('compile', SUB))!;
+    expect(callee.focusable).toBe(false);
+    expect(callee.data?.removable).toBeUndefined();
+    // Outside edit mode nothing of it.
+    const read = toFlow(model, layout, {});
+    expect(read.edges.every((e) => e.focusable === false && e.data?.removable === undefined)).toBe(true);
+    expect((byId(read.nodes, j('build')).data as { editable?: boolean }).editable).toBeUndefined();
+  });
+
+  it('shows ✕ on the hot edge alone', () => {
+    const { model, layout } = picture();
+    const hot = `${j('lint')}->${j('docs')}`;
+    const { edges } = toFlow(model, layout, { ...editing, hotEdge: hot });
+    expect(edges.filter((e) => e.data?.hot).map((e) => e.id)).toEqual([hot]);
+  });
+
+  it('draws a need written since the picture dashed between the two cards it places, until the picture has it', () => {
+    const { model, layout } = picture();
+    const pending = [
+      { source: j('lint'), target: j('deploy'), files: 3 },
+      // Drawn already, and one whose card the picture does not place.
+      { source: j('build'), target: j('test'), files: 3 },
+      { source: j('lint'), target: j('publish', RELEASE), files: 3 },
+    ];
+    const { edges } = toFlow(model, layout, { ...editing, pending });
+    expect(edges.filter((e) => e.data?.pending).map((e) => e.id)).toEqual([
+      `pending:${j('lint')}->${j('deploy')}`,
+    ]);
+    expect(toFlow(model, layout, { pending }).edges.some((e) => e.data?.pending)).toBe(false);
+  });
+
+  it('reads Delete as removing the focused edge’s need, else the selection, and nothing typed or held', () => {
+    const { model } = picture();
+    const key = (
+      k: string,
+      target: unknown,
+      mods: Partial<{ altKey: boolean; shiftKey: boolean }> = {},
+      selected: string | undefined = j('test'),
+    ) => editKey({ key: k, altKey: false, ctrlKey: false, metaKey: false, target, ...mods }, model, selected);
+    const edgeEl = {
+      classList: { contains: (name: string) => name === 'react-flow__edge' },
+      getAttribute: (name: string) => (name === 'data-id' ? `${j('test')}->${j('deploy')}` : null),
+    };
+    expect(edgeIdOf(edgeEl)).toBe(`${j('test')}->${j('deploy')}`);
+    expect(edgeIdOf(cardElement(j('test')))).toBeUndefined();
+    expect(key('Delete', cardElement(j('test')))).toBe('remove');
+    expect(key('Backspace', cardElement(j('test')))).toBe('remove');
+    expect(key('Delete', edgeEl)).toEqual({ source: j('test'), target: j('deploy') });
+    expect(key('Delete', { tagName: 'INPUT' })).toBeUndefined();
+    expect(key('Delete', cardElement(j('test')), { shiftKey: true })).toBeUndefined();
+    expect(key('x', cardElement(j('test')))).toBeUndefined();
+    // Alt+↑ and Alt+↓ move the selected step; Alt with anything else is the navigation's.
+    expect(key('ArrowUp', cardElement(j('build')), { altKey: true }, `${j('build')}/steps.compile`)).toBe(
+      'up',
+    );
+    expect(key('ArrowDown', cardElement(j('build')), { altKey: true }, `${j('build')}/steps.compile`)).toBe(
+      'down',
+    );
+    expect(key('ArrowRight', cardElement(j('build')), { altKey: true })).toBeUndefined();
+    expect(key('ArrowDown', edgeEl, { altKey: true })).toBeUndefined();
+    // A card that does not hold the selection removes nothing: the key is about the card the focus is on.
+    expect(key('Delete', cardElement(j('lint')))).toBeUndefined();
+    expect(key('Delete', cardElement(j('build')), {}, `${j('build')}/steps.compile`)).toBe('remove');
+    expect(key('Delete', cardElement(j('build')), {}, undefined)).toBeUndefined();
   });
 });
 

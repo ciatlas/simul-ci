@@ -1,5 +1,6 @@
 import type { NodeId, Tri } from '@simulci/engine';
 import { type Edge, type Node, type NodeHandle, Position } from '@xyflow/react';
+import type { PendingEdge } from '../edit/gestures';
 import { type CardState, jobLabel, needsLabel, scopeLabel } from './card';
 import type { Flash } from './highlight';
 import { cardOf, type NavAction, type NavKey } from './navigate';
@@ -42,10 +43,18 @@ export interface FlowView {
   lit?: ReadonlySet<NodeId>;
   /** The cards the last change changed, which flash, and the ones it added, which get the ring. */
   flash?: Pick<Flash, 'parity' | 'cards' | 'ring'>;
+  /**
+   * In edit mode, the depth-0 workflow being edited (synthesis § 4.5): its jobs connect by their handles, its edges
+   * take the focus and offer ✕, and the needs written since its picture are drawn dashed (`pending`).
+   */
+  editing?: NodeId;
+  /** The edge the pointer or the focus is on, which shows its ✕. */
+  hotEdge?: string;
+  pending?: readonly PendingEdge[];
 }
 
-export type ScopeData = { scope: ScopeModel; caller?: string; state: CardState };
-export type JobData = { job: JobModel; needs: string[]; state: CardState };
+export type ScopeData = { scope: ScopeModel; caller?: string; state: CardState; editable?: boolean };
+export type JobData = { job: JobModel; needs: string[]; state: CardState; editable?: boolean };
 export type WorkflowFlowNode = Node<ScopeData, 'workflow'>;
 export type JobFlowNode = Node<JobData, 'job'>;
 export type FlowNode = WorkflowFlowNode | JobFlowNode;
@@ -57,6 +66,11 @@ export type NeedsEdgeData = {
   onPath: boolean;
   /** Off the selected job's dependency path while its workflow shows one, or not lit at both ends by a hover. */
   faded: boolean;
+  /** In the workflow being edited: ✕ removes the need, while the edge is `hot`. */
+  removable?: boolean;
+  hot?: boolean;
+  /** Written, and not in a picture yet: drawn dashed. */
+  pending?: boolean;
 };
 export type NeedsFlowEdge = Edge<NeedsEdgeData, 'needs'>;
 
@@ -119,7 +133,12 @@ function emitScope(ctx: Context, scope: ScopeModel, place: Placement, faded = fa
     draggable: false,
     selected: ctx.card === scope.id,
     ariaLabel: scopeLabel(scope, caller),
-    data: { scope, caller, state: stateOf(ctx, scope.id, faded ? 'off' : undefined) },
+    data: {
+      scope,
+      caller,
+      state: stateOf(ctx, scope.id, faded ? 'off' : undefined),
+      ...(scope.id === ctx.view.editing && !scope.collapsed ? { editable: true } : {}),
+    },
   });
   const laid = scope.collapsed ? undefined : ctx.layout.scopes[scope.id];
   if (laid) emitInside(ctx, scope, laid, faded);
@@ -143,6 +162,21 @@ function emitInside(ctx: Context, scope: ScopeModel, laid: ScopeLayout, faded: b
   }
   for (const e of scope.edges)
     if (placed.has(e.source) && placed.has(e.target)) ctx.out.edges.push(edgeOf(ctx, scope.id, e, faded));
+  ctx.out.edges.push(...pendingEdges(ctx, scope, placed));
+}
+
+/** In the workflow being edited, the needs written since the picture between two cards it places, not drawn yet. */
+function pendingEdges(ctx: Context, scope: ScopeModel, placed: ReadonlySet<NodeId>): NeedsFlowEdge[] {
+  if (scope.id !== ctx.view.editing) return [];
+  const drawn = new Set(scope.edges.map((e) => e.id));
+  return (ctx.view.pending ?? []).flatMap(({ source, target }) => {
+    const id = `${source}->${target}`;
+    if (drawn.has(id) || !placed.has(source) || !placed.has(target)) return [];
+    const data: NeedsEdgeData = { from: 'yes', deciding: false, onPath: false, faded: false, pending: true };
+    return [
+      { id: `pending:${id}`, type: 'needs', source, target, selectable: false, focusable: false, data },
+    ];
+  });
 }
 
 function emitJob(ctx: Context, job: JobModel, place: Placement, path: CardState['path']): void {
@@ -156,7 +190,12 @@ function emitJob(ctx: Context, job: JobModel, place: Placement, path: CardState[
     draggable: false,
     selected: ctx.card === job.id,
     ariaLabel: jobLabel(job, needs),
-    data: { job, needs, state: stateOf(ctx, job.id, path) },
+    data: {
+      job,
+      needs,
+      state: stateOf(ctx, job.id, path),
+      ...(job.scope === ctx.view.editing ? { editable: true } : {}),
+    },
   });
   emitCallee(ctx, job, path === 'off');
 }
@@ -207,15 +246,22 @@ function pathOf(ctx: Context, scope: NodeId, job: NodeId): CardState['path'] {
 function edgeOf(ctx: Context, scope: NodeId, e: EdgeModel, faded: boolean): NeedsFlowEdge {
   const look = ctx.view.lit ? litEdge(ctx.view.lit, e) : pathEdge(ctx, scope, e, faded);
   const label = (id: NodeId): string => ctx.model.jobs[id]?.label ?? id;
+  const removable = scope === ctx.view.editing;
   return {
     id: e.id,
     type: 'needs',
     source: e.source,
     target: e.target,
     selectable: false,
-    focusable: false,
+    focusable: removable,
     ariaLabel: needsLabel(label(e.source), label(e.target), e),
-    data: { from: e.from, deciding: e.deciding, label: e.label, ...look },
+    data: {
+      from: e.from,
+      deciding: e.deciding,
+      label: e.label,
+      ...look,
+      ...(removable ? { removable, hot: ctx.view.hotEdge === e.id } : {}),
+    },
   };
 }
 
@@ -342,6 +388,51 @@ export function nodeIdOf(el: unknown): NodeId | undefined {
   };
   if (!e?.classList?.contains('react-flow__node')) return undefined;
   return e.getAttribute?.('data-id') ?? undefined;
+}
+
+/** The canvas edge an element is: React Flow's edge element carries its id. */
+export function edgeIdOf(el: unknown): string | undefined {
+  const e = el as {
+    classList?: { contains(name: string): boolean };
+    getAttribute?(name: string): string | null;
+  };
+  if (!e?.classList?.contains('react-flow__edge')) return undefined;
+  return e.getAttribute?.('data-id') ?? undefined;
+}
+
+/** An edit key on the canvas: remove the selection, move the selected step, or take the focused edge's need away. */
+export type EditKey = 'remove' | 'up' | 'down' | { source: NodeId; target: NodeId };
+
+/**
+ * What a key press on the canvas asks of the edit runtime (synthesis § 4.2): Delete or Backspace removes the need of
+ * the focused edge, else the selection; Alt+↑ and Alt+↓ move the selected step. On a card, only the selection that
+ * card holds, so a key never edits another node than the one the focus is on. Typed into a field, or with Ctrl or
+ * Meta, it is none.
+ */
+export function editKey(
+  e: KeyPress & { shiftKey?: boolean },
+  model: GraphModel | undefined,
+  selected: NodeId | undefined,
+): EditKey | undefined {
+  const key = keyOf(e);
+  if (key === undefined) return undefined;
+  const card = nodeIdOf(e.target);
+  if (card !== undefined) return model && holder(model, selected) === card ? key : undefined;
+  if (key !== 'remove') return undefined;
+  const edge = edgeIdOf(e.target);
+  if (edge === undefined) return 'remove';
+  for (const scope of Object.values(model?.scopes ?? {})) {
+    const found = scope.edges.find((x) => x.id === edge);
+    if (found) return { source: found.source, target: found.target };
+  }
+  return undefined;
+}
+
+/** Delete or Backspace, Alt+↑ or Alt+↓, given to the canvas. */
+function keyOf(e: KeyPress & { shiftKey?: boolean }): 'remove' | 'up' | 'down' | undefined {
+  if (!canvasKey(e) || e.shiftKey) return undefined;
+  if (e.altKey) return e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : undefined;
+  return e.key === 'Delete' || e.key === 'Backspace' ? 'remove' : undefined;
 }
 
 /** How focus came to a card: `keys` when the canvas keys put it there, `keyboard` when it shows a focus ring. */

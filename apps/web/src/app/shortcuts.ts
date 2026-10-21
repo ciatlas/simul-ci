@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { gestures } from '../edit/gestures';
 import { viewport } from '../graph/commands';
 import { cardOf } from '../graph/navigate';
 import { planIndex, resolveSelection } from '../plan/index';
@@ -13,7 +14,8 @@ import { canSave } from './saver';
  * centres the selection, `0` shows 100 %; `r` jumps to the Reasons tab and `1`–`4` open a tab of the right panel;
  * `[`, `]` and `\` close and open the scenario column, the right panel and the YAML pane; `c` opens Copy as test
  * case while there is a plan and a focused workflow; `e` turns edit mode on and off, and in edit mode `i` puts the
- * focus in the selected job's or step's Run if (synthesis § 4.2). None fires while the author
+ * focus in the selected job's or step's Run if, `a` adds a job after the selected one (or to the workflow), `n` opens
+ * what the selected job needs and `s` the palette for a step after the selection (synthesis § 4.2). None fires while the author
  * types (an input, a textarea, a select, an editable region such as the YAML pane), inside an open dialog, or once
  * something on the way handled the key (the canvas, a tree item: they prevent its default). None fires while the
  * author has turned them off (`prefs.keys`, the top bar's Shortcuts button; WCAG 2.1.4); the canvas's own keys need
@@ -21,7 +23,8 @@ import { canSave } from './saver';
  *
  * In edit mode Mod+Z undoes and Mod+Shift+Z or Mod+Y redoes the page's one edit history (synthesis § 6) wherever no
  * field keeps its own undo: whatever `prefs.keys` says, since a modifier makes them no single keys. The YAML pane
- * binds the same keys itself. Mod+Shift+D opens the Changes dialog (§ 5.2) in edit mode, the YAML pane included.
+ * binds the same keys itself. Mod+Shift+D opens the Changes dialog (§ 5.2) in edit mode, the YAML pane included, and
+ * Mod+K the palette, as `s` does.
  * Mod+S saves to the folder (§ 5.3) anywhere outside a dialog, fields and the pane included; with no folder to save
  * to it opens Changes, which downloads. The page always takes it, so the browser never offers to save the page.
  */
@@ -35,6 +38,9 @@ export type PageCommand =
   | 'case'
   | 'edit'
   | 'runIf'
+  | 'addJob'
+  | 'needs'
+  | 'step'
   | `panel:${PanelTab}`
   | `pane:${Pane}`;
 
@@ -60,6 +66,9 @@ const COMMANDS = new Map<string, PageCommand>([
   ['c', 'case'],
   ['e', 'edit'],
   ['i', 'runIf'],
+  ['a', 'addJob'],
+  ['n', 'needs'],
+  ['s', 'step'],
   ['1', 'panel:reasons'],
   ['2', 'panel:unknowns'],
   ['3', 'panel:node'],
@@ -115,13 +124,18 @@ export function installShortcuts(
 ): () => void {
   const onKey = (event: KeyboardEvent): void => {
     const s = store.getState();
-    if (historyKey(event, s) || changesKey(event, s) || saveKey(event, s, save)) {
+    if (
+      historyKey(event, s) ||
+      changesKey(event, s) ||
+      saveKey(event, s, save) ||
+      paletteKey(event, s, store)
+    ) {
       event.preventDefault();
       return;
     }
     if (!s.ui.prefs.keys) return;
     const command = keyFor(event);
-    if (command && run(command, s, win)) event.preventDefault();
+    if (command && run(command, s, win, store)) event.preventDefault();
   };
   win.addEventListener('keydown', onKey);
   return () => win.removeEventListener('keydown', onKey);
@@ -179,8 +193,27 @@ function dialogAround(target: EventTarget | null): boolean {
   return doc?.querySelector('dialog[open]') != null;
 }
 
+/** Mod+K in edit mode, outside a dialog: the palette, when a job or a step of the focused workflow is selected. */
+function paletteKey(event: HistoryKey, s: SessionState, store: SessionStore): boolean {
+  if (!s.edit.on || !modKey(event, 'k') || dialogAround(event.target)) return false;
+  return Boolean(s.sel) && !s.sel?.includes('/') && gestures.ask(store, (g) => g.palette());
+}
+
+/** Mod and a letter, without Shift or Alt, that nothing handled yet. */
+const modKey = (event: HistoryKey, letter: string): boolean =>
+  (event.metaKey || event.ctrlKey) &&
+  event.shiftKey !== true &&
+  !event.altKey &&
+  !event.defaultPrevented &&
+  letterOf(event) === letter;
+
 /** Runs a command; false when it has nothing to act on, so the key goes on as if unheard. */
-function run(command: PageCommand, s: SessionState & SessionActions, win: Window): boolean {
+function run(
+  command: PageCommand,
+  s: SessionState & SessionActions,
+  win: Window,
+  store?: SessionStore,
+): boolean {
   if (command.startsWith('panel:')) {
     const tab = command.slice('panel:'.length) as PanelTab;
     // A key pressed inside the panel would leave the focus on the tab that goes: it follows to the new one.
@@ -193,7 +226,7 @@ function run(command: PageCommand, s: SessionState & SessionActions, win: Window
     togglePaneKeepingFocus(s, command.slice('pane:'.length) as Pane, win.document);
     return true;
   }
-  if (command === 'edit' || command === 'runIf') return runEdit(command, s);
+  if (EDIT_COMMANDS.has(command)) return runEdit(command, s, store);
   if (command === 'case') {
     if (!caseAvailability(s).ok) return false;
     s.openCase();
@@ -207,18 +240,28 @@ function run(command: PageCommand, s: SessionState & SessionActions, win: Window
   return runView(command, s, win.innerWidth);
 }
 
+const EDIT_COMMANDS: ReadonlySet<PageCommand> = new Set(['edit', 'runIf', 'addJob', 'needs', 'step']);
+
 /**
- * `e` turns edit mode on and off; in edit mode `i` puts the focus in Run if of the selected job or step of the focused
- * workflow (the workflow has no `if:`, and a called workflow's job is not its file's).
+ * `e` turns edit mode on and off. In edit mode, about the selection in the focused workflow (the workflow has no
+ * `if:`, and a called workflow's job is not its file's): `i` puts the focus in Run if; `a` opens Add job, after the
+ * selected job or for the workflow; `n` what the selected job needs; `s` the palette. The structural keys ask the edit
+ * runtime (`edit/gestures.ts`), which takes a key pressed before it is in once it is.
  */
-function runEdit(command: 'edit' | 'runIf', s: SessionState & SessionActions): boolean {
+function runEdit(command: PageCommand, s: SessionState & SessionActions, store?: SessionStore): boolean {
   if (command === 'edit') {
     s.setEdit(!s.edit.on);
     return true;
   }
-  if (!s.edit.on || !s.sel || s.sel.includes('/')) return false;
-  s.focusProperty('if');
-  return true;
+  if (!s.edit.on) return false;
+  if (!store) return false;
+  if (command === 'addJob') return gestures.ask(store, (g) => g.addJob());
+  if (!s.sel || s.sel.includes('/')) return false;
+  if (command === 'runIf') {
+    s.focusProperty('if');
+    return true;
+  }
+  return gestures.ask(store, (g) => (command === 'needs' ? g.needs() : g.palette()));
 }
 
 /**

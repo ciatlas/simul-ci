@@ -84,11 +84,92 @@
   }
 }
 
-/* Edges meet a card at its handles; nothing connects by hand, so they are never seen. */
+/* Edges meet a card at its handles; outside the workflow being edited nothing connects by hand, so they are never seen. */
 .sc-canvas .react-flow__handle {
   opacity: 0;
   pointer-events: none;
   border: 0;
+}
+
+/*
+ * In edit mode a card of the workflow being edited shows its handles under the pointer, the focus or the selection: a
+ * drag from one onto another's makes the second need the first.
+ */
+.sc-canvas .react-flow__handle.connectable {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: all;
+  cursor: crosshair;
+}
+
+.sc-canvas .react-flow__node:hover .react-flow__handle.connectable,
+.sc-canvas .react-flow__node:focus-within .react-flow__handle.connectable,
+.sc-canvas .sc-card[data-selected] .react-flow__handle.connectable,
+.sc-canvas .react-flow__handle.connectingto {
+  opacity: 1;
+}
+
+/* A drag the document refuses (the same job, a need it has, a loop) draws a red line and connects nothing. */
+.sc-canvas .react-flow__connection-path {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.sc-canvas .react-flow__connection.invalid .react-flow__connection-path {
+  stroke: var(--danger);
+  stroke-dasharray: 4 3;
+}
+
+/* + on a card's right edge adds a job after it; + Add job in the edited workflow's bar adds one at the end. */
+.sc-add-after {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  transform: translate(50%, -50%);
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 18px;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.react-flow__node:hover .sc-add-after,
+.sc-card[data-selected] .sc-add-after,
+.sc-add-after:focus-visible {
+  opacity: 1;
+}
+
+.sc-add-after:hover,
+.sc-add-job:hover {
+  background: var(--accent-soft);
+}
+
+.sc-add-after:focus-visible,
+.sc-add-job:focus-visible,
+.sc-edge-remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sc-add-job {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11.5px;
+  cursor: pointer;
 }
 
 /* Keyboard focus rings the node outside the selection's ring. */
@@ -581,6 +662,82 @@
   cursor: default;
 }
 
+/*
+ * The editable step lists (the open list of a card being edited, Properties' Steps): a handle to drag a step by and +
+ * on a row's top edge (the last row's bottom too) for the palette, both in the gutter at the row's left and seen under
+ * the pointer, so a click on the middle of a card never lands on one; a row a step is dragged over shows where it lands.
+ */
+.sc-list-edit li,
+.sc-step-row {
+  position: relative;
+}
+
+.sc-step-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sc-step-handle {
+  flex: none;
+  order: -1;
+  width: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+  opacity: 0;
+  cursor: grab;
+}
+
+.sc-step-gap {
+  position: absolute;
+  top: 0;
+  left: 5px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 14px;
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+}
+
+.sc-step-gap[data-after] {
+  top: 100%;
+}
+
+.sc-list-edit li:hover > .sc-step-handle,
+.sc-list-edit li[data-selected] > .sc-step-handle,
+.sc-step-row:hover > .sc-step-handle,
+.sc-step-row:focus-within > .sc-step-handle {
+  opacity: 1;
+}
+
+/* Only the row under the pointer offers its +: a hidden one takes no click meant for the row. */
+.sc-list-edit li:hover > .sc-step-gap,
+.sc-step-row:hover > .sc-step-gap {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.sc-list-edit li[data-drop='before'],
+.sc-step-row[data-drop='before'] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.sc-list-edit li[data-drop='after'],
+.sc-step-row[data-drop='after'] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
 /* Needs. base.css comes first, so a plain class here outranks its edge path rule. */
 
 .sc-edge {
@@ -618,6 +775,50 @@
 
 .sc-edge[data-path='off'] {
   opacity: 0.15;
+}
+
+/* A need written since the picture: dashed until the next picture draws it. */
+.sc-edge[data-pending] {
+  stroke: var(--accent);
+  stroke-dasharray: 4 3;
+}
+
+/* A focused edge of the workflow being edited: Delete removes its need, ✕ beside it does the same. */
+.sc-canvas .react-flow__edge:focus-visible {
+  outline: none;
+}
+
+.sc-canvas .react-flow__edge:focus-visible .sc-edge {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+/*
+ * At the level of the edges inside a workflow: above the frame even while it is selected (1000), with its jobs (1001),
+ * which come later and so paint over it.
+ */
+.sc-edge-remove {
+  position: absolute;
+  z-index: 1001;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--danger);
+  font-size: 10px;
+  line-height: 16px;
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+}
+
+/* Only a hot edge's ✕ takes the pointer: a hidden one must never take a click meant for the card under it. */
+.sc-edge-remove[data-hot],
+.sc-edge-remove:hover {
+  opacity: 1;
+  pointer-events: all;
 }
 
 /* Above the cards (a label can fall over a wider card of the same layer), below a selected card and the hover card. */

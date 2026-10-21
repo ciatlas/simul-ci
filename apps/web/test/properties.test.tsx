@@ -97,7 +97,7 @@ describe('Properties', () => {
     expect(within(fieldOf('timeout-minutes')).getByRole('button', { name: /line 5/ })).toBeTruthy();
     expect(within(fieldOf('if')).queryByRole('button', { name: /line/ })).toBeNull();
     // build's steps, each selecting its step.
-    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+    expect([...document.querySelectorAll('[data-step-name]')].map((b) => b.textContent)).toEqual([
       '1actions/checkout@v4',
       '2Test',
     ]);
