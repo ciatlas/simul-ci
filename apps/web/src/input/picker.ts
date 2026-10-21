@@ -1,9 +1,9 @@
-import { isProjectFile, normalizePath } from './filter';
+import { isKeptFile, normalizePath } from './filter';
 import { readWithin, type Walked } from './limits';
 
 /**
  * A folder through `<input type="file" webkitdirectory>`: every browser has it, the files are a copy (no handle, no
- * reload) and the first path segment is the folder's own name. Only the files the engine takes are read.
+ * reload) and the first path segment is the folder's own name. Only the files the page keeps (filter.ts) are read.
  */
 
 export interface PickedFiles extends Walked {
@@ -24,7 +24,7 @@ export async function filesFromList(list: ArrayLike<File>): Promise<PickedFiles>
     }
     name ??= relative.slice(0, slash);
     const path = relative.slice(slash + 1);
-    if (isProjectFile(path)) await readWithin(file, path, walked);
+    if (isKeptFile(path)) await readWithin(file, path, walked);
   }
   return name === undefined ? walked : { name, ...walked };
 }

@@ -97,6 +97,20 @@ describe('the three-way reload', () => {
     ]);
   });
 
+  it('compares the route tests too: one created here stays, one gone from the folder is gone, one changed is taken', () => {
+    const T = '.github/simulci/tests';
+    const base = { [`${W}/ci.yml`]: 'a\n', [`${T}/ci.test.yml`]: 'a\n', [`${T}/gone.test.yml`]: 'a\n' };
+    const files = filesOf(base, { [`${T}/nested/new.test.yml`]: 'new here\n' });
+    const disk = read({ [`${W}/ci.yml`]: 'a\n', [`${T}/ci.test.yml`]: 'b\n' });
+    const plan = reloadPlan(files, disk);
+    expect(plan.disk).toEqual({
+      [`${T}/ci.test.yml`]: { text: 'b\n', meta: textMeta('b\n') },
+      [`${T}/gone.test.yml`]: null,
+    });
+    expect(plan.take).toEqual([`${T}/ci.test.yml`, `${T}/gone.test.yml`]);
+    expect(plan.conflicts).toEqual([]);
+  });
+
   it('takes a BOM added on disk as a change of a clean file', () => {
     const files = filesOf({ [`${W}/ci.yml`]: 'a\n' });
     const plan = reloadPlan(files, {

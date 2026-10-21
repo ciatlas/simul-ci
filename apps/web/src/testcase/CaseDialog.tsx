@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { lazy, type RefObject, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useModal } from '../app/modal';
 import { useApp, useSession } from '../app/providers';
 import { copyText } from '../lib/clipboard';
@@ -10,15 +10,23 @@ import {
   destinationOf,
   downloadName,
   formatInfo,
+  isTestFormat,
 } from './case';
 
-/** What one request was for: the format and the store's inputs it was written from, each compared by identity. */
+/** Adding the case to the repository needs the document model: the edit runtime, fetched when the dialog shows it. */
+const AddCase = lazy(() => import('../edit/edit').then((m) => ({ default: m.AddCase })));
+
+/**
+ * What one request was for: the format, the store's inputs it was written from, each compared by identity, and the
+ * `given` of the test file a test case is for, as JSON text.
+ */
 interface Asked {
   format: CaseFormat;
   focus: string;
   scenario: unknown;
   assume: unknown;
   project: number | undefined;
+  given: string | undefined;
 }
 
 /** The newest answer that landed, and what it was asked for. */
@@ -28,6 +36,8 @@ interface Answer {
   maybes: number;
   /** The headlines that make `simulci test` report the case invalid. */
   errors: string[];
+  /** The test case as JSON, to add to the workflow's test file; none for the plan formats. */
+  case?: Extract<CaseOutcome, { type: 'case' }>['case'];
   /** The workflow the text is about: the path line, the destination and the download name say the same. */
   workflow: string;
   /** Why the newest request gave no text; Copy and Download wait for one that does. */
@@ -50,56 +60,66 @@ function landed(answer: Answer, outcome: CaseOutcome, asked: Asked): Answer {
   const base = { workflow: asked.focus, for: asked };
   if (outcome.type === 'failed')
     return { ...base, text: '', maybes: 0, errors: [], failure: outcome.message };
-  return { ...base, text: outcome.text, maybes: outcome.maybes, errors: outcome.errors };
+  const next = { ...base, text: outcome.text, maybes: outcome.maybes, errors: outcome.errors };
+  return outcome.case ? { ...next, case: outcome.case } : next;
 }
 
 /** The format with the store's inputs a case is written from, one object while none of them changes. */
-function useAsked(format: CaseFormat): Asked {
+function useAsked(format: CaseFormat, given: string | undefined): Asked {
   const focus = useSession((s) => s.focus) ?? '';
   const scenario = useSession((s) => s.scenario);
   const assume = useSession((s) => s.assume);
   const project = useSession((s) => s.project.version);
   return useMemo(
-    () => ({ format, focus, scenario, assume, project }),
-    [format, focus, scenario, assume, project],
+    () => ({ format, focus, scenario, assume, project, given: isTestFormat(format) ? given : undefined }),
+    [format, focus, scenario, assume, project, given],
   );
 }
 
 /**
  * The format and its text, asked for when the dialog opens and again whenever the format or what the case is written
- * from changes underneath it (Back and Forward still move the store while the modal is up). The worker simulates the
+ * from changes underneath it (Back and Forward still move the store while the modal is up), or the test file the case
+ * goes to turns out to have a `given` (`simulci test` merges it into every case there). The worker simulates the
  * store's inputs again each time, so the answers can come back out of order: a counter lets only the newest land,
  * and a slow answer for a format the author already left never replaces the one they picked. The text on screen is
  * busy from the render that changes the inputs until the answer for them lands, so it is never offered as theirs.
  */
-function useCase(): { asked: Asked; shown: Shown; choose: (format: CaseFormat) => void } {
+function useCase(): {
+  asked: Asked;
+  shown: Shown;
+  choose: (format: CaseFormat) => void;
+  destined: (given: string | undefined) => void;
+} {
   const { session } = useApp();
   const [format, setFormat] = useState<CaseFormat>('jobs');
-  const asked = useAsked(format);
+  const [given, setGiven] = useState<string>();
+  const asked = useAsked(format, given);
   const [answer, setAnswer] = useState<Answer>({ text: '', maybes: 0, errors: [], workflow: asked.focus });
   const latest = useRef(0);
 
   useEffect(() => {
     latest.current += 1;
     const request = latest.current;
-    void session.testCase(asked.format).then((outcome) => {
+    const applied = asked.given === undefined ? undefined : (JSON.parse(asked.given) as unknown);
+    void session.testCase(asked.format, applied).then((outcome) => {
       if (request === latest.current) setAnswer((a) => landed(a, outcome, asked));
     });
   }, [session, asked]);
 
   const { for: answered, ...shown } = answer;
-  return { asked, shown: { ...shown, busy: answered !== asked }, choose: setFormat };
+  return { asked, shown: { ...shown, busy: answered !== asked }, choose: setFormat, destined: setGiven };
 }
 
 /**
- * Copy as test case (synthesis § 7): the focused workflow's route test, or the plan as text or Mermaid, to copy or
- * download, with where it belongs. A clipboard the browser refuses leaves the text selected for the author's own
- * Ctrl+C and the download.
+ * Copy as test case (synthesis § 7, § 4.9): the focused workflow's route test, or the plan as text or Mermaid, to copy
+ * or download, with where it belongs; a test case can also be added to the workflow's test file in the repository,
+ * which closes the dialog on the case in the YAML pane. A clipboard the browser refuses leaves the text selected for
+ * the author's own Ctrl+C and the download.
  */
 export function CaseDialog() {
   const closeCase = useSession((s) => s.closeCase);
   const dialog = useModal(closeCase);
-  const { asked, shown, choose } = useCase();
+  const { asked, shown, choose, destined } = useCase();
   const { format } = asked;
   const { workflow } = shown;
   // What Copy said holds for the text it copied: a new request makes it go.
@@ -109,6 +129,7 @@ export function CaseDialog() {
   const title = useId();
   const path = useId();
   const name = downloadName(workflow, format);
+  const ready = !shown.busy && shown.failure === undefined;
 
   // Cleared first, so a second Copy with the same result is a change a screen reader announces again.
   const copy = async (): Promise<void> => {
@@ -138,13 +159,24 @@ export function CaseDialog() {
         <FormatField format={format} onChange={choose} />
         <CaseText area={area} shown={shown} />
         <Invalid errors={shown.errors} />
-        <Destination workflow={workflow} format={format} />
         <Maybes count={shown.maybes} />
+        {isTestFormat(format) ? (
+          <Suspense fallback={<Destination workflow={workflow} format={format} />}>
+            <AddCase
+              workflow={workflow}
+              testCase={ready ? shown.case : undefined}
+              onGiven={destined}
+              onAdded={() => dialog.current?.close()}
+            />
+          </Suspense>
+        ) : (
+          <Destination workflow={workflow} format={format} />
+        )}
       </div>
       <div className="border-border border-t px-4 py-3">
         <Said copied={copied} failure={shown.failure} />
         <Actions
-          ready={!shown.busy && shown.failure === undefined}
+          ready={ready}
           name={name}
           onCopy={() => void copy()}
           onDownload={() => downloadText(name, shown.text, formatInfo(format).type)}

@@ -180,6 +180,17 @@ function runFile(project: LoadedProject, file: TestInput, options: RunOptions): 
   return result;
 }
 
+/**
+ * What a test file fails on before any case runs, without the project: its YAML (T001), its schema (T002, T1xx) and
+ * its duplicate case names (T103), each as `runTests` reports it, with its position; none when it would go on to run
+ * its cases. The app checks the route tests it holds with it, since they never join the project it simulates.
+ */
+export function testFileFailures(text: string): Failure[] {
+  const result: FileResult = { path: '', status: 'passed', failures: [], notes: [], cases: [] };
+  readSpec(parseYaml(text), result);
+  return result.failures;
+}
+
 /** The file's spec, or nothing with the YAML (T001), schema (T002, T1xx) or duplicate-name (T103) failures recorded. */
 function readSpec(parsed: ParsedYaml, result: FileResult): TestFile | undefined {
   if (parsed.errors.length) {

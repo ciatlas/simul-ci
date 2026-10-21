@@ -13,7 +13,7 @@ export { freeId, ID, sameId, stepIdFor } from './ops/ids';
 export { ORDER, orderFor } from './ops/order';
 export { planOp } from './ops/plan';
 export { fingerprint } from './ops/steps';
-export { caseFileText, kindOf } from './ops/cases';
+export { caseFileText, freeCaseName, kindOf } from './ops/cases';
 export type {
   CaseJson,
   DispatchInput,

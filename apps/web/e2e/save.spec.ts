@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { fileOf, folderWith, useOpfsFolder } from './opfs';
 
 /**
  * Saving to the folder (synthesis § 5.3, § 5.4, § 5.7, § 9.5's data gates), in a real browser under the deployment's
@@ -32,52 +33,12 @@ test.beforeEach(async ({ page }) => {
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
-  // Open folder hands the page the OPFS directory `repo`.
-  await page.addInitScript(() => {
-    (
-      window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }
-    ).showDirectoryPicker = async () =>
-      (await navigator.storage.getDirectory()).getDirectoryHandle('repo', { create: true });
-  });
+  await useOpfsFolder(page);
 });
 
 test.afterEach(() => {
   expect(errors).toEqual([]);
 });
-
-/** The OPFS folder `repo` holding exactly these files, written as bytes. */
-async function folderWith(page: Page, files: Record<string, number[]>): Promise<void> {
-  await page.evaluate(async (tree) => {
-    const root = await navigator.storage.getDirectory();
-    await root.removeEntry('repo', { recursive: true }).catch(() => undefined);
-    const repo = await root.getDirectoryHandle('repo', { create: true });
-    for (const [path, content] of Object.entries(tree)) {
-      const parts = path.split('/');
-      const name = parts.pop()!;
-      let dir = repo;
-      for (const part of parts) dir = await dir.getDirectoryHandle(part, { create: true });
-      const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
-      await writable.write(new Uint8Array(content));
-      await writable.close();
-    }
-  }, files);
-}
-
-/** A file of `repo` as bytes, and when it was last written; nothing when it is not there. */
-async function fileOf(page: Page, path: string): Promise<{ bytes: number[]; modified: number } | undefined> {
-  return page.evaluate(async (where) => {
-    let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('repo');
-    const parts = where.split('/');
-    const name = parts.pop()!;
-    try {
-      for (const part of parts) dir = await dir.getDirectoryHandle(part);
-      const file = await (await dir.getFileHandle(name)).getFile();
-      return { bytes: Array.from(new Uint8Array(await file.arrayBuffer())), modified: file.lastModified };
-    } catch {
-      return undefined;
-    }
-  }, path);
-}
 
 const pane = (page: Page): Locator => page.locator('[data-pane="yaml"]');
 const editor = (page: Page): Locator => pane(page).locator('.cm-content');

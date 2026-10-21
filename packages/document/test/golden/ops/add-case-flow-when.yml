@@ -14,5 +14,5 @@ cases:
     when: { event: release, action: published, tag: v1.2.0 }
     allowMaybe: true
     then:
-      run: [ build, publish ]
-      maybe: [ deploy ]
+      run: [build, publish]
+      maybe: [deploy]

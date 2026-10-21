@@ -5,7 +5,7 @@ import type { SourceStore, StoredSource } from '../state/persist';
 import type { ReloadPlan } from '../state/reload';
 import { type BaseDiff, dirtyPaths, type SessionStore, type Settling, type Source } from '../state/store';
 import { type Dropped, filesFromDrop } from './drop';
-import { filterFiles } from './filter';
+import { filterFiles, isProjectFile } from './filter';
 import { canPickFolder, canReadFolder, pickFolder, readFolder, requestFolder } from './folder';
 import { leftOut, overLimit, type Skipped, type Walked } from './limits';
 import { checkPaste, type PasteCheck } from './paste';
@@ -173,8 +173,9 @@ export function createSources({
   };
 
   const accept = ({ files, meta, skipped = [], base }: Brought, source: Source, where: string): boolean => {
+    // Route tests are kept beside the project, but a source of tests alone has nothing to simulate.
     const kept = filterFiles(files);
-    if (Object.keys(kept).length === 0) {
+    if (!Object.keys(kept).some(isProjectFile)) {
       fail(nothingIn(where, skipped, `no workflow files in ${where}: ${LOOKED_FOR}`));
       return false;
     }

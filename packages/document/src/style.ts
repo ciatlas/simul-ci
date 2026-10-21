@@ -132,8 +132,12 @@ function countNesting(map: CST.BlockMap, counts: TokenCounts): void {
   }
 }
 
+/**
+ * Whether a flow list is padded inside its brackets. Maps are not counted: formatters pad braces and not brackets
+ * (`{ event: push }` beside `[a, b]`), and a map's padding is read where one is written (`addCase`'s `when`).
+ */
 function countPadding(text: string, token: CST.FlowCollection, counts: TokenCounts): void {
-  if (token.items.length === 0) return;
+  if (token.items.length === 0 || token.start.source !== '[') return;
   const next = text[token.start.offset + 1];
   if (next === ' ') counts.padded++;
   else if (next !== '\n' && next !== '\r') counts.tight++;

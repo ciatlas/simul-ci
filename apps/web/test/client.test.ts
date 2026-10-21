@@ -146,15 +146,16 @@ describe('the engine client', () => {
     const client = createEngineClient({ spawn });
     workers[0]!.ready();
     await client.ready;
-    const load = client.load({ files: { a: '' } });
+    const load = client.load({ files: { a: '' }, tests: { 't.test.yml': '' } });
     const sim = client.simulate({ project: 1, scenario: { event: 'push' }, assume: [], detail: 'steps' });
     await vi.advanceTimersByTimeAsync(3001);
     expect(workers).toHaveLength(2);
     workers[1]!.ready();
     await client.ready;
     await vi.advanceTimersByTimeAsync(0);
-    // Only the load went out; the simulate waits for the project id.
+    // Only the load went out, route tests and all; the simulate waits for the project id.
     expect(workers[1]!.sent.map((m) => m.type)).toEqual(['load']);
+    expect(workers[1]!.sent[0]).toMatchObject({ files: { a: '' }, tests: { 't.test.yml': '' } });
     workers[1]!.reply({ id: workers[1]!.sent[0]!.id, type: 'loaded', project: 1, outline: {}, ms: 1 });
     expect((await load).type).toBe('loaded');
     await vi.advanceTimersByTimeAsync(0);

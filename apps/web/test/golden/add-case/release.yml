@@ -1,0 +1,13 @@
+  # resolve: maybe — release-please.rp.outputs.release_created → pin: assume: {"step":"release-please.rp","outputs":{"release_created":""}}
+  # npm: maybe — release-please.rp.outputs.release_created → pin: assume: {"step":"release-please.rp","outputs":{"release_created":""}}
+  # publish-release: maybe — release-please.rp.outputs.release_created → pin: assume: {"step":"release-please.rp","outputs":{"release_created":""}}
+  # major-tag: maybe — release-please.rp.outputs.release_created → pin: assume: {"step":"release-please.rp","outputs":{"release_created":""}}
+  # major-tag: maybe — resolve.tag.outputs.prerelease → pin: assume: {"step":"resolve.tag","outputs":{"prerelease":""}}
+  # smoke-published: maybe — release-please.rp.outputs.release_created → pin: assume: {"step":"release-please.rp","outputs":{"release_created":""}}
+  - name: added from the page
+    when: { event: push, branch: main }
+    allowMaybe: true
+    then:
+      run: [release-please]
+      maybe: [resolve, npm, publish-release, major-tag, smoke-published]
+      conclusion: success
