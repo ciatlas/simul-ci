@@ -31,8 +31,8 @@ const BUDGETS = [
   // React, the router, React Flow and its d3 modules, Base UI, the scenario form, the panels and the edit history,
   // with the crash snapshot, the replace prompt, edit mode, what an edit changed (the plan diff and Details, a
   // platform popover), the edit runtime's loader, saving to the folder and the canvas's side of its gestures:
-  // 246.5 kB measured (238.0 before saving and the gestures); the budget is that and 15 %.
-  { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 284 },
+  // 246.5 kB measured (238.0 before saving and the gestures). The synthesis keeps 251 (§ 8.5).
+  { name: 'the page', test: (f) => f.startsWith('index-') && f.endsWith('.js'), kB: 251 },
   // CodeMirror's view, state, language and commands with the YAML grammar, and the pane's edit mode, fetched when the
   // pane first opens: 107.1 kB measured (95.4 before edit mode).
   { name: 'the YAML pane', test: (f) => f.startsWith('YamlPane-'), kB: 124 },
